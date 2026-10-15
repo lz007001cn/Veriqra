@@ -26,6 +26,10 @@ public final class JdbcTestAttemptDao implements TestAttemptDao {
     @Override public List<TestAttempt> listByRunCase(Long testRunCaseId) {
         return query(SELECT + " WHERE test_run_case_id=? ORDER BY attempt_no", testRunCaseId);
     }
+    @Override public List<TestAttempt> listByRunCaseForUpdate(Long testRunCaseId) {
+        requireTransaction();
+        return query(SELECT + " WHERE test_run_case_id=? ORDER BY attempt_no FOR UPDATE", testRunCaseId);
+    }
 
     @Override public List<TestAttempt> listByImport(Long importId) {
         return query(SELECT + " WHERE import_id=? ORDER BY test_run_case_id, attempt_no", importId);

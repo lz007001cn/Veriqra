@@ -13,4 +13,6 @@ public record ServiceDaos(UserDao users, ProjectDao projects, ProjectMemberDao m
                            DefectDao defects, TestAttemptDefectDao attemptDefects,
                            TestAutomationIdentityDao automationIdentities,
                            TestAutomationMappingDao automationMappings,
-                           TestImportDao imports, CollaborationDao collaboration) { }
+                           TestImportDao imports, CollaborationDao collaboration,
+                           DefectRetestLinkDao retestLinks, DefectClosureReceiptDao closureReceipts,
+                           DefectClosureItemDao closureItems) { }

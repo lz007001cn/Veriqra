@@ -45,6 +45,15 @@ test('all eleven baseline pages retain IDs and form behavior contracts', () => {
     }
     const available = current.filter(element => controls.has(element.tag));
     for (const element of previous.filter(element => controls.has(element.tag))) {
+      // R1 deliberately replaces the two numeric-assignee inputs with real project-member selectors.
+      if (file === 'src/main/webapp/index.html' && ['defect-action-assignee', 'defect-create-assignee'].includes(element.attributes.id)) {
+        const id = element.attributes.id;
+        const replacement = available.findIndex(candidate => candidate.tag === 'select' && candidate.attributes.id === id && candidate.attributes['aria-describedby'] === id + '-status');
+        assert.ok(replacement >= 0, file + ': project-member select must preserve #' + id + ' and describe its loading/failure state');
+        assert.ok(current.some(candidate => candidate.tag === 'input' && candidate.attributes.id === id + '-search' && candidate.attributes.type === 'search'), file + ': member selector must have keyboard-accessible search');
+        available.splice(replacement, 1);
+        continue;
+      }
       const contract = Object.fromEntries(Object.entries(element.attributes)
         .filter(([name]) => validation.has(name) || name.startsWith('data-')));
       const index = available.findIndex(candidate => candidate.tag === element.tag &&

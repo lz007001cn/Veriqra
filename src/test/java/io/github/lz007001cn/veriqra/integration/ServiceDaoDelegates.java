@@ -12,61 +12,61 @@ final class ServiceDaoDelegates {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), replacement,
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos steps(ServiceDaos d, TestStepDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), replacement, d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos traceability(ServiceDaos d, TestCaseRequirementDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), replacement, d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos planCases(ServiceDaos d, TestPlanCaseDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), replacement,
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos testRuns(ServiceDaos d, TestRunDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 replacement, d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos runCaseSteps(ServiceDaos d, TestRunCaseStepDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), replacement, d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos attempts(ServiceDaos d, TestAttemptDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), replacement, d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos defects(ServiceDaos d, DefectDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), replacement, d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos attemptDefects(ServiceDaos d, TestAttemptDefectDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), replacement,
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos automationIdentities(ServiceDaos d, TestAutomationIdentityDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                replacement, d.automationMappings(), d.imports(), d.collaboration());
+                replacement, d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
 
     abstract static class RequirementDelegate implements RequirementDao {
@@ -85,6 +85,7 @@ final class ServiceDaoDelegates {
         public TestStep add(TestStep value) { return target.add(value); }
         public Optional<TestStep> find(Long caseId, Integer order) { return target.find(caseId, order); }
         public List<TestStep> listByTestCase(Long caseId) { return target.listByTestCase(caseId); }
+        public List<TestStep> listByTestCaseForShare(Long caseId) { return target.listByTestCaseForShare(caseId); }
         public boolean updateContent(TestStep value) { return target.updateContent(value); }
         public boolean remove(Long caseId, Integer order) { return target.remove(caseId, order); }
         public int deleteByTestCase(Long caseId) { return target.deleteByTestCase(caseId); }
@@ -121,6 +122,7 @@ final class ServiceDaoDelegates {
         public Optional<TestRun> findById(Long id) { return target.findById(id); }
         public Optional<TestRun> findByIdForUpdate(Long id) { return target.findByIdForUpdate(id); }
         public List<TestRun> listByProject(Long id) { return target.listByProject(id); }
+        public List<TestRun> listByProjectForUpdate(Long id) { return target.listByProjectForUpdate(id); }
         public List<TestRun> listByPlan(Long id) { return target.listByPlan(id); }
         public TestRun insert(TestRun value) { return target.insert(value); }
         public TestRun update(TestRun value) { return target.update(value); }
@@ -131,6 +133,18 @@ final class ServiceDaoDelegates {
         public TestRunCaseStep insert(TestRunCaseStep value) { return target.insert(value); }
         public Optional<TestRunCaseStep> find(Long id, Integer order) { return target.find(id, order); }
         public List<TestRunCaseStep> listByRunCase(Long id) { return target.listByRunCase(id); }
+        public List<TestRunCaseStep> listByRunCaseForShare(Long id) { return target.listByRunCaseForShare(id); }
+    }
+    abstract static class RunCaseDelegate implements TestRunCaseDao {
+        final TestRunCaseDao target;
+        RunCaseDelegate(TestRunCaseDao target) { this.target = target; }
+        public Optional<TestRunCase> findById(Long id) { return target.findById(id); }
+        public Optional<TestRunCase> findByIdForUpdate(Long id) { return target.findByIdForUpdate(id); }
+        public Optional<TestRunCase> findByRunAndCase(Long run, Long testCase) { return target.findByRunAndCase(run, testCase); }
+        public List<TestRunCase> listByRun(Long run) { return target.listByRun(run); }
+        public List<TestRunCase> listByRunForUpdate(Long run) { return target.listByRunForUpdate(run); }
+        public List<TestRunCase> listByTestCase(Long testCase) { return target.listByTestCase(testCase); }
+        public TestRunCase insert(TestRunCase value) { return target.insert(value); }
     }
     abstract static class AttemptDelegate implements TestAttemptDao {
         final TestAttemptDao target;
@@ -138,6 +152,7 @@ final class ServiceDaoDelegates {
         public Optional<TestAttempt> findById(Long id) { return target.findById(id); }
         public Optional<TestAttempt> findByIdForUpdate(Long id) { return target.findByIdForUpdate(id); }
         public List<TestAttempt> listByRunCase(Long id) { return target.listByRunCase(id); }
+        public List<TestAttempt> listByRunCaseForUpdate(Long id) { return target.listByRunCaseForUpdate(id); }
         public List<TestAttempt> listByImport(Long id) { return target.listByImport(id); }
         public Optional<TestAttempt> findLatestByRunCase(Long id) { return target.findLatestByRunCase(id); }
         public Optional<TestAttempt> findLatestByRunCaseForUpdate(Long id) { return target.findLatestByRunCaseForUpdate(id); }

@@ -5,20 +5,28 @@ import io.github.lz007001cn.veriqra.model.*;
 import io.github.lz007001cn.veriqra.service.command.*;
 import io.github.lz007001cn.veriqra.service.exception.*;
 import io.github.lz007001cn.veriqra.service.support.*;
-import io.github.lz007001cn.veriqra.service.query.DefectDetails;
+import io.github.lz007001cn.veriqra.service.query.*;
 import java.util.*;
 
 public final class DefaultDefectService implements DefectService {
     private final ServiceTransaction transactions;
     private final ServiceDaoFactory daoFactory;
     private final ProjectAccessPolicy access;
+    private final DefaultDefectRetestWorkflow retestWorkflow;
 
     public DefaultDefectService(ServiceTransaction transactions, ServiceDaoFactory daoFactory,
                                 ProjectAccessPolicy access) {
         this.transactions = Objects.requireNonNull(transactions);
         this.daoFactory = Objects.requireNonNull(daoFactory);
         this.access = Objects.requireNonNull(access);
+        this.retestWorkflow = new DefaultDefectRetestWorkflow(transactions, daoFactory, access);
     }
+
+    @Override public ClosureEligibility closureEligibility(Long actor, Long project, Long defect) { return retestWorkflow.eligibility(actor, project, defect); }
+    @Override public RetestCandidates retestCandidates(Long actor, Long project, Long defect, Long failure, Long cursor, int size) { return retestWorkflow.candidates(actor, project, defect, failure, cursor, size); }
+    @Override public RetestOperationResult linkRetest(Long actor, Long project, LinkRetestCommand command) { return retestWorkflow.link(actor, project, command); }
+    @Override public RetestOperationResult revokeRetest(Long actor, Long project, RevokeRetestCommand command) { return retestWorkflow.revoke(actor, project, command); }
+    @Override public Optional<RetestOperationResult> recoverRetestOperation(Long actor, Long project, Long defect, UUID key, String action) { return retestWorkflow.recover(actor, project, defect, key, action); }
 
     @Override public Defect create(Long actorUserId, CreateDefectCommand command) {
         ServiceValidation.required(command, "command");
@@ -36,9 +44,9 @@ public final class DefaultDefectService implements DefectService {
             lockParticipants(daos, project.id(), actorUserId, command.assigneeId());
             access.requireProjectMemberWrite(daos.users(), daos.members(), actorUserId, project.id());
             validateAssignee(daos, project.id(), command.assigneeId());
-            long key = daos.counters().allocateNext(project.id(), CounterEntityType.BUG);
             AttemptContext evidence = lockAttemptContext(daos, preliminary);
             validateEvidence(evidence, project.id());
+            long key = daos.counters().allocateNext(project.id(), CounterEntityType.BUG);
             Defect defect = daos.defects().insert(new Defect(null, project.id(), key, title,
                     command.description(), severity, priority, DefectStatus.OPEN, actorUserId,
                     command.assigneeId(), null, null, null, null));
@@ -197,8 +205,13 @@ public final class DefaultDefectService implements DefectService {
     }
 
     @Override public TestAttemptDefect addEvidence(Long actorUserId, Long projectId, Long defectId, Long failureAttemptId) {
+        return addEvidence(actorUserId, projectId, defectId, failureAttemptId, get(actorUserId, defectId).lockVersion());
+    }
+
+    @Override public TestAttemptDefect addEvidence(Long actorUserId, Long projectId, Long defectId, Long failureAttemptId, Integer expectedVersion) {
         ServiceValidation.required(defectId, "defectId");
         ServiceValidation.required(failureAttemptId, "failureAttemptId");
+        validateVersion(expectedVersion);
         return transactions.execute(connection -> {
             ServiceDaos daos = daoFactory.create(connection);
             Defect preliminary = findDefect(daos, defectId);
@@ -214,12 +227,14 @@ public final class DefaultDefectService implements DefectService {
             Defect current = daos.defects().findByIdForUpdate(defectId)
                     .orElseThrow(() -> new NotFoundException("Defect does not exist"));
             if (current.status() == DefectStatus.CLOSED) {
-                throw new ConflictException("Closed defect must be reopened with new evidence");
+                throw new R1RuleException("CLOSED_READ_ONLY");
             }
+            if (!Objects.equals(current.lockVersion(), expectedVersion)) throw new R1RuleException("STALE_VERSION");
             List<TestAttemptDefect> links = daos.attemptDefects().listAttemptsByDefectForUpdate(current.id());
-            return links.stream().filter(link -> Objects.equals(link.attemptId(), evidence.attempt().id()))
-                    .findFirst().orElseGet(() -> daos.attemptDefects().add(new TestAttemptDefect(
-                            evidence.attempt().id(), current.id(), actorUserId, null)));
+            var existing = links.stream().filter(link -> Objects.equals(link.attemptId(), evidence.attempt().id())).findFirst();
+            if (existing.isPresent()) return existing.get();
+            updateRow(daos, copyForStatus(current, current.status(), current.assigneeId(), current.resolutionNote(), expectedVersion));
+            return daos.attemptDefects().add(new TestAttemptDefect(evidence.attempt().id(), current.id(), actorUserId, null));
         });
     }
 
@@ -228,8 +243,13 @@ public final class DefaultDefectService implements DefectService {
     }
 
     @Override public void removeEvidence(Long actorUserId, Long projectId, Long defectId, Long failureAttemptId) {
+        removeEvidence(actorUserId, projectId, defectId, failureAttemptId, get(actorUserId, defectId).lockVersion());
+    }
+
+    @Override public void removeEvidence(Long actorUserId, Long projectId, Long defectId, Long failureAttemptId, Integer expectedVersion) {
         ServiceValidation.required(defectId, "defectId");
         ServiceValidation.required(failureAttemptId, "failureAttemptId");
+        validateVersion(expectedVersion);
         transactions.execute(connection -> {
             ServiceDaos daos = daoFactory.create(connection);
             Defect preliminary = findDefect(daos, defectId);
@@ -243,15 +263,21 @@ public final class DefaultDefectService implements DefectService {
             Defect current = daos.defects().findByIdForUpdate(defectId)
                     .orElseThrow(() -> new NotFoundException("Defect does not exist"));
             if (current.status() == DefectStatus.CLOSED) {
-                throw new ConflictException("Closed defect evidence is read-only");
+                throw new R1RuleException("CLOSED_READ_ONLY");
             }
+            if (!Objects.equals(current.lockVersion(), expectedVersion)) throw new R1RuleException("STALE_VERSION");
             List<TestAttemptDefect> links = daos.attemptDefects().listAttemptsByDefectForUpdate(current.id());
             if (!containsAttempt(links, failureAttemptId)) {
                 throw new NotFoundException("Evidence link does not exist");
             }
+            if (daos.retestLinks().listByDefectForUpdate(current.id()).stream().anyMatch(link -> Objects.equals(link.failureAttemptId(), failureAttemptId))
+                    || daos.closureItems().listByDefectForShare(current.id()).stream().anyMatch(item -> Objects.equals(item.failureAttemptId(), failureAttemptId))) {
+                throw new R1RuleException("EVIDENCE_RETAINED");
+            }
             if (!daos.attemptDefects().remove(failureAttemptId, current.id())) {
                 throw new ConflictException("Evidence link changed during removal");
             }
+            updateRow(daos, copyForStatus(current, current.status(), current.assigneeId(), current.resolutionNote(), expectedVersion));
             return null;
         });
     }
@@ -277,52 +303,14 @@ public final class DefaultDefectService implements DefectService {
     }
 
     private Defect close(Long actorUserId, Long projectId, TransitionDefectCommand command) {
-        return transactions.execute(connection -> {
-            ServiceDaos daos = daoFactory.create(connection);
-            Defect preliminary = findDefect(daos, command.defectId());
-            ProjectOwnership.require(preliminary.projectId(), projectId);
-            List<TestAttemptDefect> preliminaryLinks = daos.attemptDefects().listAttemptsByDefect(preliminary.id());
-            List<AttemptContext> preliminaryEvidence = preliminaryLinks.stream()
-                    .map(link -> loadAttemptContext(daos, link.attemptId())).toList();
-            Project project = writableProject(daos, preliminary.projectId());
-            lockParticipants(daos, project.id(), actorUserId);
-            access.requireAssetWrite(daos.users(), daos.members(), actorUserId, project.id());
-            LockedEvidence locked = lockEvidenceContexts(daos, preliminaryEvidence, project.id());
-            Defect current = lockDefect(daos, preliminary.id(), command.lockVersion());
-            if (current.status() != DefectStatus.RESOLVED) {
-                throw new ConflictException("Only a RESOLVED defect can be closed");
-            }
-            List<TestAttemptDefect> currentLinks = daos.attemptDefects().listAttemptsByDefectForUpdate(current.id());
-            if (!attemptIds(preliminaryLinks).equals(attemptIds(currentLinks))) {
-                throw new ConflictException("Defect evidence changed during close verification");
-            }
-            if (currentLinks.isEmpty()) throw new ConflictException("Defect requires FAIL evidence before close");
-            for (TestAttemptDefect link : currentLinks) {
-                TestAttempt failure = locked.attempts().get(link.attemptId());
-                if (failure == null || failure.status() != TestAttemptStatus.FAIL) {
-                    throw new ConflictException("Every defect evidence row must reference a FAIL attempt");
-                }
-                TestAttempt latest = locked.latestByRunCase().get(failure.testRunCaseId());
-                if (latest == null || latest.status() != TestAttemptStatus.PASS
-                        || latest.attemptNo() <= failure.attemptNo()) {
-                    throw new ConflictException("Every failure evidence requires a later current PASS retest");
-                }
-            }
-            String note = command.resolutionNote() == null ? current.resolutionNote()
-                    : ServiceValidation.requiredText(command.resolutionNote(), Integer.MAX_VALUE, "resolutionNote");
-            if (note == null || note.isBlank()) {
-                throw new ConflictException("Closed defect requires a resolution note");
-            }
-            return updateRow(daos, copyForStatus(current, DefectStatus.CLOSED, current.assigneeId(),
-                    note, command.lockVersion()));
-        });
+        return retestWorkflow.close(actorUserId, projectId, command);
     }
 
     private User requireTransitionPermission(ServiceDaos daos, Long actorUserId, Long projectId,
                                              Defect defect, DefectStatus target) {
         User actor = access.requireProjectMemberWrite(daos.users(), daos.members(), actorUserId, projectId);
         if (actor.systemRole() == SystemRole.ADMIN) return actor;
-        ProjectMember member = daos.members().find(projectId, actorUserId)
+        ProjectMember member = daos.members().findForShare(projectId, actorUserId)
                 .orElseThrow(() -> new ForbiddenException("Active project membership is required"));
         if (member.projectRole() == ProjectRole.TESTER) return actor;
         if (member.projectRole() == ProjectRole.DEVELOPER
@@ -405,6 +393,9 @@ public final class DefaultDefectService implements DefectService {
     }
 
     private static AttemptContext lockAttemptContext(ServiceDaos daos, AttemptContext preliminary) {
+        TestCase testCase = daos.testCases().findByIdForUpdate(preliminary.runCase().testCaseId())
+                .orElseThrow(() -> new NotFoundException("Test case does not exist"));
+        ensureSameProject(testCase.projectId(), preliminary.run().projectId(), "Test case");
         TestRun run = daos.testRuns().findByIdForUpdate(preliminary.run().id())
                 .orElseThrow(() -> new NotFoundException("Test run does not exist"));
         TestRunCase runCase = daos.runCases().findByIdForUpdate(preliminary.runCase().id())
@@ -416,37 +407,6 @@ public final class DefaultDefectService implements DefectService {
             throw new ConflictException("Attempt execution hierarchy changed");
         }
         return new AttemptContext(attempt, runCase, run);
-    }
-
-    private static LockedEvidence lockEvidenceContexts(ServiceDaos daos, List<AttemptContext> preliminary,
-                                                        Long projectId) {
-        Map<Long, TestRun> runs = new HashMap<>();
-        preliminary.stream().map(context -> context.run().id()).distinct().sorted().forEach(id ->
-                runs.put(id, daos.testRuns().findByIdForUpdate(id)
-                        .orElseThrow(() -> new NotFoundException("Test run does not exist"))));
-        Map<Long, TestRunCase> runCases = new HashMap<>();
-        preliminary.stream().map(context -> context.runCase().id()).distinct().sorted().forEach(id ->
-                runCases.put(id, daos.runCases().findByIdForUpdate(id)
-                        .orElseThrow(() -> new NotFoundException("Test run case does not exist"))));
-        Map<Long, TestAttempt> attempts = new HashMap<>();
-        preliminary.stream().map(context -> context.attempt().id()).distinct().sorted().forEach(id ->
-                attempts.put(id, daos.attempts().findByIdForUpdate(id)
-                        .orElseThrow(() -> new NotFoundException("Attempt does not exist"))));
-        Map<Long, TestAttempt> latest = new HashMap<>();
-        runCases.keySet().stream().sorted().forEach(id -> daos.attempts().findLatestByRunCaseForUpdate(id)
-                .ifPresent(value -> latest.put(id, value)));
-        for (AttemptContext context : preliminary) {
-            TestRun run = runs.get(context.run().id());
-            TestRunCase runCase = runCases.get(context.runCase().id());
-            TestAttempt attempt = attempts.get(context.attempt().id());
-            if (run == null || runCase == null || attempt == null
-                    || !Objects.equals(run.projectId(), projectId)
-                    || !Objects.equals(runCase.testRunId(), run.id())
-                    || !Objects.equals(attempt.testRunCaseId(), runCase.id())) {
-                throw new ConflictException("Defect evidence hierarchy is inconsistent");
-            }
-        }
-        return new LockedEvidence(Map.copyOf(attempts), Map.copyOf(latest));
     }
 
     private static void validateEvidence(AttemptContext context, Long projectId) {
@@ -472,7 +432,9 @@ public final class DefaultDefectService implements DefectService {
         if (!Objects.equals(actual, expected)) throw new ValidationException(entity + " belongs to another project");
     }
 
+    private static void validateVersion(Integer value) {
+        if (value == null || value < 0) throw new ValidationException("expectedVersion must be nonnegative");
+    }
+
     private record AttemptContext(TestAttempt attempt, TestRunCase runCase, TestRun run) { }
-    private record LockedEvidence(Map<Long, TestAttempt> attempts,
-                                  Map<Long, TestAttempt> latestByRunCase) { }
 }

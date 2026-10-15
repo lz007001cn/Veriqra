@@ -23,12 +23,19 @@ abstract class MysqlFixture {
 
     @BeforeAll void openFixture() throws Exception {
         Properties p=new Properties();
-        String selected=io.github.lz007001cn.veriqra.config.EnvironmentVariables.get("TEST_CONFIG");
-        if(selected==null) selected=System.getProperty("veriqra.test.config","config/database-test.local.properties");
-        Path file=Path.of(selected);
-        if(Files.exists(file)) try(var r=Files.newBufferedReader(file)) { p.load(r); }
-        for(var e:Map.of("jdbcUrl","JDBC_URL","username","USERNAME","password","PASSWORD").entrySet()) {
-            String v=io.github.lz007001cn.veriqra.config.EnvironmentVariables.get("TEST_"+e.getValue()); if(v!=null) p.setProperty(e.getKey(),v);
+        String r1Selected=System.getProperty("r1.fixture.config");
+        if(r1Selected!=null) {
+            // An explicitly selected R1 target always wins. Missing/invalid files fail closed;
+            // neither TEST_CONFIG nor TEST_* environment variables can redirect this fixture.
+            try(var r=Files.newBufferedReader(Path.of(r1Selected))) { p.load(r); }
+        } else {
+            String selected=io.github.lz007001cn.veriqra.config.EnvironmentVariables.get("TEST_CONFIG");
+            if(selected==null) selected=System.getProperty("veriqra.test.config","config/database-test.local.properties");
+            Path file=Path.of(selected);
+            if(Files.exists(file)) try(var r=Files.newBufferedReader(file)) { p.load(r); }
+            for(var e:Map.of("jdbcUrl","JDBC_URL","username","USERNAME","password","PASSWORD").entrySet()) {
+                String v=io.github.lz007001cn.veriqra.config.EnvironmentVariables.get("TEST_"+e.getValue()); if(v!=null) p.setProperty(e.getKey(),v);
+            }
         }
         String url=p.getProperty("jdbcUrl","");
         schemaName=requireTestUrl(url);
@@ -36,7 +43,7 @@ abstract class MysqlFixture {
         config=new DatabaseConfig(url,p.getProperty("username"),p.getProperty("password"),2,4,Duration.ofSeconds(2));
         Properties credentials=new Properties(); credentials.setProperty("user",config.username()); credentials.setProperty("password",config.password());
         credentials.setProperty("connectTimeout","3000"); credentials.setProperty("socketTimeout","10000");
-        owner=DriverManager.getConnection(url,credentials);
+        owner=r1Selected!=null?R1MysqlTarget.open():DriverManager.getConnection(url,credentials);
         if(!schemaName.equals(owner.getCatalog())) throw new IllegalStateException("Unexpected selected schema");
         try(var s=owner.prepareStatement("SELECT VERSION(), GET_LOCK(?,0)")) {
             s.setString(1,"veriqra-jdbc-tests:"+UUID.nameUUIDFromBytes(schemaName.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
@@ -57,6 +64,14 @@ abstract class MysqlFixture {
         // Drop it first during reverse-order cleanup while keeping FOREIGN_KEY_CHECKS enabled.
         createdTables.remove("credit_transactions");
         createdTables.add("credit_transactions");
+        // The unchanged 32-table baseline remains independently checked above. Current
+        // service regressions also require the three approved additive R1 evidence tables.
+        // Append in creation order so reverse cleanup drops items, receipts, then links
+        // before any old evidence/Attempt/Defect endpoint, with all constraints enabled.
+        installSchema(owner,Files.readString(Path.of("database/migrations/20261014-r1-defect-retest.sql")),createdTables);
+        if(createdTables.size()!=35 || !createdTables.subList(32,35).equals(List.of(
+                "defect_retest_links","defect_closure_receipts","defect_closure_items")))
+            throw new IllegalStateException("Unexpected R1 fixture tables");
         pool=new ConnectionPool(config); tx=new JdbcTransactionManager(pool);
     }
 
@@ -95,6 +110,14 @@ abstract class MysqlFixture {
     @BeforeEach void resetRows() throws SQLException {
         // Only rows inserted by this fixture; the development seed is never loaded or referenced.
         try(var c=pool.borrow(); var s=c.createStatement()) {
+            // Fresh fixture-owned close-time records must be removed before their retained
+            // source associations. Keep both FOREIGN_KEY_CHECKS and CHECK rules enabled.
+            //noinspection SqlWithoutWhere
+            s.executeUpdate("DELETE FROM defect_closure_items");
+            //noinspection SqlWithoutWhere
+            s.executeUpdate("DELETE FROM defect_closure_receipts");
+            //noinspection SqlWithoutWhere
+            s.executeUpdate("DELETE FROM defect_retest_links");
             // Admin telemetry, ledger and collaboration records depend on users and projects.
             //noinspection SqlWithoutWhere
             s.executeUpdate("DELETE FROM audit_logs");

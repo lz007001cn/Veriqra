@@ -345,7 +345,7 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         assertTrue(runtime.get("buildCommit").asText().matches("[0-9a-f]{40}"));
         assertDoesNotThrow(() -> java.time.Instant.parse(runtime.get("buildTime").asText()));
         assertEquals("UP", runtime.get("databaseStatus").asText());
-        assertEquals(32, runtime.get("databaseTableCount").asInt());
+        assertEquals(35, runtime.get("databaseTableCount").asInt());
         assertEquals("Asia/Shanghai (UTC+8)", runtime.get("applicationTimeZone").asText());
         assertFalse(system.body().contains("jdbc:mysql"));
         assertFalse(system.body().contains("fixture-login-password"));

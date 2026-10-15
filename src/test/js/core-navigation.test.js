@@ -255,10 +255,34 @@ test('generated dashboard links use the verified project in native href and pres
 
 test('href filters invalid or irrelevant IDs and does not mutate navigation state', async () => {
   const ui = browser(); await ui.boot(); const before = ui.location.href, count = ui.events.length;
-  const href = ui.nav.href('runs', { projectId: '7', runId: '40', runCaseId: '50', attemptId: '0', defectId: '90', action: 'bogus', sourcePlanId: 'abc' });
+  const href = ui.nav.href('runs', { projectId: '7', runId: '40', runCaseId: '50', attemptId: '0', defectId: '90', sourceTestCaseId: '20', failureAttemptId: '60', requirementId: '10', action: 'bogus', sourcePlanId: 'abc' });
   const target = new URL(href);
-  assert.deepEqual(Object.fromEntries(target.searchParams), { projectId: '7', runId: '40', runCaseId: '50' });
+  assert.deepEqual(Object.fromEntries(target.searchParams), { projectId: '7', runId: '40', runCaseId: '50', sourceTestCaseId: '20', defectId: '90', failureAttemptId: '60' });
   assert.equal(ui.location.href, before); assert.equal(ui.events.length, count);
+});
+
+test('terminal-failure retest context survives refresh, new-tab URL and Back/Forward without numeric entry', async () => {
+  for (const base of ['http://127.0.0.1:9000/', 'http://127.0.0.1:9000/veriqra/']) {
+    const ui = browser(base + 'index.html?projectId=7&defectId=90#defects'); await ui.boot();
+    const context = { projectId: '7', action: 'create', sourceTestCaseId: '20', runId: '40', runCaseId: '50', failureAttemptId: '60', defectId: '90' };
+    const href = ui.nav.href('runs', context), restored = browser(href); await restored.boot();
+    assert.deepEqual(plain(restored.nav.read()), { view: 'runs', ...context });
+    ui.nav.open('runs', context); ui.nav.open('defects', { projectId: '7', defectId: '90' });
+    ui.history.back(); assert.deepEqual(plain(ui.nav.read()), { view: 'runs', ...context });
+    ui.history.forward(); assert.deepEqual(plain(ui.nav.read()), { view: 'defects', projectId: '7', defectId: '90' });
+  }
+});
+
+test('retest case and newly recorded PASS URLs keep their original FAIL on ROOT and nested refresh/new-tab restoration', async () => {
+  for (const base of ['http://127.0.0.1:9000/', 'http://127.0.0.1:9000/veriqra/']) {
+    const ui = browser(base + 'index.html?projectId=7&runId=55&sourceTestCaseId=20&defectId=90&failureAttemptId=60#runs'); await ui.boot();
+    const context = { projectId: '7', runId: '55', runCaseId: '75', attemptId: '85', sourceTestCaseId: '20', defectId: '90', failureAttemptId: '60' };
+    const href = ui.nav.href('runs', context), restored = browser(href); await restored.boot();
+    assert.deepEqual(plain(restored.nav.read()), { view: 'runs', ...context });
+    assert.notEqual(restored.nav.read().attemptId, restored.nav.read().failureAttemptId);
+    ui.nav.open('runs', context); ui.nav.open('defects', { projectId: '7', defectId: '90' }); ui.history.back();
+    assert.deepEqual(plain(ui.nav.read()), { view: 'runs', ...context });
+  }
 });
 
 test('project-list network and server failures end the loading caption and retry only their GET', async () => {

@@ -136,10 +136,10 @@ class ExecutionWebTest {
         assertEquals(new TransitionDefectCommand(70L,DefectStatus.RESOLVED,"fixed",3),arguments[2]);
         expect(204,"POST",DEFECT+"/reopen","{\"expectedVersion\":3,\"failureAttemptId\":61,\"assigneeId\":2}");
         assertEquals(new ReopenDefectCommand(70L,61L,2L,3),arguments[2]);
-        expect(204,"POST",DEFECT+"/evidence","{\"failureAttemptId\":61}");
-        assertArrayEquals(new Object[]{1L,7L,70L,61L},arguments);
-        expect(204,"POST",DEFECT+"/evidence/61/remove","{}");
-        assertEquals("removeEvidence",invoked);assertArrayEquals(new Object[]{1L,7L,70L,61L},arguments);
+        expect(204,"POST",DEFECT+"/evidence","{\"failureAttemptId\":61,\"expectedVersion\":3}");
+        assertArrayEquals(new Object[]{1L,7L,70L,61L,3},arguments);
+        expect(204,"POST",DEFECT+"/evidence/61/remove","{\"expectedVersion\":4}");
+        assertEquals("removeEvidence",invoked);assertArrayEquals(new Object[]{1L,7L,70L,61L,4},arguments);
         expect(405,"PATCH",DEFECT,"{\"status\":\"CLOSED\"}");
     }
     @Test void allWriteShapesRejectForgedServerFieldsAndInvalidVersions() throws Exception {
@@ -148,7 +148,7 @@ class ExecutionWebTest {
         bodies.put(ATTEMPTS,attemptBody());bodies.put(DEFECTS,CREATE_DEFECT);
         bodies.put(DEFECT+"/resolve","{\"expectedVersion\":0,\"resolutionNote\":\"fixed\"}");
         bodies.put(DEFECT+"/reopen","{\"expectedVersion\":0,\"failureAttemptId\":61,\"assigneeId\":2}");
-        bodies.put(DEFECT+"/evidence","{\"failureAttemptId\":61}");
+        bodies.put(DEFECT+"/evidence","{\"failureAttemptId\":61,\"expectedVersion\":0}");
         for(var entry:bodies.entrySet())for(String field:List.of(
                 "actorUserId","role","projectRole","projectId","runId","runCaseId",
                 "attemptNo","status","bugKey","lockVersion")){

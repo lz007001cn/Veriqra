@@ -37,8 +37,9 @@
       message = t(messageKey, messageArgs, messageFallback);
     }
     const code = xhr.responseJSON && xhr.responseJSON.error && xhr.responseJSON.error.code;
+    const reasonCode = xhr.responseJSON && xhr.responseJSON.error && xhr.responseJSON.error.reasonCode;
     // UI descriptors let visible failures follow a locale change without another request.
-    return { status: status, message: global.I18n.error({ code: code, message: message }), code: code,
+    return { status: status, message: global.I18n.error({ code: code, message: message }), code: code, reasonCode: reasonCode,
       messageKey: messageKey, messageArgs: messageArgs, messageFallback: messageFallback,
       retryAfterSeconds: Number.isFinite(seconds) && seconds > 0 ? seconds : null };
   }

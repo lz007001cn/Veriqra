@@ -33,8 +33,15 @@ public final class JdbcTestStepDao implements TestStepDao {
     }
 
     @Override public List<TestStep> listByTestCase(Long testCaseId) {
+        return list(testCaseId, false);
+    }
+    @Override public List<TestStep> listByTestCaseForShare(Long testCaseId) {
+        R1Jdbc.transaction(connection);
+        return list(testCaseId, true);
+    }
+    private List<TestStep> list(Long testCaseId, boolean locked) {
         try (PreparedStatement s = connection.prepareStatement(
-                "SELECT test_case_id, step_order, action, expected_result FROM test_steps WHERE test_case_id=? ORDER BY step_order")) {
+                "SELECT test_case_id, step_order, action, expected_result FROM test_steps WHERE test_case_id=? ORDER BY step_order"+(locked?" FOR SHARE":""))) {
             s.setObject(1, testCaseId, Types.BIGINT);
             try (ResultSet rs = s.executeQuery()) {
                 List<TestStep> rows = new ArrayList<>();

@@ -29,6 +29,10 @@ public final class JdbcTestRunCaseDao implements TestRunCaseDao {
     @Override public List<TestRunCase> listByRun(Long testRunId) {
         return query(SELECT + " WHERE test_run_id=? ORDER BY test_case_id", testRunId);
     }
+    @Override public List<TestRunCase> listByRunForUpdate(Long testRunId) {
+        requireTransaction();
+        return query(SELECT + " WHERE test_run_id=? ORDER BY id FOR UPDATE", testRunId);
+    }
 
     @Override public List<TestRunCase> listByTestCase(Long testCaseId) {
         return query(SELECT + " WHERE test_case_id=? ORDER BY test_run_id", testCaseId);

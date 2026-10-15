@@ -25,7 +25,7 @@
     requirements: ['requirementId', 'sourceTestCaseId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId'],
     'test-cases': ['testCaseId', 'sourceRequirementId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId'],
     'test-plans': ['planId', 'sourceTestCaseId'],
-    runs: ['runId', 'runCaseId', 'attemptId', 'sourcePlanId'],
+    runs: ['runId', 'runCaseId', 'attemptId', 'sourcePlanId', 'sourceTestCaseId', 'defectId', 'failureAttemptId'],
     defects: ['defectId', 'runId', 'runCaseId', 'failureAttemptId']
   };
   function routeUrl() {

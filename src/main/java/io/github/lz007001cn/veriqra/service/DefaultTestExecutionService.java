@@ -56,6 +56,9 @@ public final class DefaultTestExecutionService implements TestExecutionService {
                     .orElseThrow(() -> new NotFoundException("Test run does not exist"));
             requireScope(preliminaryRun, projectId, testRunId);
             Project project = writableProject(daos, actorUserId, preliminaryRun.projectId());
+            TestCase sharedCase = daos.testCases().findByIdForUpdate(preliminaryRunCase.testCaseId())
+                    .orElseThrow(() -> new NotFoundException("Test case does not exist"));
+            if (!Objects.equals(sharedCase.projectId(), project.id())) throw new ConflictException("Execution case project mismatch");
             TestRun run = daos.testRuns().findByIdForUpdate(preliminaryRun.id())
                     .orElseThrow(() -> new NotFoundException("Test run does not exist"));
             if (!Objects.equals(run.projectId(), project.id())) {

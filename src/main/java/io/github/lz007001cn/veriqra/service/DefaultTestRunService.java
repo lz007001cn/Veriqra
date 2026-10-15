@@ -15,6 +15,10 @@ public final class DefaultTestRunService implements TestRunService {
     private final ProjectAccessPolicy access;
     private final Clock clock;
 
+    @Override public io.github.lz007001cn.veriqra.service.query.RunCompletionImpact completionImpact(Long actor, Long project, Long run) {
+        return new DefaultDefectRetestWorkflow(transactions, daoFactory, access).impact(actor, project, run);
+    }
+
     public DefaultTestRunService(ServiceTransaction transactions, ServiceDaoFactory daoFactory,
                                  ProjectAccessPolicy access, Clock clock) {
         this.transactions = Objects.requireNonNull(transactions);
@@ -181,7 +185,7 @@ public final class DefaultTestRunService implements TestRunService {
         TestRun run = daos.testRuns().insert(new TestRun(null, projectId, planId, text.name(), text.environment(),
                 text.buildVersion(), TestRunStatus.IN_PROGRESS, null, actorUserId, null, null, null));
         for (TestCase testCase : cases) {
-            List<TestStep> steps = daos.steps().listByTestCase(testCase.id());
+            List<TestStep> steps = daos.steps().listByTestCaseForShare(testCase.id());
             validateSnapshotSteps(testCase.id(), steps);
             TestRunCase runCase = daos.runCases().insert(new TestRunCase(null, run.id(), testCase.id(),
                     testCase.title(), testCase.description(), testCase.preconditions(), testCase.priority(), null));

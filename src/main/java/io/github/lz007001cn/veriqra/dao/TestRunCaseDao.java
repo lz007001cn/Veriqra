@@ -10,6 +10,7 @@ public interface TestRunCaseDao {
     Optional<TestRunCase> findByIdForUpdate(Long id);
     Optional<TestRunCase> findByRunAndCase(Long testRunId, Long testCaseId);
     List<TestRunCase> listByRun(Long testRunId);
+    List<TestRunCase> listByRunForUpdate(Long testRunId);
     List<TestRunCase> listByTestCase(Long testCaseId);
     /** Ignores generated fields; insert and readback belong in an outer transaction. */
     TestRunCase insert(TestRunCase value);

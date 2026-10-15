@@ -34,6 +34,11 @@ public final class ApplicationListener implements ServletContextListener {
             DriverManager.drivers().filter(driver -> !existing.contains(driver)
                     && driver.getClass().getClassLoader() == getClass().getClassLoader()).forEach(ownedDrivers::add);
             pool = new ConnectionPool(DatabaseConfig.load());
+            // Verify before exposing any Services; an old or partial migration must fail closed.
+            try (var schemaConnection = pool.borrow()) {
+                schemaConnection.setReadOnly(true);
+                R1SchemaGuard.verify(schemaConnection);
+            }
             var transactions = new JdbcServiceTransaction(new JdbcTransactionManager(pool));
             var daos = new JdbcServiceDaoFactory();
             var access = new ProjectAccessPolicy();
@@ -59,6 +64,9 @@ public final class ApplicationListener implements ServletContextListener {
                     new DefaultAutomationService(transactions, daos, access),
                     new DefaultTestImportService(transactions, daos, access, new JUnitXmlParser(),
                             java.time.Clock.systemUTC())));
+        } catch (R1SchemaGuard.IncompatibleSchema e) {
+            closePool(context);
+            throw new IllegalStateException(R1SchemaGuard.SAFE_MESSAGE);
         } catch (SQLException | ClassNotFoundException | RuntimeException e) {
             closePool(context);
             // Configuration/driver exceptions may contain credentials; do not attach them to container logs.

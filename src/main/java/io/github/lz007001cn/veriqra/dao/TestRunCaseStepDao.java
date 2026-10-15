@@ -8,4 +8,5 @@ public interface TestRunCaseStepDao {
     TestRunCaseStep insert(TestRunCaseStep value);
     Optional<TestRunCaseStep> find(Long testRunCaseId, Integer stepOrder);
     List<TestRunCaseStep> listByRunCase(Long testRunCaseId);
+    List<TestRunCaseStep> listByRunCaseForShare(Long testRunCaseId);
 }

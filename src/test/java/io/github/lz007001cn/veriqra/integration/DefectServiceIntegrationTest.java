@@ -130,7 +130,10 @@ class DefectServiceIntegrationTest extends ServiceFixture {
         Defect defect = createDefect(s.tester(), s, first, "Evidence");
         TestAttempt second = attempt(s, 0, TestAttemptStatus.FAIL);
         TestAttemptDefect secondLink = defects.addEvidence(s.tester().id(), defect.id(), second.id());
+        Defect evidenceAdded = defects.get(s.tester().id(), defect.id());
+        assertEquals(defect.lockVersion() + 1, evidenceAdded.lockVersion());
         assertEquals(secondLink, defects.addEvidence(s.tester().id(), defect.id(), second.id()));
+        assertEquals(evidenceAdded, defects.get(s.tester().id(), defect.id()), "Duplicate ADD must not bump the version");
         assertEquals(List.of(first.id(), second.id()), defects.listEvidence(s.tester().id(), defect.id())
                 .stream().map(TestAttemptDefect::attemptId).toList());
 
@@ -139,6 +142,7 @@ class DefectServiceIntegrationTest extends ServiceFixture {
         assertThrows(ValidationException.class,
                 () -> defects.addEvidence(s.tester().id(), defect.id(), otherFailure.id()));
         defects.removeEvidence(s.tester().id(), defect.id(), second.id());
+        assertEquals(evidenceAdded.lockVersion() + 1, defects.get(s.tester().id(), defect.id()).lockVersion());
         assertEquals(List.of(first.id()), defects.listEvidence(s.tester().id(), defect.id())
                 .stream().map(TestAttemptDefect::attemptId).toList());
         assertTrue(execution.listAttempts(s.tester().id(), s.runCases().getFirst().id()).stream()
@@ -154,16 +158,18 @@ class DefectServiceIntegrationTest extends ServiceFixture {
         TestAttempt secondFailure = attempt(s, 1, TestAttemptStatus.FAIL);
         Defect defect = createDefect(s.tester(), s, firstFailure, "Multi evidence");
         defects.addEvidence(s.tester().id(), defect.id(), secondFailure.id());
+        Defect withEvidence = defects.get(s.tester().id(), defect.id());
+        assertEquals(defect.lockVersion() + 1, withEvidence.lockVersion());
         assertThrows(ConflictException.class, () -> defects.transition(s.tester().id(),
-                new TransitionDefectCommand(defect.id(), DefectStatus.RESOLVED, "skip", defect.lockVersion())));
+                new TransitionDefectCommand(withEvidence.id(), DefectStatus.RESOLVED, "skip", withEvidence.lockVersion())));
         assertThrows(ConflictException.class, () -> defects.transition(s.tester().id(),
-                new TransitionDefectCommand(defect.id(), DefectStatus.OPEN, null, defect.lockVersion())));
+                new TransitionDefectCommand(withEvidence.id(), DefectStatus.OPEN, null, withEvidence.lockVersion())));
         assertThrows(ConflictException.class, () -> defects.transition(s.tester().id(),
-                new TransitionDefectCommand(defect.id(), DefectStatus.REOPENED, null, defect.lockVersion())));
+                new TransitionDefectCommand(withEvidence.id(), DefectStatus.REOPENED, null, withEvidence.lockVersion())));
         assertThrows(ConflictException.class, () -> defects.transition(s.tester().id(),
-                new TransitionDefectCommand(defect.id(), DefectStatus.CLOSED, null, defect.lockVersion())));
+                new TransitionDefectCommand(withEvidence.id(), DefectStatus.CLOSED, null, withEvidence.lockVersion())));
         Defect inProgress = defects.transition(s.tester().id(), new TransitionDefectCommand(
-                defect.id(), DefectStatus.IN_PROGRESS, null, defect.lockVersion()));
+                withEvidence.id(), DefectStatus.IN_PROGRESS, null, withEvidence.lockVersion()));
         Defect resolved = defects.transition(s.tester().id(), new TransitionDefectCommand(
                 defect.id(), DefectStatus.RESOLVED, "fixed", inProgress.lockVersion()));
 

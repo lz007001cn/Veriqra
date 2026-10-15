@@ -39,6 +39,14 @@ public final class TestRunHandler {
             res.setStatus(204);
             return;
         }
+        if (path.length == 6 && path[5].equals("completion-impact")) {
+            Long run = JsonHttp.positiveId(path[4]);
+            JsonHttp.method(res, method, "GET");
+            if (!req.getParameterMap().isEmpty())
+                throw new HttpFailure(400, "INVALID_QUERY", "Invalid query parameters");
+            JsonHttp.write(res, 200, s.testRuns().completionImpact(actor, project, run));
+            return;
+        }
         if (path.length == 8 && path[5].equals("cases") && path[7].equals("attempts")) {
             Long run = JsonHttp.positiveId(path[4]), runCase = JsonHttp.positiveId(path[6]);
             JsonHttp.method(res, method, "GET", "POST");

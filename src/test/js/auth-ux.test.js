@@ -165,3 +165,17 @@ test('UI message descriptors preserve API status, code, Retry-After, and localiz
   assert.equal(browser.requests[1].settings.method, 'POST');
   assert.deepEqual(browser.navigation, []);
 });
+
+test('API errors preserve typed retest reasons and use localized public messages', async () => {
+  const browser = page('en'); await Promise.resolve(); browser.requests[0].call.reject(failure(401));
+  let rejected;
+  browser.api.post('projects/7/defects/70/close', { expectedVersion: 3 }).fail(error => { rejected = error; });
+  const response = failure(409);
+  response.responseJSON.error = { code: 'CONFLICT', reasonCode: 'LATER_NON_PASS', message: 'internal-text-is-not-ui-copy' };
+  browser.requests[1].call.reject(response);
+  assert.equal(rejected.code, 'CONFLICT');
+  assert.equal(rejected.reasonCode, 'LATER_NON_PASS');
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.message, catalogs.en['http.thisItemHasChangedRefreshAndTryAgain']);
+  assert.equal(rejected.message.includes('internal-text'), false);
+});

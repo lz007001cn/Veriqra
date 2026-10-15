@@ -23,6 +23,9 @@
   let sourceCaseMissing = false;
   let planPreviewGeneration = 0;
   let planPreview = null;
+  let completionImpact = null;
+  let completionImpactGeneration = 0;
+  let finishBusy = false;
   const submissions = new Map();
   const knownDefects = new Map();
   const active = function () { return view === 'test-plans' || view === 'runs'; };
@@ -40,9 +43,18 @@
     const current = nav() ? nav().read() : {};
     return current.projectId && !sameId(current.projectId, projectId) ? {} : current;
   }
-  function selectRoute(context) { if (nav()) nav().select(view, Object.assign({ projectId: projectId }, context)); }
+  function runDestination(context) {
+    const current = routeContext(), retained = {};
+    // Retest identity follows navigation within the current Run. attemptId remains the viewed result,
+    // while failureAttemptId always identifies the original FAIL chosen on the defect page.
+    if (view === 'runs' && context.runId && sameId(context.runId, current.runId)) {
+      ['sourceTestCaseId', 'defectId', 'failureAttemptId'].forEach(function (key) { if (current[key]) retained[key] = current[key]; });
+    }
+    return Object.assign({ projectId: projectId }, retained, context);
+  }
+  function selectRoute(context) { if (nav()) nav().select(view, view === 'runs' ? runDestination(context) : Object.assign({ projectId: projectId }, context)); }
   function routeLink(title, targetView, context, className) {
-    const destination = Object.assign({ projectId: projectId }, context);
+    const destination = targetView === 'runs' ? runDestination(context) : Object.assign({ projectId: projectId }, context);
     const link = $('<a>').addClass(className || 'btn btn-outline-primary btn-sm')
       .attr('href', nav() ? nav().href(targetView, destination) : '#' + targetView).text(title);
     link.on('click', function (event) {
@@ -93,6 +105,34 @@
     $(target).empty().append($('<p>').text(t('execution.sourceCaseContext',
       { title: 'TC-' + String(source.keyNo).padStart(3, '0') + ' · ' + source.title }, 'Source test case: {title}')),
       routeLink(t('execution.backToSourceCase', null, 'Back to source test case'), 'test-cases', { testCaseId: idText(source.id) }));
+  }
+  async function validateRetestSource(source, token) {
+    if (!formContext.failureAttemptId) return;
+    const context = Object.assign({}, formContext);
+    if (!context.runId || !context.runCaseId || !context.defectId) { sourceCaseMissing = true; formError(t('execution.retestSourceUnavailable', null, 'The original failure context is incomplete. Return to the defect page and start the retest there.')); return; }
+    const results = await Promise.all([api.get(base('runs') + '/' + encodeURIComponent(context.runId)),
+      api.get(base('test-cases') + '/' + encodeURIComponent(source.id)),
+      api.get(base('runs') + '/' + encodeURIComponent(context.runId) + '/cases/' + encodeURIComponent(context.runCaseId) + '/attempts')]);
+    if (!valid(token)) return;
+    const original = results[0].cases.find(function (item) { return sameId(item.runCaseId, context.runCaseId); });
+    const current = results[1], failed = results[2].find(function (attempt) { return sameId(attempt.id, context.failureAttemptId) && attempt.outcome === 'FAIL'; });
+    if (!original || !failed || !sameId(original.testCaseId, source.id) || !sameId(current.testCase.id, source.id) || current.testCase.status !== 'READY') {
+      sourceCaseMissing = true; formError(t('execution.retestSourceUnavailable', null, 'The original failure context is incomplete. Return to the defect page and start the retest there.')); return;
+    }
+    const differences = [];
+    ['title', 'description', 'preconditions'].forEach(function (name) {
+      if (current.testCase[name] !== original['snapshot' + name[0].toUpperCase() + name.slice(1)]) differences.push(t('execution.' + name, null, name));
+    });
+    const steps = function (rows) { return rows.slice().sort(function (a, b) { return a.stepOrder - b.stepOrder; }).map(function (row) { return [row.stepOrder, row.action, row.expectedResult]; }); };
+    const sourceSteps = steps(original.steps), currentSteps = steps(current.steps);
+    if (!sourceSteps.length || !currentSteps.length || sourceSteps.some(function (row, index) { return row[0] !== index + 1; }) || currentSteps.some(function (row, index) { return row[0] !== index + 1; }) || JSON.stringify(sourceSteps) !== JSON.stringify(currentSteps)) differences.push(t('execution.orderedSteps', null, 'ordered steps'));
+    if (differences.length) {
+      sourceCaseMissing = true;
+      formError(t('execution.retestDefinitionChanged', { fields: differences.join(', ') }, 'The current Test Case differs from the original frozen failure: {fields}. This run cannot provide compatible closure evidence.'));
+    } else $('#execution-form-context').append($('<p class="small text-secondary">').text(t('execution.retestSourceCompatible', null, 'The current READY Test Case matches the original frozen definition. Its new run will preserve that definition. Linking and closure will verify compatibility again.')));
+    $('#execution-form-context').append(routeLink(t('execution.backToDefect', null, 'Back to defect and link the retest PASS'), 'defects', { defectId: context.defectId }));
+    if (!$('#execution-name').val()) $('#execution-name').val(t('execution.retestRunName', { title: source.title }, 'Retest · {title}'));
+    if (!$('#execution-environment').val()) $('#execution-environment').val(results[0].run.environment || '');
   }
   function refreshFormSave() {
     const fromPlan = view === 'runs' && $('#execution-origin').val() === 'plan';
@@ -156,6 +196,7 @@
     caseOptions = [];
     formContext = {}; existingPlans = []; selectedAttemptId = null; recordedMessage = null;
     renderedAttemptOwner = null; localeAttemptDraft = null; formLoading = false; formWriting = false; formCasesLoaded = false; formPlansLoaded = false; sourceCaseMissing = false; planPreview = null; planPreviewGeneration++;
+    completionImpact = null; completionImpactGeneration++; finishBusy = false;
     $('#execution-list, #execution-detail, #execution-actions, #execution-items, #execution-case-selector, #execution-snapshot, #execution-history').empty();
     $('#execution-context, #execution-progress, #execution-case-context, #execution-case-progress, #execution-case-navigation, #execution-form-context').empty();
     $('#execution-plan-preview').empty();
@@ -178,7 +219,8 @@
     rows.forEach(function (row) {
       const id = 'execution-select-case-' + row.id;
       target.append($('<div class="form-check">').append(
-        $('<input type="checkbox" class="form-check-input">').attr('id', id).val(String(row.id)).prop('checked', chosen.includes(String(row.id))),
+        $('<input type="checkbox" class="form-check-input">').attr('id', id).val(String(row.id)).prop('checked', chosen.includes(String(row.id)) || (view === 'runs' && sameId(row.id, formContext.sourceTestCaseId)))
+          .prop('disabled', view === 'runs' && sameId(row.id, formContext.sourceTestCaseId)),
         $('<label class="form-check-label">').attr('for', id).text('TC-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title + ' · ' + label(row.status))));
     });
   }
@@ -216,9 +258,11 @@
   async function openDetail(id, caseId, attemptId) {
     const token = ++generation;
     detail = null; runCaseId = null; pendingAttempt = null;
+    completionImpact = null; completionImpactGeneration++; finishBusy = false;
     selectedAttemptId = idText(attemptId);
     selectRoute(view === 'test-plans' ? { planId: idText(id), sourceTestCaseId: routeContext().sourceTestCaseId }
-      : { runId: idText(id), runCaseId: idText(caseId), attemptId: selectedAttemptId });
+      : { runId: idText(id), runCaseId: idText(caseId), attemptId: selectedAttemptId, defectId: routeContext().defectId,
+        failureAttemptId: routeContext().failureAttemptId, sourceTestCaseId: routeContext().sourceTestCaseId });
     panels('detail'); notice('');
     $('#execution-detail-title').text(t("common.loading", null, 'Loading…'));
     $('#execution-detail, #execution-actions, #execution-items').empty();
@@ -302,6 +346,9 @@
     if (run.testPlanId != null) $('#execution-context').append(routeLink(t('execution.viewSourcePlan', null, 'View source plan'), 'test-plans',
       { planId: idText(run.testPlanId) }));
     const status = progress(current, '#execution-progress');
+    $('#execution-progress').append($('<div class="mt-3">').attr('id', 'execution-completion-impact'), $('<div class="mt-3">').attr('id', 'execution-finish-panel'));
+    loadCompletionImpact(current);
+    if (routeContext().defectId) $('#execution-context').append(routeLink(t('execution.backToDefect', null, 'Back to defect and link the retest PASS'), 'defects', { defectId: routeContext().defectId }));
     $('#execution-detail-title').text(run.name);
     $('#execution-detail').append($('<dl class="asset-fields">').append(
       field(t("common.status", null, 'Status'), label(run.status)), field(t("execution.source", null, 'Source'), run.testPlanId == null ? t("execution.adHoc", null, 'Ad-hoc') : t('execution.planNumber', { number: run.testPlanId }, 'Plan #{number}')),
@@ -329,20 +376,59 @@
           .prop('disabled', entry[1] === 'complete' && (!status.total || !!status.remaining))
           .on('click', function () { finishRun(run, entry[1]); }));
       });
+    } else $('#execution-progress').append($('<p class="small text-secondary">').text(t('execution.terminalRetestPath', null, 'This run is read-only. Its history is retained. For unresolved defects, execute a compatible READY Test Case in a new run and explicitly link its PASS from the defect page.')));
+  }
+  function renderCompletionImpact() {
+    const target = $('#execution-completion-impact').empty();
+    if (!completionImpact) return;
+    if (completionImpact.loading) { target.text(t('execution.loadingCompletionImpact', null, 'Loading completion impact…')); return; }
+    if (completionImpact.error) {
+      target.append($('<p class="small text-danger" role="status">').text(t('execution.completionImpactUnavailable', null, 'Defect and retest impact is unavailable. These counts cannot be assumed to be zero.')));
+      retry(target, function () { if (detail && !finishBusy) return loadCompletionImpact(detail); }); return;
+    }
+    const value = completionImpact.value;
+    const outcomes = ['PASS', 'FAIL', 'BLOCKED', 'SKIPPED', 'NOT_RUN'].map(function (name) { return t('execution.outcomeCount', { outcome: label(name), count: window.I18n.formatNumber(value.outcomes[name]) }, '{outcome}: {count}'); }).join(' · ');
+    target.append($('<p class="small mb-1">').text(outcomes), $('<p class="small mb-1">').text(t('execution.defectCompletionImpact',
+      { defects: window.I18n.formatNumber(value.openDefectCount), retests: window.I18n.formatNumber(value.pendingRetestDefectCount) }, 'Unclosed defects: {defects} · defects awaiting valid retest: {retests}')));
+  }
+  async function loadCompletionImpact(current) {
+    const token = generation, request = ++completionImpactGeneration;
+    completionImpact = { loading: true }; renderCompletionImpact();
+    try {
+      const value = await api.get(base('runs') + '/' + encodeURIComponent(current.run.id) + '/completion-impact');
+      if (!valid(token) || detail !== current || request !== completionImpactGeneration) return;
+      completionImpact = { value: value }; renderCompletionImpact(); return value;
+    } catch (failure) {
+      if (!valid(token) || detail !== current || request !== completionImpactGeneration) return;
+      completionImpact = { error: failure }; renderCompletionImpact();
     }
   }
-  async function finishRun(run, action) {
+  async function finishRun(run, action, confirmed) {
+    if (finishBusy || !detail || !sameId(detail.run.id, run.id)) return;
     if (action === 'complete' && (!detail || !detail.cases.length || detail.cases.some(function (item) { return !item.latestAttempt; }))) {
       notice(t('execution.completionRequiresAllCases', null, 'Record at least one attempt for every case before completing this run.'), true); return;
     }
-    if (!window.confirm(t(action === 'complete' ? 'execution.completeRunConfirm' : 'execution.cancelRunConfirm',
-      { name: run.name }, action === 'complete' ? 'Complete run "{name}"?' : 'Cancel run "{name}"?'))) return;
     const token = generation;
+    if (action === 'complete' && !confirmed) {
+      const current = detail; finishBusy = true; $('#execution-actions button').prop('disabled', true);
+      await loadCompletionImpact(current);
+      if (!valid(token) || detail !== current) return;
+      finishBusy = false;
+      const panel = $('#execution-finish-panel').empty().append($('<h3 class="fs-6">').text(t('execution.completeRunConfirm', { name: run.name }, 'Complete run "{name}"?')),
+        $('<p class="small">').text(t('execution.completionWarning', null, 'Completing a run does not mean all cases passed. After completion you cannot append attempts to these Run Cases. Original results stay in history. Later retests use a new run with a compatible READY Test Case and an explicit PASS link from the defect page.')));
+      panel.append($('<button type="button" class="btn btn-primary">').text(t('execution.confirmCompletion', null, 'Confirm completion')).on('click', function () { if (valid(token) && detail === current) return finishRun(run, action, true); }),
+        $('<button type="button" class="btn btn-outline-secondary ms-2">').text(t('common.cancel', null, 'Cancel')).on('click', function () { if (valid(token)) { panel.empty(); $('#execution-actions button').prop('disabled', false); } }));
+      focusHeading('#execution-finish-panel h3'); return;
+    }
+    if (action === 'cancel' && !window.confirm(t('execution.cancelRunConfirm', { name: run.name }, 'Cancel run "{name}"?'))) return;
+    finishBusy = true;
     $('#execution-actions button').prop('disabled', true);
+    $('#execution-finish-panel button').prop('disabled', true);
     try { await api.post(path(run.id) + '/' + action, { expectedVersion: run.version }); if (valid(token)) await openDetail(run.id); }
     catch (failure) { if (valid(token)) { notice(conflict(failure), true); reloadConflict('#execution-notice', failure, function () { openDetail(run.id); }); } }
     finally {
       if (valid(token)) {
+        finishBusy = false; $('#execution-finish-panel button').prop('disabled', false);
         const incomplete = !detail || !detail.cases.length || detail.cases.some(function (item) { return !item.latestAttempt; });
         $('#execution-actions button').each(function () { $(this).prop('disabled', $(this).attr('data-execution-action') === 'complete' && incomplete); });
       }
@@ -369,7 +455,8 @@
     const token = ++generation;
     runCaseId = id; selectedAttemptId = idText(attemptId); pendingAttempt = submissions.get(submissionContext(runId, id)) || null;
     renderedAttemptOwner = null;
-    selectRoute({ runId: idText(runId), runCaseId: idText(id), attemptId: selectedAttemptId });
+    selectRoute({ runId: idText(runId), runCaseId: idText(id), attemptId: selectedAttemptId, defectId: routeContext().defectId,
+      failureAttemptId: routeContext().failureAttemptId, sourceTestCaseId: routeContext().sourceTestCaseId });
     panels('case'); notice(''); attemptError('');
     $('#execution-case-title').text(t('execution.loadingSnapshot', null, 'Loading snapshot…'));
     $('#execution-snapshot, #execution-history').empty();
@@ -404,6 +491,7 @@
       });
       snapshot(item);
       const target = $('#execution-history').empty();
+      if (routeContext().defectId) $('#execution-case-navigation').append(routeLink(t('execution.backToDefect', null, 'Back to defect and link the retest PASS'), 'defects', { defectId: routeContext().defectId }));
       $('#execution-history-status').text(history.length ? t('execution.attemptCount', { count: window.I18n.formatNumber(history.length) }, '{count} recorded attempt(s)') : t("execution.noAttemptsYet", null, 'No attempts yet.'));
       history.forEach(function (attempt, index) {
         const referenced = sameId(attempt.id, selectedAttemptId);
@@ -462,10 +550,12 @@
     formLoading = true; formWriting = false; formCasesLoaded = false; formPlansLoaded = false; sourceCaseMissing = false; planPreview = null; planPreviewGeneration++;
     formContext = context || routeContext();
     selectRoute(update ? { planId: idText(detail.plan.id), sourceTestCaseId: formContext.sourceTestCaseId }
-      : { action: 'create', sourceTestCaseId: view === 'test-plans' ? formContext.sourceTestCaseId : null,
-        sourcePlanId: view === 'runs' ? formContext.sourcePlanId : null });
+      : { action: 'create', sourceTestCaseId: formContext.sourceTestCaseId,
+        sourcePlanId: view === 'runs' ? formContext.sourcePlanId : null, runId: formContext.failureAttemptId ? formContext.runId : null,
+        runCaseId: formContext.failureAttemptId ? formContext.runCaseId : null, defectId: formContext.defectId, failureAttemptId: formContext.failureAttemptId });
     panels('form'); notice(''); formError('');
     $('#execution-form')[0].reset();
+    $('#execution-origin').prop('disabled', false);
     $('#execution-save').prop('disabled', true);
     $('#execution-form-title').text(view === 'test-plans' ? (update ? t("execution.editPlan", null, 'Edit plan') : t("execution.createPlan", null, 'Create plan')) : t("execution.createRun", null, 'Create run'));
     $('#execution-description-wrap').toggleClass('d-none', view !== 'test-plans');
@@ -485,7 +575,7 @@
         if (!valid(token)) return;
         caseOptions = cases.filter(function (item) { return view === 'test-plans' ? item.status !== 'ARCHIVED' : item.status === 'READY'; });
         formCasesLoaded = true;
-        const sourceCase = view === 'test-plans' && formContext.sourceTestCaseId;
+        const sourceCase = formContext.sourceTestCaseId;
         const source = sourceCase && caseOptions.find(function (item) { return sameId(item.id, sourceCase); });
         caseSelector(caseOptions, draft && draft.casesLoaded ? draft.cases : source ? [idText(source.id)] : []);
         if (sourceCase) {
@@ -493,14 +583,18 @@
           else {
             const sourceContext = $('<div id="execution-source-case-context">');
             $('#execution-form-context').append(sourceContext); renderSourceCaseContext(source, sourceContext);
-            const plans = await api.get(base('test-plans'));
+            if (view === 'runs') await validateRetestSource(source, token);
             if (!valid(token)) return;
-            formPlansLoaded = true;
-            existingPlans = plans.filter(function (plan) { return plan.status !== 'ARCHIVED'; });
-            const selector = $('#execution-existing-plan').empty().append($('<option>').val('').text(t('execution.selectExistingPlan', null, 'Select an existing plan')));
-            existingPlans.forEach(function (plan) { selector.append($('<option>').val(plan.id).text(planKey(plan) + ' · ' + plan.name)); });
-            $('#execution-existing-plan-wrap').toggleClass('d-none', !existingPlans.length);
-            $('#execution-add-existing').prop('disabled', false);
+            if (view === 'test-plans') {
+              const plans = await api.get(base('test-plans'));
+              if (!valid(token)) return;
+              formPlansLoaded = true;
+              existingPlans = plans.filter(function (plan) { return plan.status !== 'ARCHIVED'; });
+              const selector = $('#execution-existing-plan').empty().append($('<option>').val('').text(t('execution.selectExistingPlan', null, 'Select an existing plan')));
+              existingPlans.forEach(function (plan) { selector.append($('<option>').val(plan.id).text(planKey(plan) + ' · ' + plan.name)); });
+              $('#execution-existing-plan-wrap').toggleClass('d-none', !existingPlans.length);
+              $('#execution-add-existing').prop('disabled', false);
+            }
           }
         }
         if (view === 'runs') {
@@ -512,7 +606,9 @@
           });
           if (!$('#execution-plan option').length) $('#execution-plan').append($('<option>').val('').text(t("execution.noREADYPlanAvailable", null, 'No READY plan available')));
           $('#execution-origin').val($('#execution-plan option[value!=""]').length ? 'plan' : 'adhoc');
-          if (formContext.sourcePlanId) {
+          if (sourceCase) $('#execution-origin').val('adhoc');
+          $('#execution-origin').prop('disabled', !!sourceCase);
+          if (formContext.sourcePlanId && !sourceCase) {
             const sourcePlan = plans.find(function (plan) { return sameId(plan.id, formContext.sourcePlanId) && plan.status === 'READY'; });
             $('#execution-origin').val('plan');
             if (sourcePlan) {
@@ -523,6 +619,7 @@
       }
       if (valid(token)) {
         restorePlanDraft(draft, true); formLoading = false;
+        if (view === 'runs' && formContext.sourceTestCaseId) $('#execution-origin').val('adhoc').prop('disabled', true);
         if (view === 'runs') await updateRunOrigin(); else refreshFormSave();
         if (valid(token)) $('#execution-name').trigger('focus');
       }
@@ -613,7 +710,7 @@
   $('#execution-plan').on('change', updatePlanPreview);
   $('#execution-outcome').on('change', function () { $('#execution-failure-wrap').toggleClass('d-none', this.value !== 'FAIL'); });
   $('#execution-back').on('click', function () { if (nav()) nav().open(view, { projectId: projectId }); else list(); });
-  $('#execution-case-back').on('click', function () { if (detail) { if (nav()) nav().open('runs', { projectId: projectId, runId: idText(detail.run.id) }); else openDetail(detail.run.id); } });
+  $('#execution-case-back').on('click', function () { if (detail) { if (nav()) nav().open('runs', runDestination({ runId: idText(detail.run.id) })); else openDetail(detail.run.id); } });
   $('#execution-new').on('click', function () { showForm(false); });
   $('#execution-cancel').on('click', function () { if (editing && detail) openDetail(detail.plan.id); else list(); });
   $('#execution-add-existing').on('click', async function () {
@@ -657,6 +754,12 @@
       }
     }
     try {
+      if (view === 'runs' && formContext.failureAttemptId) {
+        const source = caseOptions.find(function (row) { return sameId(row.id, formContext.sourceTestCaseId); });
+        if (!source || !selectedCases().some(function (id) { return sameId(id, source.id); })) { sourceCaseMissing = true; formError(t('execution.retestSourceUnavailable', null, 'The original failure context is incomplete. Return to the defect page and start the retest there.')); return; }
+        await validateRetestSource(source, token);
+        if (!valid(token) || sourceCaseMissing) return;
+      }
       const saved = editing ? await api.put(path(detail.plan.id), body)
         : await api.post(base(view === 'test-plans' ? 'test-plans' : 'runs'), body);
       if (valid(token)) await openDetail(saved.id);
@@ -669,6 +772,7 @@
     const token = generation;
     const runId = detail.run.id;
     const caseId = runCaseId;
+    const retainedRoute = runDestination({ runId: idText(runId), runCaseId: idText(caseId) });
     const owner = submissionContext(runId, caseId);
     const previous = submissions.get(owner);
     if (previous && previous.busy) { attemptError(t('execution.attemptInProgress', null, 'This attempt is being recorded. Please wait before submitting it again.')); return; }
@@ -694,7 +798,7 @@
         pendingAttempt = null;
         if (next && nav()) {
           recordedMessage = { owner: submissionContext(runId, next.runCaseId), message: t('execution.attemptRecorded', { number: saved.attemptNo }, 'Attempt #{number} recorded.') };
-          nav().open('runs', { projectId: projectId, runId: idText(runId), runCaseId: idText(next.runCaseId) });
+          nav().open('runs', Object.assign({}, retainedRoute, { runCaseId: idText(next.runCaseId) }));
         }
         else {
           const rendered = await openCase(next ? next.runCaseId : caseId, saved.id);

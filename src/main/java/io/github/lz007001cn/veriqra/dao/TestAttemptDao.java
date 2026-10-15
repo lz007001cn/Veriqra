@@ -9,6 +9,7 @@ public interface TestAttemptDao {
     /** Current locking read after the caller has locked Run then RunCase. */
     Optional<TestAttempt> findByIdForUpdate(Long id);
     List<TestAttempt> listByRunCase(Long testRunCaseId);
+    List<TestAttempt> listByRunCaseForUpdate(Long testRunCaseId);
     List<TestAttempt> listByImport(Long importId);
     Optional<TestAttempt> findLatestByRunCase(Long testRunCaseId);
     /** Current locking read, even after an earlier repeatable-read snapshot.

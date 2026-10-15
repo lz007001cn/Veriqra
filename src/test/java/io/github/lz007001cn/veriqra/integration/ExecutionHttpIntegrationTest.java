@@ -119,6 +119,7 @@ class ExecutionHttpIntegrationTest extends MysqlFixture {
         return expect(201,"POST",base(p)+"/test-plans","{\"name\":\"plan\",\"testCaseIds\":"+JsonMapperProvider.writer().writeValueAsString(cases)+"}");
     }
     static String version(int v){return "{\"expectedVersion\":"+v+"}";}
+    static String evidence(long failure,int version){return "{\"failureAttemptId\":"+failure+",\"expectedVersion\":"+version+"}";}
     String link(long p,long r,long c){return base(p)+"/requirements/"+r+"/test-cases/"+c;}
 
 
@@ -310,11 +311,11 @@ class ExecutionHttpIntegrationTest extends MysqlFixture {
         for(String action:List.of("start","close"))expect(400,"POST",wrong+"/"+action,version(0));
         expect(400,"POST",wrong+"/resolve","{\"expectedVersion\":0,\"resolutionNote\":\"fixed\"}");
         expect(400,"POST",wrong+"/reopen","{\"expectedVersion\":0,\"failureAttemptId\":"+failure+",\"assigneeId\":"+admin.id()+"}");
-        expect(400,"POST",wrong+"/evidence","{\"failureAttemptId\":"+failure+"}");
-        expect(400,"POST",wrong+"/evidence/"+failure+"/remove","{}");
+        expect(400,"POST",wrong+"/evidence","{\"failureAttemptId\":"+failure+",\"expectedVersion\":0}");
+        expect(400,"POST",wrong+"/evidence/"+failure+"/remove",version(0));
         long outside=record(foreign,"FAIL").get("id").asLong();
-        expect(400,"POST",right+"/evidence","{\"failureAttemptId\":"+outside+"}");
-        expect(400,"POST",right+"/evidence/"+outside+"/remove","{}");
+        expect(400,"POST",right+"/evidence","{\"failureAttemptId\":"+outside+",\"expectedVersion\":0}");
+        expect(400,"POST",right+"/evidence/"+outside+"/remove",version(0));
         expect(400,"POST",right+"/reopen","{\"expectedVersion\":0,\"failureAttemptId\":"+outside+",\"assigneeId\":"+admin.id()+"}");
         expect(400,"POST",base(q)+"/defects","{\"failureAttemptId\":"+failure+",\"title\":\"x\",\"priority\":\"HIGH\",\"severity\":\"HIGH\"}");
         assertEquals(0,defectVersion(right));
@@ -325,19 +326,19 @@ class ExecutionHttpIntegrationTest extends MysqlFixture {
         login(admin);long p=project("EVIDENCE");var a=adHoc(p,readyCase(p));var b=adHoc(p,readyCase(p));
         long fa=record(a,"FAIL").get("id").asLong(),fb=record(b,"FAIL").get("id").asLong();
         long id=defect(p,fa,admin.id()).get("id").asLong();String path=defectPath(p,id);
-        String add="{\"failureAttemptId\":"+fb+"}";
-        expect(204,"POST",path+"/evidence",add);expect(204,"POST",path+"/evidence",add);
+        expect(204,"POST",path+"/evidence",evidence(fb,defectVersion(path)));
+        expect(204,"POST",path+"/evidence",evidence(fb,defectVersion(path)));
         assertEquals(2,expect(200,"GET",path,null).get("evidence").size());
-        expect(204,"POST",path+"/evidence/"+fb+"/remove","{}");
+        expect(204,"POST",path+"/evidence/"+fb+"/remove",version(defectVersion(path)));
         assertEquals(1,expect(200,"GET",b.attempts(),null).size());
-        expect(204,"POST",path+"/evidence",add);
+        expect(204,"POST",path+"/evidence",evidence(fb,defectVersion(path)));
         resolve(path);
         record(a,"PASS");expect(409,"POST",path+"/close",version(defectVersion(path)));
         record(b,"PASS");record(a,"FAIL");
         expect(409,"POST",path+"/close",version(defectVersion(path)));
         record(a,"PASS");expect(204,"POST",path+"/close",version(defectVersion(path)));
-        expect(409,"POST",path+"/evidence",add);
-        expect(409,"POST",path+"/evidence/"+fb+"/remove","{}");
+        expect(409,"POST",path+"/evidence",evidence(fb,defectVersion(path)));
+        expect(409,"POST",path+"/evidence/"+fb+"/remove",version(defectVersion(path)));
     }
 
     @Test void invalidFailureAndResolutionAndStaleUpdateDoNotMutate() throws Exception {
@@ -371,8 +372,8 @@ class ExecutionHttpIntegrationTest extends MysqlFixture {
         expect(403,"POST",defectPath(p,others)+"/start",version(0));
         resolve(path);
         expect(403,"POST",path+"/close",version(defectVersion(path)));
-        expect(403,"POST",path+"/evidence","{\"failureAttemptId\":"+fail+"}");
-        expect(403,"POST",path+"/evidence/"+fail+"/remove","{}");
+        expect(403,"POST",path+"/evidence",evidence(fail,defectVersion(path)));
+        expect(403,"POST",path+"/evidence/"+fail+"/remove",version(defectVersion(path)));
         expect(403,"POST",path+"/reopen","{\"expectedVersion\":"+defectVersion(path)+",\"failureAttemptId\":"+fail+",\"assigneeId\":"+developer.id()+"}");
         login(tester);
         record(run,"PASS");

@@ -63,7 +63,7 @@ public final class DefaultTestImportService implements TestImportService {
             for (ResolvedResult item : resolved.stream()
                     .sorted(Comparator.comparing(value -> value.testCase().id())).toList()) {
                 TestCase testCase = item.testCase();
-                List<TestStep> steps = daos.steps().listByTestCase(testCase.id());
+                List<TestStep> steps = daos.steps().listByTestCaseForShare(testCase.id());
                 validateSnapshotSteps(testCase.id(), steps);
                 TestRunCase runCase = daos.runCases().insert(new TestRunCase(null, insertedRun.id(), testCase.id(),
                         testCase.title(), testCase.description(), testCase.preconditions(), testCase.priority(), null));

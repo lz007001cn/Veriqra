@@ -27,6 +27,7 @@ public final class ApiExceptionFilter implements Filter {
             int status = 500;
             String code = "INTERNAL_ERROR";
             String message = "An internal error occurred";
+            String reasonCode = null;
             if (failure instanceof HttpFailure f) { status = f.status(); code = f.code(); message = f.getMessage(); }
             else if (failure instanceof AdminConflictException f) { status = 409; code = f.code(); message = f.getMessage(); }
             else if (failure instanceof io.github.lz007001cn.veriqra.web.security.LoginRateLimiter.Limited f) {
@@ -34,6 +35,10 @@ public final class ApiExceptionFilter implements Filter {
                 response.setHeader("Retry-After", Long.toString(f.retryAfter()));
             }
             else if (failure instanceof AuthenticationException) { status = 401; code = "UNAUTHENTICATED"; message = "Authentication required or credentials invalid"; }
+            else if (failure instanceof R1RuleException f) {
+                status = 409; code = "CONFLICT"; message = "Request conflicts with current state";
+                reasonCode = f.reasonCode();
+            }
             else if (failure instanceof ValidationException) { status = 400; code = workflowCode(failure, "VALIDATION"); message = "Request validation failed"; }
             else if (failure instanceof NotFoundException) { status = 404; code = "NOT_FOUND"; message = "Resource not found"; }
             else if (failure instanceof ForbiddenException) { status = 403; code = "FORBIDDEN"; message = "Operation is not permitted"; }
@@ -46,7 +51,7 @@ public final class ApiExceptionFilter implements Filter {
             }
             if (!response.isCommitted()) {
                 response.resetBuffer();
-                JsonHttp.write(response, status, ApiError.of(code, message));
+                JsonHttp.write(response, status, ApiError.of(code, message, reasonCode));
             }
             if (failure instanceof VirtualMachineError fatal) throw fatal;
             if (failure instanceof ThreadDeath fatal) throw fatal;

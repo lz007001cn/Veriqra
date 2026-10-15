@@ -7,8 +7,8 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.resolve(__dirname, '../../main/webapp/assets/js/execution.js'), 'utf8');
 const flush = async () => { for (let index = 0; index < 12; index++) await Promise.resolve(); };
 
-function browser() {
-  const nodes = new Map(), calls = [], handlers = new Map(), navigation = [];
+function browser(options = {}) {
+  const nodes = new Map(), calls = [], impactCalls = [], handlers = new Map(), navigation = [];
   let locale = 'en';
   const chinese = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../main/webapp/i18n/zh-CN.json'), 'utf8'));
   const formIds = ['execution-outcome', 'execution-duration', 'execution-comment', 'execution-failure'];
@@ -63,14 +63,20 @@ function browser() {
     for (const fn of document.handlers[name] || []) fn.call(document, { originalEvent: { detail } });
     for (const fn of handlers.get(name) || []) fn({ detail });
   }
-  let route = { view: 'dashboard', projectId: '12' };
+  let route = { view: 'dashboard', projectId: '12', ...options.initialRoute };
   const nav = {
     read: () => route,
     href(view, context) { const query = new URLSearchParams(context); return 'http://localhost/index.html?' + query + '#' + view; },
     select(view, context) { route = { view, ...context }; },
     open(view, context) { route = { view, ...context }; navigation.push(route); emit('veriqra:view', { view, projectId: route.projectId, context: route }); }
   };
-  function request(method, url, body) { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); calls.push({ method, url, body, resolve, reject }); return promise; }
+  function request(method, url, body) {
+    let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    const call = { method, url, body, resolve, reject };
+    if (url.endsWith('/completion-impact')) { impactCalls.push(call); if (!options.manualImpact) resolve({ runId: 40, status: 'IN_PROGRESS', outcomes: { PASS: 1, FAIL: 1, BLOCKED: 0, SKIPPED: 0, NOT_RUN: 0 }, openDefectCount: 1, pendingRetestDefectCount: 1 }); }
+    else calls.push(call);
+    return promise;
+  }
   const api = { get: url => request('GET', url), post: (url, body) => request('POST', url, body), put: (url, body) => request('PUT', url, body) };
   const window = { VeriqraApi: api, VeriqraQaNavigation: nav, confirm: () => true, I18n: {
     t: (key, values, fallback) => ((locale === 'zh-CN' && chinese[key]) || fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''), enumLabel: value => value, formatNumber: String, formatDateTime: value => value || '—'
@@ -84,7 +90,7 @@ function browser() {
   const open = async (view, context) => { nav.open(view, { projectId: '12', ...context }); await flush(); };
   const textOf = node => node.content + node.children.map(child => child instanceof Element ? textOf(child) : String(child)).join(' ');
   const find = (selector, text) => descendants($(selector)[0]).find(node => node.content === text);
-  return { $, nodes, calls, emit, navigation, nav, click, submit, respond, open, textOf, find, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
+  return { $, nodes, calls, impactCalls, emit, navigation, nav, click, submit, respond, open, textOf, find, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
 }
 
 function run(outcomes = ['NOT_RUN', 'FAIL', 'PASS'], status = 'IN_PROGRESS') {
@@ -393,4 +399,134 @@ test('verified unlink removes only that defect association in the matching proje
   ui.emit('veriqra:defect-unlinked', { projectId: '12', attemptId: '60', defectId: '71' });
   await loadCase(ui, '50', [attempt()]); assert.equal(ui.find('#execution-history', 'Known linked defects in this session'), undefined);
   assert.equal(ui.calls.some(call => call.url.includes('defects')), false);
+});
+
+test('completion confirmation refreshes real outcomes and pending defects before explicitly finishing a run containing failures', async () => {
+  const ui = browser({ manualImpact: true }); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['PASS', 'FAIL', 'BLOCKED', 'SKIPPED']));
+  const impact = { runId: 40, status: 'IN_PROGRESS', outcomes: { PASS: 1, FAIL: 1, BLOCKED: 1, SKIPPED: 1, NOT_RUN: 0 }, openDefectCount: 3, pendingRetestDefectCount: 2 };
+  await ui.respond(ui.impactCalls[0], impact);
+  assert.match(ui.textOf(ui.$('#execution-completion-impact')[0]), /Unclosed defects: 3.*awaiting valid retest: 2/);
+  assert.equal(ui.find('#execution-actions', 'Complete run').disabled, false);
+  await ui.click(ui.find('#execution-actions', 'Complete run'));
+  assert.equal(ui.impactCalls.length, 2); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 0);
+  await ui.respond(ui.impactCalls[1], impact);
+  assert.match(ui.textOf(ui.$('#execution-finish-panel')[0]), /does not mean all cases passed/); assert.match(ui.textOf(ui.$('#execution-finish-panel')[0]), /cannot append attempts/);
+  await ui.click(ui.find('#execution-finish-panel', 'Confirm completion'));
+  const write = ui.calls.at(-1); assert.equal(write.method, 'POST'); assert.equal(write.url, 'projects/12/runs/40/complete'); assert.equal(write.body.expectedVersion, 2);
+  write.reject({ status: 409, message: 'Changed' }); await flush();
+});
+
+test('unavailable completion impact stays unavailable, offers a scoped Retry and does not invent zero defect counts', async () => {
+  const ui = browser({ manualImpact: true }); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['PASS', 'FAIL']));
+  ui.impactCalls[0].reject({ status: 500, message: 'Impact unavailable' }); await flush();
+  const text = ui.textOf(ui.$('#execution-completion-impact')[0]); assert.match(text, /cannot be assumed to be zero/); assert.doesNotMatch(text, /Unclosed defects: 0/);
+  assert.equal(ui.find('#execution-actions', 'Complete run').disabled, false);
+  await ui.click(ui.find('#execution-completion-impact', 'Retry loading')); assert.equal(ui.impactCalls.length, 2);
+  ui.impactCalls[1].reject({ status: 500, message: 'Impact unavailable' }); await flush();
+  await ui.click(ui.find('#execution-actions', 'Complete run')); ui.impactCalls[2].reject({ status: 500, message: 'Impact unavailable' }); await flush();
+  assert.ok(ui.find('#execution-finish-panel', 'Confirm completion')); assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('late completion impact and terminal-run confirmation cannot affect a newly selected run', async () => {
+  const ui = browser({ manualImpact: true }); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['FAIL']));
+  const old = ui.impactCalls[0];
+  await ui.open('runs', { runId: '41' }); const other = run(['PASS'], 'COMPLETED'); other.run.id = 41; await ui.respond(ui.calls.at(-1), other);
+  await ui.respond(old, { runId: 40, outcomes: { PASS: 0, FAIL: 9, BLOCKED: 0, SKIPPED: 0, NOT_RUN: 0 }, openDefectCount: 88, pendingRetestDefectCount: 88 });
+  assert.doesNotMatch(ui.textOf(ui.$('#execution-completion-impact')[0]), /88/); assert.equal(ui.find('#execution-actions', 'Complete run'), undefined);
+  await ui.respond(ui.impactCalls[1], { runId: 41, status: 'COMPLETED', outcomes: { PASS: 1, FAIL: 0, BLOCKED: 0, SKIPPED: 0, NOT_RUN: 0 }, openDefectCount: 1, pendingRetestDefectCount: 0 });
+  assert.match(ui.textOf(ui.$('#execution-progress')[0]), /compatible READY Test Case in a new run/);
+});
+
+const retestSource = () => ({ testCase: { id: 20, keyNo: 20, title: 'Frozen 0', description: 'Captured description', preconditions: 'Before', status: 'READY' }, steps: [{ stepOrder: 1, action: 'Frozen action', expectedResult: 'Frozen expected' }] });
+async function sourceReads(ui, current = retestSource()) {
+  const reads = ui.calls.slice(-3);
+  await ui.respond(reads.find(call => call.url === 'projects/12/runs/40'), run(['FAIL'], 'COMPLETED'));
+  await ui.respond(reads.find(call => call.url === 'projects/12/test-cases/20'), current);
+  await ui.respond(reads.find(call => call.url.endsWith('/attempts')), [attempt(60, 'FAIL')]);
+}
+async function retestForm(ui, current = retestSource()) {
+  await ui.open('runs', { action: 'create', sourceTestCaseId: '20', runId: '40', runCaseId: '50', failureAttemptId: '60', defectId: '9' });
+  await ui.respond(ui.calls.at(-1), [current.testCase]); await sourceReads(ui, current); await ui.respond(ui.calls.at(-1), []);
+}
+
+test('terminal-failure retest creation verifies frozen semantics and automatically keeps the actual READY source case', async () => {
+  const ui = browser(); await retestForm(ui);
+  assert.equal(ui.$('#execution-name').val(), 'Retest · Frozen 0'); assert.equal(ui.$('#execution-origin').val(), 'adhoc'); assert.equal(ui.$('#execution-origin').prop('disabled'), true);
+  const chosen = ui.$('#execution-select-case-20')[0]; assert.equal(chosen.checked, true); assert.equal(chosen.disabled, true);
+  assert.equal(ui.$('#execution-save').prop('disabled'), false); assert.match(ui.textOf(ui.$('#execution-form-context')[0]), /matches the original frozen definition/);
+  ui.$('#execution-name').val('New QA retest'); await ui.submit('execution-form');
+  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 0, 'Compatibility is rechecked immediately before creation');
+  await sourceReads(ui);
+  const write = ui.calls.at(-1); assert.equal(write.method, 'POST'); assert.equal(write.url, 'projects/12/runs'); assert.deepEqual(JSON.parse(JSON.stringify(write.body)), { name: 'New QA retest', environment: null, buildVersion: null, testCaseIds: [20] });
+  await ui.respond(write, { id: 45 }); const created = run(['NOT_RUN']); created.run.id = 45; await ui.respond(ui.calls.at(-1), created);
+  assert.ok(ui.find('#execution-context', 'Back to defect and link the retest PASS'));
+  assert.equal(ui.nav.read().defectId, '9'); assert.equal(ui.nav.read().failureAttemptId, '60');
+  assert.equal(ui.calls.filter(call => call.method !== 'GET').length, 1, 'Only the new run was created; the original completed run stays untouched');
+});
+
+test('changed semantics and equal-title changed steps cannot silently create incompatible retest closure evidence', async () => {
+  for (const field of ['title', 'steps']) {
+    const ui = browser(), changed = retestSource();
+    if (field === 'title') changed.testCase.title = 'Modified login'; else changed.steps[0].expectedResult = 'Different result';
+    await retestForm(ui, changed);
+    assert.equal(ui.$('#execution-save').prop('disabled'), true); assert.match(ui.$('#execution-form-error').text(), /differs from the original frozen failure/);
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  }
+  const ui = browser(); await retestForm(ui); ui.$('#execution-name').val('Keep my draft'); await ui.submit('execution-form');
+  const changed = retestSource(); changed.steps[0].action = 'New action'; await sourceReads(ui, changed);
+  assert.equal(ui.$('#execution-name').val(), 'Keep my draft'); assert.equal(ui.$('#execution-save').prop('disabled'), true); assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+const retestIdentity = { sourceTestCaseId: '20', defectId: '9', failureAttemptId: '6' };
+function expectRetestIdentity(context) {
+  for (const [key, value] of Object.entries(retestIdentity)) assert.equal(context[key], value, key + ' must follow the retest workflow');
+}
+function routeFromHref(href) { const url = new URL(href); return { view: url.hash.slice(1), ...Object.fromEntries(url.searchParams) }; }
+async function respondRunCase(ui, current, history = []) {
+  await ui.respond(ui.calls.at(-1), current); await ui.respond(ui.calls.at(-1), history);
+}
+
+test('Continue execution and snapshot selection preserve retest identity in native hrefs, refresh and new-tab case recovery', async () => {
+  const current = run(['NOT_RUN', 'NOT_RUN']), ui = browser(); await ui.open('runs', { runId: '40', ...retestIdentity }); await ui.respond(ui.calls.at(-1), current);
+  const continued = ui.find('#execution-actions', 'Continue execution'); const continuation = routeFromHref(continued.attributes.href);
+  expectRetestIdentity(continuation); assert.equal(continuation.runCaseId, '50');
+  const selected = ui.find('#execution-items', 'View snapshot and attempts'); expectRetestIdentity(routeFromHref(selected.attributes.href));
+  assert.equal(await ui.click(continued, { ctrlKey: true }), false, 'New-tab gestures retain native navigation');
+  for (const nativeHref of [continued.attributes.href, selected.attributes.href]) {
+    const restored = browser({ initialRoute: routeFromHref(nativeHref) }); await respondRunCase(restored, current);
+    expectRetestIdentity(restored.nav.read());
+    const back = restored.find('#execution-case-navigation', 'Back to defect and link the retest PASS'); assert.ok(back, 'Restored case must expose its target Defect');
+    assert.equal(routeFromHref(back.attributes.href).defectId, '9');
+  }
+  await ui.click(continued); await respondRunCase(ui, current); expectRetestIdentity(ui.nav.read());
+  assert.ok(ui.find('#execution-case-navigation', 'Back to defect and link the retest PASS'));
+  const adjacent = ui.find('#execution-case-navigation', 'Next case'); expectRetestIdentity(routeFromHref(adjacent.attributes.href));
+  await ui.click(adjacent); await respondRunCase(ui, current); expectRetestIdentity(ui.nav.read()); assert.equal(ui.nav.read().runCaseId, '51');
+  const previous = ui.find('#execution-case-navigation', 'Previous case'); expectRetestIdentity(routeFromHref(previous.attributes.href));
+  await ui.click(previous); await respondRunCase(ui, current); expectRetestIdentity(ui.nav.read());
+  await ui.click(ui.$('#execution-case-back')[0]); await ui.respond(ui.calls.at(-1), current); expectRetestIdentity(ui.nav.read());
+  assert.equal(ui.nav.read().runCaseId, null); assert.ok(ui.find('#execution-context', 'Back to defect and link the retest PASS'));
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true, 'Navigation and restoration must not produce execution facts');
+});
+
+test('recorded PASS and record-and-next retain the original FAIL independently of the newly viewed attempt', async () => {
+  for (const advance of [false, true]) {
+    const current = run(['NOT_RUN', 'NOT_RUN']), ui = browser(); await ui.open('runs', { runId: '40', runCaseId: '50', ...retestIdentity }); await respondRunCase(ui, current);
+    ui.$('#execution-outcome').val('PASS'); ui.$('#execution-comment').val('Actual retest succeeded');
+    await ui.submit('execution-attempt-form', advance ? ui.$('#execution-record-next')[0] : undefined); const write = ui.calls.at(-1);
+    const saved = attempt(81, 'PASS', write.body.submissionKey, 1); await ui.respond(write, saved);
+    const latest = run(['PASS', 'NOT_RUN']); latest.cases[0].latestAttempt = saved;
+    await respondRunCase(ui, latest, advance ? [] : [saved]); expectRetestIdentity(ui.nav.read());
+    assert.equal(ui.nav.read().failureAttemptId, '6'); assert.notEqual(ui.nav.read().failureAttemptId, String(saved.id));
+    assert.equal(ui.nav.read().runCaseId, advance ? '51' : '50');
+    if (!advance) assert.equal(ui.nav.read().attemptId, '81');
+    assert.ok(ui.find('#execution-case-navigation', 'Back to defect and link the retest PASS'));
+    assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1, 'Context restoration cannot append a duplicate attempt');
+  }
+});
+
+test('plain Run navigation stays free of unrelated defect context', async () => {
+  const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN']));
+  const plain = routeFromHref(ui.find('#execution-actions', 'Continue execution').attributes.href);
+  for (const key of Object.keys(retestIdentity)) assert.equal(key in plain, false);
 });

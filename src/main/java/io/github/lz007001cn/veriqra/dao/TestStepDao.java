@@ -8,6 +8,7 @@ public interface TestStepDao {
     TestStep add(TestStep value);
     Optional<TestStep> find(Long testCaseId, Integer stepOrder);
     List<TestStep> listByTestCase(Long testCaseId);
+    List<TestStep> listByTestCaseForShare(Long testCaseId);
     /** Updates content at the composite key; does not move a step or version the parent. */
     boolean updateContent(TestStep value);
     boolean remove(Long testCaseId, Integer stepOrder);

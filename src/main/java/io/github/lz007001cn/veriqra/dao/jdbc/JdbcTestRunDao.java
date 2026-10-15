@@ -25,6 +25,11 @@ public final class JdbcTestRunDao implements TestRunDao {
     @Override public List<TestRun> listByProject(Long projectId) {
         return query(SELECT + " WHERE project_id=? ORDER BY created_at, id", projectId);
     }
+    @Override public List<TestRun> listByProjectForUpdate(Long projectId) {
+        requireTransaction();
+        // Use the existing project range index instead of a whole PRIMARY scan for id ordering.
+        return query(SELECT + " FORCE INDEX (ix_runs_project_created_id) WHERE project_id=? ORDER BY id FOR UPDATE", projectId);
+    }
 
     @Override public List<TestRun> listByPlan(Long testPlanId) {
         return query(SELECT + " WHERE test_plan_id=? ORDER BY created_at, id", testPlanId);
