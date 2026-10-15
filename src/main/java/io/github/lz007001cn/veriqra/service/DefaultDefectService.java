@@ -302,6 +302,27 @@ public final class DefaultDefectService implements DefectService {
         });
     }
 
+    @Override public List<Defect> listForAttempt(Long actorUserId, Long projectId, Long runId, Long runCaseId, Long attemptId) {
+        ServiceValidation.required(projectId, "projectId");
+        ServiceValidation.required(runId, "runId");
+        ServiceValidation.required(runCaseId, "runCaseId");
+        ServiceValidation.required(attemptId, "attemptId");
+        return transactions.execute(connection -> {
+            ServiceDaos daos = daoFactory.create(connection);
+            access.requireProjectRead(daos.users(), daos.members(), actorUserId, projectId);
+            daos.testRuns().findById(runId).filter(value -> Objects.equals(value.projectId(), projectId))
+                    .orElseThrow(() -> new NotFoundException("Run does not exist in project"));
+            daos.runCases().findById(runCaseId).filter(value -> Objects.equals(value.testRunId(), runId))
+                    .orElseThrow(() -> new NotFoundException("Run case does not exist in run"));
+            daos.attempts().findById(attemptId).filter(value -> Objects.equals(value.testRunCaseId(), runCaseId))
+                    .orElseThrow(() -> new NotFoundException("Attempt does not exist in run case"));
+            return daos.attemptDefects().listDefectsByAttempt(attemptId).stream().map(link ->
+                    daos.defects().findById(link.defectId())
+                            .filter(value -> Objects.equals(value.projectId(), projectId))
+                            .orElseThrow(() -> new NotFoundException("Defect does not exist in project"))).toList();
+        });
+    }
+
     private Defect close(Long actorUserId, Long projectId, TransitionDefectCommand command) {
         return retestWorkflow.close(actorUserId, projectId, command);
     }

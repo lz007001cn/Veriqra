@@ -51,7 +51,13 @@ public final class ApiExceptionFilter implements Filter {
             }
             if (!response.isCommitted()) {
                 response.resetBuffer();
-                JsonHttp.write(response, status, ApiError.of(code, message, reasonCode));
+                String field = null;
+                // Existing R1 reason codes remain authoritative and byte-for-byte unchanged.
+                if (reasonCode == null && QaErrorDetails.isManualQaPath(request.getRequestURI(), request.getContextPath())) {
+                    QaErrorDetails.Hint hint = QaErrorDetails.forFailure(failure, status);
+                    if (hint != null) { reasonCode = hint.reasonCode(); field = hint.field(); }
+                }
+                JsonHttp.write(response, status, ApiError.of(code, message, reasonCode, field));
             }
             if (failure instanceof VirtualMachineError fatal) throw fatal;
             if (failure instanceof ThreadDeath fatal) throw fatal;

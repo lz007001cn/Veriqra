@@ -6,6 +6,10 @@
   const error = $('#login-error');
   let busy = false;
   let feedbackDescriptor = null;
+  function returnTarget() {
+    const value = typeof URL === 'function' && window.location.href ? new URL(window.location.href).searchParams.get('returnTo') : null;
+    return window.VeriqraSessionRecovery ? window.VeriqraSessionRecovery.safeReturnTarget(value) : new URL('index.html', document.baseURI).href;
+  }
 
   function renderFeedback() {
     const descriptor = feedbackDescriptor;
@@ -40,7 +44,7 @@
     }
     setBusy(true);
     api.post('auth/login', { username: username, password: password }, { authRequired: false })
-      .done(function () { window.location.replace(new URL('index.html', document.baseURI).href); })
+      .done(function () { window.location.replace(returnTarget()); })
       .fail(function (failure) {
         feedback(failure.status === 401
           ? { messageKey: 'auth.invalidUsernameOrPassword', messageFallback: 'Invalid username or password.' } : failure);
@@ -50,7 +54,7 @@
   // A server session, never a browser flag, decides whether this page is needed.
   window.I18n.init().then(function () {
     api.get('auth/me', { authRequired: false }).done(function () {
-      window.location.replace(new URL('index.html', document.baseURI).href);
+      window.location.replace(returnTarget());
     }).fail(function (failure) {
       // A missing session is the normal login-page state, not a retryable error.
       if (failure.status !== 401) feedback(failure);

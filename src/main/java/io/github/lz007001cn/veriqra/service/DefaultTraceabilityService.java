@@ -127,6 +127,24 @@ public final class DefaultTraceabilityService implements TraceabilityService {
         });
     }
 
+    @Override public java.util.List<CaseRequirementDetails> listByTestCase(Long actorUserId, Long projectId, Long testCaseId) {
+        ServiceValidation.required(projectId, "projectId");
+        ServiceValidation.required(testCaseId, "testCaseId");
+        return transactions.execute(connection -> {
+            ServiceDaos daos = daoFactory.create(connection);
+            access.requireProjectRead(daos.users(), daos.members(), actorUserId, projectId);
+            TestCase testCase = daos.testCases().findById(testCaseId)
+                    .filter(value -> Objects.equals(value.projectId(), projectId))
+                    .orElseThrow(() -> new NotFoundException("Test case does not exist in project"));
+            return daos.traceability().listByTestCase(testCase.id()).stream().map(link -> {
+                Requirement requirement = daos.requirements().findById(link.requirementId())
+                        .filter(value -> Objects.equals(value.projectId(), projectId))
+                        .orElseThrow(() -> new NotFoundException("Requirement does not exist in project"));
+                return new CaseRequirementDetails(requirement, link);
+            }).toList();
+        });
+    }
+
     private LockedEndpoints lockWritableEndpoints(ServiceDaos daos, Long actorUserId, Long projectId,
                                                     Long requirementId, Long testCaseId) {
         ServiceValidation.required(requirementId, "requirementId");

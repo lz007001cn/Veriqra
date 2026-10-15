@@ -36,6 +36,14 @@ public final class TestCaseHandler {
             }
             return;
         }
+        if (path.length == 6 && path[5].equals("requirements")) {
+            JsonHttp.method(res, method, "GET");
+            if (!req.getParameterMap().isEmpty())
+                throw new HttpFailure(400, "INVALID_QUERY", "Invalid query parameters");
+            JsonHttp.write(res, 200, s.traceability().listByTestCase(actor, project, JsonHttp.positiveId(path[4]))
+                    .stream().map(CaseRequirementResponse::from).toList());
+            return;
+        }
         throw new HttpFailure(404, "NOT_FOUND", "Resource not found");
     }
 }

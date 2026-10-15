@@ -8,6 +8,7 @@ import java.util.UUID;
 import io.github.lz007001cn.veriqra.service.query.*;
 
 public interface DefectService {
+    List<Defect> listForAttempt(Long actorUserId, Long projectId, Long runId, Long runCaseId, Long attemptId);
     ClosureEligibility closureEligibility(Long actorUserId, Long projectId, Long defectId);
     RetestCandidates retestCandidates(Long actorUserId, Long projectId, Long defectId, Long failureAttemptId, Long cursor, int pageSize);
     RetestOperationResult linkRetest(Long actorUserId, Long projectId, LinkRetestCommand command);

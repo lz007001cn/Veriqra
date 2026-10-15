@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../../main/webapp/assets
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 
-function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#dashboard', savedProject = '8') {
+function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#dashboard', savedProject = '8', options = {}) {
   const location = new URL(href), base = new URL('./', location).href;
   const nodes = new Map(), events = [], requests = [], saved = new Map(savedProject ? [['veriqra.selectedProjectId', savedProject]] : []);
   const handlers = new Map();
@@ -91,11 +91,15 @@ function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#da
     };
     call.resolve = value => { state = 'done'; result = value; callbacks.done.forEach(fn => fn(value)); callbacks.always.forEach(fn => fn(value)); };
     call.reject = failure => { state = 'fail'; result = failure; callbacks.fail.forEach(fn => fn(failure)); callbacks.always.forEach(fn => fn(failure)); };
+    call.then = (resolve, reject) => new Promise((ok, fail) => { call.done(ok); call.fail(fail); }).then(resolve, reject);
     return call;
   }
   const api = {};
   for (const method of ['get', 'post']) api[method] = (url, body) => { const call = deferred(); requests.push({ method, url, body, ...call }); return call; };
   const window = { history, VeriqraApi: api, I18n: { init: async () => {}, t: (key, _, fallback) => fallback || key, enumLabel: String } };
+  const contextCalls = [];
+  if (options.workflow) window.VeriqraQaContext = { load(projectId) { const call = deferred(); contextCalls.push({ projectId, ...call }); return call; } };
+  if (options.draftGuard) window.VeriqraDraftGuard = options.draftGuard;
   const sessionStorage = { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) };
   vm.runInNewContext(source, { window, document, jQuery: $, location, sessionStorage, URL, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } } });
   const project = id => ({ id: Number(id), projectKey: 'QA' + id, name: 'Project ' + id, status: 'ACTIVE' });
@@ -106,10 +110,10 @@ function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#da
     if (requests[2]) requests[2].resolve(project(requests[2].url.split('/').pop()));
     await flush();
   }
-  return { $, requests, events, location, history, sidebar, saved, project, boot, nav: window.VeriqraQaNavigation,
+  return { $, requests, contextCalls, events, location, history, sidebar, saved, project, boot, nav: window.VeriqraQaNavigation,
     click: (node, fields) => fire(node, 'click', fields), changeProject(id) { $('#project-select').val(id); fire($('#project-select')[0], 'change'); },
     fireWindow: (name, fields) => fire(windowNode, name, fields), lastView: () => events.filter(event => event.type === 'veriqra:view').at(-1),
-    fireDocument: name => document.dispatchEvent({ type: name }),
+    fireDocument: (name, detail) => document.dispatchEvent({ type: name, detail }),
     lastProject: () => events.filter(event => event.type === 'veriqra:project').at(-1) };
 }
 
@@ -344,4 +348,129 @@ test('membership revalidation keeps the picker locked until its list GET settles
   assert.equal(ui.requests.at(-1).url, 'projects');
   assert.equal(ui.requests.filter(request => request.url === 'auth/me').length, 1);
   assert.equal(ui.requests.every(request => request.method === 'get'), true);
+});
+
+const qaContext = (id, overrides = {}) => ({ projectId: id, actorId: 1, systemRole: 'USER', projectRole: 'TESTER', projectStatus: 'ACTIVE', canWriteAssets: true, ...overrides });
+const flushSummary = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+function currentRecommendation(ui) { return ui.$('#qa-next-step')[0].children.find(node => node.tag === 'a'); }
+
+test('dashboard waits for verified role and current scoped business reads before recommending creation', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot();
+  assert.equal(ui.contextCalls.length, 1); assert.equal(ui.contextCalls[0].projectId, '7');
+  assert.equal(currentRecommendation(ui), undefined);
+  assert.equal(ui.$('#access-summary').text(), 'r2.loadingRole');
+  ui.contextCalls[0].resolve(qaContext(7));
+  const lists = ui.requests.slice(3);
+  assert.deepEqual(lists.map(call => call.url), ['requirements', 'test-cases', 'test-plans', 'runs', 'defects'].map(area => 'projects/7/' + area));
+  lists.slice(0, 4).forEach(call => call.resolve([])); await flushSummary();
+  assert.equal(currentRecommendation(ui), undefined, 'Do not infer completion before all five reads settle');
+  lists[4].resolve([]); await flushSummary();
+  const link = currentRecommendation(ui), target = new URL(link.attrs.href);
+  assert.equal(link.content, 'r2.createRequirement'); assert.equal(target.hash, '#requirements');
+  assert.equal(target.searchParams.get('projectId'), '7'); assert.equal(target.searchParams.get('action'), 'create');
+  assert.equal(ui.$('#access-summary').text(), 'r2.role.TESTER');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
+test('failed role or business reads publish an unavailable state without creation links', async () => {
+  for (const failedAt of ['context', 'business']) {
+    const ui = browser(undefined, '8', { workflow: true }); await ui.boot();
+    if (failedAt === 'context') ui.contextCalls[0].reject({ status: 503 });
+    else { ui.contextCalls[0].resolve(qaContext(7)); ui.requests[3].reject({ status: 503 }); }
+    await flushSummary();
+    assert.equal(currentRecommendation(ui), undefined);
+    assert.equal(ui.$('#qa-next-step')[0].children[0].content, 'r2.nextUnavailable');
+    assert.equal(ui.$('#access-summary').text(), 'r2.loadingRole');
+    assert.equal(ui.requests.every(call => call.method === 'get'), true);
+  }
+});
+
+test('read-only developer and archived-project recommendations cannot offer asset creation', async () => {
+  for (const [context, expected] of [
+    [qaContext(7, { projectRole: 'DEVELOPER', canWriteAssets: false }), 'r2.inspectResults'],
+    [qaContext(7, { projectStatus: 'ARCHIVED', canWriteAssets: false }), 'r2.projectReadOnly']
+  ]) {
+    const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(context);
+    ui.requests.slice(3).forEach(call => call.resolve([])); await flushSummary();
+    const link = currentRecommendation(ui); assert.equal(link.content, expected);
+    assert.equal(new URL(link.attrs.href).searchParams.has('action'), false);
+    assert.equal(ui.$('#access-help').text(), 'r2.readerHelp');
+  }
+});
+
+test('assigned developer defect and tester RESOLVED defect guidance use actual IDs in their current project', async () => {
+  for (const [context, defects, key, id] of [
+    [qaContext(7, { projectRole: 'DEVELOPER', canWriteAssets: false }), [{ id: 31, status: 'OPEN', assigneeId: 2 }, { id: 32, status: 'IN_PROGRESS', assigneeId: 1 }], 'r2.handleAssigned', '32'],
+    [qaContext(7), [{ id: 33, status: 'RESOLVED' }], 'r2.reviewRetest', '33']
+  ]) {
+    const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(context);
+    ui.requests.slice(3).forEach((call, i) => call.resolve(i === 4 ? defects : [])); await flushSummary();
+    const link = currentRecommendation(ui), url = new URL(link.attrs.href);
+    assert.equal(link.content, key); assert.equal(url.searchParams.get('defectId'), id);
+    assert.equal(url.searchParams.get('projectId'), '7');
+  }
+});
+
+test('abandoned dashboard reads cannot overwrite a newer project recommendation', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(qaContext(7));
+  const staleLists = ui.requests.slice(3); ui.changeProject('8');
+  ui.requests.at(-1).resolve(ui.project(8)); ui.contextCalls[1].resolve(qaContext(8));
+  const freshLists = ui.requests.slice(-5);
+  freshLists.forEach((call, i) => call.resolve(i === 0 ? [{ id: 80, status: 'ACTIVE' }] : [])); await flushSummary();
+  assert.equal(currentRecommendation(ui).content, 'r2.createCoveredCase');
+  assert.equal(new URL(currentRecommendation(ui).attrs.href).searchParams.get('sourceRequirementId'), '80');
+  const before = currentRecommendation(ui).attrs.href;
+  staleLists.forEach(call => call.resolve([])); await flushSummary();
+  assert.equal(currentRecommendation(ui).attrs.href, before);
+  assert.equal(new URL(before).searchParams.get('projectId'), '8');
+});
+
+test('language refresh invalidates late dashboard context and never replays a business write', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot();
+  const old = ui.contextCalls[0]; ui.fireDocument('veriqra:localechange');
+  assert.equal(ui.contextCalls.length, 2); ui.contextCalls[1].resolve(qaContext(7));
+  ui.requests.slice(3).forEach(call => call.resolve([])); await flushSummary();
+  const count = ui.requests.length, href = currentRecommendation(ui).attrs.href;
+  old.resolve(qaContext(7, { canWriteAssets: false, projectRole: 'DEVELOPER' })); await flushSummary();
+  assert.equal(ui.requests.length, count); assert.equal(currentRecommendation(ui).attrs.href, href);
+  assert.equal(ui.$('#access-summary').text(), 'r2.role.TESTER');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
+test('draft leave veto blocks normal navigation, project switch and logout before any request', async () => {
+  let allowed = false, checks = 0;
+  const ui = browser(undefined, '8', { draftGuard: { allowLeave() { checks++; return allowed; } } }); await ui.boot();
+  const before = ui.location.href, count = ui.requests.length;
+  ui.nav.open('test-cases', { projectId: '7', action: 'create' }); assert.equal(ui.location.href, before);
+  ui.changeProject('8'); assert.equal(ui.$('#project-select').val(), '7'); assert.equal(ui.location.href, before);
+  ui.click(ui.$('#logout-button')[0]); assert.equal(ui.requests.length, count); assert.equal(checks, 3);
+  allowed = true; ui.nav.open('requirements', { projectId: '7', action: 'create' });
+  assert.equal(ui.nav.read().view, 'requirements'); assert.equal(ui.nav.read().action, 'create');
+});
+
+test('returning to dashboard refreshes current data once without replaying writes', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot();
+  ui.contextCalls[0].resolve(qaContext(7)); ui.requests.slice(3).forEach(call => call.resolve([])); await flushSummary();
+  assert.equal(currentRecommendation(ui).content, 'r2.createRequirement');
+  ui.nav.open('requirements', { projectId: '7' }); const count = ui.requests.length;
+  ui.nav.open('dashboard', { projectId: '7' }); assert.equal(ui.contextCalls.length, 2);
+  ui.contextCalls[1].resolve(qaContext(7));
+  ui.requests.slice(count).forEach((call, i) => call.resolve(i === 0 ? [{ id: 80, status: 'DRAFT' }] : [])); await flushSummary();
+  assert.equal(currentRecommendation(ui).content, 'r2.createCoveredCase');
+  assert.equal(ui.requests.length, count + 5); assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
+test('dashboard recommendations exclude archived source objects while retaining total counts', async () => {
+  for (const [requirements, cases, plans, expected, key, value] of [
+    [[{ id: 70, status: 'ARCHIVED' }], [], [], 'r2.createRequirement', null, null],
+    [[{ id: 70, status: 'ARCHIVED' }, { id: 71, status: 'ACTIVE' }], [{ id: 20, status: 'ARCHIVED' }], [], 'r2.createCoveredCase', 'sourceRequirementId', '71'],
+    [[{ id: 71, status: 'ACTIVE' }], [{ id: 20, status: 'ARCHIVED' }, { id: 21, status: 'READY' }], [{ id: 30, status: 'ARCHIVED' }], 'r2.createPlan', 'sourceTestCaseId', '21'],
+    [[{ id: 71, status: 'ACTIVE' }], [{ id: 21, status: 'READY' }], [{ id: 30, status: 'ARCHIVED' }, { id: 31, status: 'READY' }], 'r2.checkPlan', 'planId', '31']
+  ]) {
+    const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(qaContext(7));
+    ui.requests.slice(3).forEach((call, i) => call.resolve([requirements, cases, plans, [], []][i])); await flushSummary();
+    const link = currentRecommendation(ui); assert.equal(link.content, expected);
+    if (key) assert.equal(new URL(link.attrs.href).searchParams.get(key), value);
+    else assert.equal(new URL(link.attrs.href).searchParams.has('sourceRequirementId'), false);
+  }
 });

@@ -23,7 +23,8 @@ class AssetVersionBuildTest {
     @Test void tokenUsesTheSameCommitAsSystemAndActualFirstPartyBytes() throws Exception {
         Properties values = assetProperties();
         List<Path> assets = assetFiles();
-        assertEquals(17, assets.size(), "The audited inventory has 13 JS, 2 CSS and 2 catalogs.");
+        assertEquals(18, assets.size(), "The R2 inventory has 14 JS (including workflow-context), 2 CSS and 2 catalogs.");
+        assertTrue(assets.contains(WEB.resolve("assets/js/workflow-context.js")));
         assertTrue(assets.contains(WEB.resolve("i18n/en.json")));
         assertTrue(assets.contains(WEB.resolve("i18n/zh-CN.json")));
         assertFalse(assets.stream().anyMatch(file -> relative(file).startsWith("assets/vendor/")));
@@ -69,7 +70,7 @@ class AssetVersionBuildTest {
             assertEquals(expected.toString(), Files.readString(generated), page + ": unrelated markup changed or resource missed");
             assertFalse(source.contains("?v="), page + ": build must not modify source HTML");
         }
-        assertEquals(80, firstParty, "Every currently referenced first-party CSS/JS must be versioned.");
+        assertEquals(82, firstParty, "Every currently referenced first-party CSS/JS, including the two context helper references, must be versioned.");
         assertEquals(32, vendor, "Vendor URL references must remain unchanged.");
     }
 

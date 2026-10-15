@@ -23,6 +23,7 @@ class TestAssetWebTest {
     String cookie;
     String invoked;
     Object[] arguments;
+    RuntimeException serviceFailure;
     static final String CASE = "{\"title\":\"case\",\"priority\":\"HIGH\",\"steps\":[{\"stepOrder\":1,\"action\":\"do\",\"expectedResult\":\"ok\"}]}";
     static final String UPDATE_CASE = CASE.substring(0, CASE.length()-1) + ",\"status\":\"READY\",\"expectedVersion\":4}";
     final TestCase testCase = new TestCase(20L, 7L, 1L, "case", null, null, Priority.HIGH, TestCaseStatus.DRAFT, 1L, null, null, 5);
@@ -37,6 +38,7 @@ class TestAssetWebTest {
         var projects = WebFoundationTest.proxy(ProjectService.class, (o,m,a) -> { throw new AssertionError("Unused"); });
         var requirements = WebFoundationTest.proxy(RequirementService.class, (o,m,a) -> {
             record("requirements." + m.getName(), a);
+            if (serviceFailure != null) throw serviceFailure;
             return m.getName().equals("listByProject") ? List.of(requirement) : requirement;
         });
         var cases = WebFoundationTest.proxy(TestCaseService.class, (o,m,a) -> {
@@ -50,7 +52,11 @@ class TestAssetWebTest {
         var trace = WebFoundationTest.proxy(TraceabilityService.class, (o,m,a) -> {
             record("trace." + m.getName(), a);
             var link = new TestCaseRequirement(10L,20L,TraceabilityStatus.NEEDS_REVIEW,1L,null,null,null,null);
-            return m.getName().equals("listByRequirement") ? List.of(new TraceabilityDetails(testCase,link)) : link;
+            return switch (m.getName()) {
+                case "listByRequirement" -> List.of(new TraceabilityDetails(testCase,link));
+                case "listByTestCase" -> List.of(new CaseRequirementDetails(requirement,link));
+                default -> link;
+            };
         });
         var plans = WebFoundationTest.proxy(TestPlanService.class, (o,m,a) -> {
             record("plans." + m.getName(), a);
@@ -76,7 +82,7 @@ class TestAssetWebTest {
         var response = call("POST", "/auth/login", "{\"username\":\"test\",\"password\":\"test-only\"}", true);
         assertEquals(200,response.statusCode());
         cookie=response.headers().firstValue("set-cookie").orElseThrow().split(";",2)[0];
-        invoked=null; arguments=null;
+        invoked=null; arguments=null; serviceFailure=null;
     }
     void record(String method,Object[] args) { invoked=method; arguments=args; }
     HttpResponse<String> call(String method,String path,String body,boolean marker) throws Exception {
@@ -142,6 +148,38 @@ class TestAssetWebTest {
         var links=expect(200,"GET","/projects/7/requirements/10/test-cases",null);
         scope("trace.listByRequirement",10);
         assertEquals("NEEDS_REVIEW",links.at("/0/status").asText());
+    }
+    @Test void reverseTraceGetUsesSessionAndBothParentsAndRejectsQueryOrWrites() throws Exception {
+        var links = expect(200, "GET", "/projects/7/test-cases/20/requirements", null);
+        scope("trace.listByTestCase", 20);
+        assertEquals(20, links.at("/0/testCaseId").asInt());
+        assertEquals(10, links.at("/0/requirement/id").asInt());
+        assertEquals("req", links.at("/0/requirement/title").asText());
+        assertEquals("NEEDS_REVIEW", links.at("/0/status").asText());
+        invoked = null;
+        expect(400, "GET", "/projects/7/test-cases/20/requirements?projectId=8", null);
+        assertNull(invoked);
+        expect(405, "POST", "/projects/7/test-cases/20/requirements", "{}");
+    }
+    @Test void safeQaErrorsExposeFieldsAndKeepR1ReasonsWithoutExceptionText() throws Exception {
+        var missing = expect(400,"POST","/projects/7/requirements","{\"priority\":\"HIGH\"}");
+        assertEquals("INVALID_JSON",missing.at("/error/code").asText());
+        assertEquals("QA_FIELD_REQUIRED",missing.at("/error/reasonCode").asText());
+        assertEquals("title",missing.at("/error/field").asText());
+        serviceFailure = new io.github.lz007001cn.veriqra.service.exception.ValidationException("title is required");
+        var field = expect(400,"GET","/projects/7/requirements/10",null);
+        assertEquals("VALIDATION",field.at("/error/code").asText());
+        assertEquals("QA_FIELD_REQUIRED",field.at("/error/reasonCode").asText());
+        assertEquals("title",field.at("/error/field").asText());
+        serviceFailure = new io.github.lz007001cn.veriqra.service.exception.ConflictException("SQL password=private-token");
+        var unknown = expect(409,"GET","/projects/7/requirements/10",null);
+        assertEquals("QA_STATE_CONFLICT",unknown.at("/error/reasonCode").asText());
+        assertFalse(unknown.toString().contains("SQL"));
+        assertFalse(unknown.toString().contains("private-token"));
+        serviceFailure = new io.github.lz007001cn.veriqra.service.exception.R1RuleException("STALE_VERSION");
+        var r1 = expect(409,"GET","/projects/7/requirements/10",null);
+        assertEquals("STALE_VERSION",r1.at("/error/reasonCode").asText());
+        assertTrue(r1.at("/error/field").isNull() || r1.at("/error/field").isMissingNode());
     }
     @Test void malformedMissingNullAndWrongTypesFailBeforeService() throws Exception {
         for(String body:List.of("{}",UPDATE_CASE.replace("\"expectedVersion\":4","\"expectedVersion\":null"),

@@ -11,6 +11,7 @@
   <script defer src="assets/vendor/bootstrap-5.3.8.bundle.min.js"></script>
   <script defer src="assets/js/i18n.js"></script>
   <script defer src="assets/js/api.js"></script>
+  <script defer src="assets/js/workflow-context.js"></script>
   <script defer src="assets/js/app.js"></script>
   <script defer src="assets/js/test-assets.js"></script>
   <script defer src="assets/js/execution.js"></script>
@@ -67,9 +68,10 @@
         <section id="empty-projects" class="empty-state d-none" aria-labelledby="empty-title"><div class="empty-icon" aria-hidden="true">◫</div><h2 id="empty-title" data-i18n="shell.noProjectsAvailable">No projects available</h2><p data-i18n="shell.youDoNotHaveAccessToAProjectYetContactYourPlatformAdministrator">You do not have access to a project yet. Contact your platform administrator.</p></section>
         <section id="project-dashboard" class="d-none" aria-labelledby="project-title">
           <div id="project-hero" class="project-hero"><div class="project-monogram" aria-hidden="true">V</div><div class="project-hero-text"><span id="project-key" class="eyebrow"></span><h2 id="project-title"></h2><p id="project-description" class="mb-0"></p></div><span id="project-status" class="status-pill"></span></div>
-          <div class="row g-3 mt-1"><div class="col-md-6"><div class="info-card"><p class="eyebrow" data-i18n="shell.yourACCESS">YOUR ACCESS</p><p id="access-summary" class="info-value" data-i18n="shell.verifiedProjectAccess">Verified project access</p><p class="text-secondary mb-0" data-i18n="shell.theServerChecksPermissionsForEveryRequestProjectRoleIsNotExposedByTheCurrentAPI">The server checks permissions for every request. Project role is not exposed by the current API.</p></div></div><div class="col-md-6"><div class="info-card"><p class="eyebrow" data-i18n="shell.currentACCOUNT">CURRENT ACCOUNT</p><p id="account-name" class="info-value"></p><p class="text-secondary mb-0" data-i18n="shell.activeSessionConfirmedByVeriqra">Active session confirmed by Veriqra.</p></div></div></div>
+          <div class="row g-3 mt-1"><div class="col-md-6"><div class="info-card"><p class="eyebrow" data-i18n="shell.yourACCESS">YOUR ACCESS</p><p id="access-summary" class="info-value" data-i18n="shell.verifiedProjectAccess">Verified project access</p><p id="access-help" class="text-secondary mb-0"></p></div></div><div class="col-md-6"><div class="info-card"><p class="eyebrow" data-i18n="shell.currentACCOUNT">CURRENT ACCOUNT</p><p id="account-name" class="info-value"></p><p class="text-secondary mb-0" data-i18n="shell.activeSessionConfirmedByVeriqra">Active session confirmed by Veriqra.</p></div></div></div>
           <div class="section-heading"><h2 data-i18n="shell.qualityWorkflow">Quality workflow</h2><p data-i18n="shell.openAWorkspaceAreaFromTheSidebar">Open a workspace area from the sidebar.</p></div>
-          <div id="workflow" class="workflow-grid" aria-label="Upcoming workflow pages" data-i18n-aria-label="shell.upcomingWorkflowPages"></div>
+          <section id="qa-next-step" class="asset-panel mt-3" aria-live="polite"></section>
+          <div id="workflow" class="workflow-grid" aria-label="Quality workflow pages" data-i18n-aria-label="shell.upcomingWorkflowPages"></div>
         </section>
         <section id="asset-workspace" class="d-none" aria-label="Test assets" data-i18n-aria-label="shell.testAssets">
           <div id="asset-notice" class="alert d-none" role="status" aria-live="polite"></div>
@@ -133,17 +135,18 @@
           <section id="execution-case-panel" class="asset-panel d-none" aria-label="Run case snapshot and attempts" data-i18n-aria-label="shell.runCaseSnapshotAndAttempts">
             <div class="asset-panel-heading"><h2 id="execution-case-title"></h2><button id="execution-case-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToRun">Back to run</button></div>
             <div id="execution-case-context" class="step-actions mb-2"></div><div id="execution-case-progress" role="status" aria-live="polite"></div><div id="execution-case-navigation" class="step-actions mb-3"></div>
-            <p class="text-secondary" data-i18n="shell.snapshotCapturedWhenThisRunWasCreatedLaterEditsToTheTestCaseDoNotChangeIt">Snapshot captured when this run was created. Later edits to the test case do not change it.</p>
-            <div id="execution-snapshot"></div><h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Attempt history</h3>
-            <p id="execution-history-status" role="status" aria-live="polite"></p><div id="execution-history"></div>
             <form id="execution-attempt-form" class="mt-4 d-none" novalidate>
               <h3 class="fs-5" data-i18n="shell.recordANewAttempt">Record a new attempt</h3><p class="text-secondary small" data-i18n="shell.retestingAppendsANewAttemptEarlierResultsRemainVisible">Retesting appends a new attempt. Earlier results remain visible.</p>
               <div id="execution-attempt-error" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
-              <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-outcome" class="form-label" data-i18n="shell.outcome">Outcome</label><select id="execution-outcome" class="form-select"><option value="PASS" data-i18n="status.pass">PASS</option><option value="FAIL" data-i18n="status.fail">FAIL</option><option value="BLOCKED" data-i18n="status.blocked">BLOCKED</option><option value="SKIPPED" data-i18n="status.skipped">SKIPPED</option></select></div><div class="col-sm-6"><label for="execution-duration" class="form-label" data-i18n="shell.durationMsOptional">Duration (ms, optional)</label><input id="execution-duration" class="form-control" type="number" min="0" step="1"></div></div>
+              <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-outcome" class="form-label" data-i18n="shell.outcome">Outcome</label><select id="execution-outcome" class="form-select" required><option value="" data-i18n="r2Exec.chooseOutcome">Choose the actual result</option><option value="PASS" data-i18n="status.pass">PASS</option><option value="FAIL" data-i18n="status.fail">FAIL</option><option value="BLOCKED" data-i18n="status.blocked">BLOCKED</option><option value="SKIPPED" data-i18n="status.skipped">SKIPPED</option></select></div><div class="col-sm-6"><label for="execution-duration" class="form-label" data-i18n="shell.durationMsOptional">Duration (ms, optional)</label><input id="execution-duration" class="form-control" type="number" min="0" step="1"></div></div>
               <div class="mb-3"><label for="execution-comment" class="form-label" data-i18n="shell.actualResultComment">Actual result / comment</label><textarea id="execution-comment" class="form-control" rows="3"></textarea></div>
               <div id="execution-failure-wrap" class="mb-3 d-none"><label for="execution-failure" class="form-label" data-i18n="shell.failureMessage">Failure message</label><textarea id="execution-failure" class="form-control" rows="2"></textarea></div>
               <button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Record new attempt</button>
             </form>
+            <p class="text-secondary" data-i18n="shell.snapshotCapturedWhenThisRunWasCreatedLaterEditsToTheTestCaseDoNotChangeIt">Snapshot captured when this run was created. Later edits to the test case do not change it.</p>
+            <div id="execution-snapshot"></div><h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Attempt history</h3>
+            <p id="execution-history-status" role="status" aria-live="polite"></p><div id="execution-history"></div>
+
           </section>
         </section>
         <section id="defect-workspace" class="d-none" aria-label="Defects" data-i18n-aria-label="common.defects">

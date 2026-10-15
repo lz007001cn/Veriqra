@@ -8,7 +8,8 @@ const source = fs.readFileSync(path.resolve(__dirname, '../../main/webapp/assets
 const flush = async () => { for (let index = 0; index < 12; index++) await Promise.resolve(); };
 
 function browser(options = {}) {
-  const nodes = new Map(), calls = [], impactCalls = [], handlers = new Map(), navigation = [];
+  const nodes = new Map(), calls = [], impactCalls = [], defectCalls = [], handlers = new Map(), navigation = [], guards = new Map();
+  let context = { actorId: 5, systemRole: 'USER', projectRole: 'TESTER', canWriteAssets: true, projectStatus: 'ACTIVE', ...options.context };
   let locale = 'en';
   const chinese = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../main/webapp/i18n/zh-CN.json'), 'utf8'));
   const formIds = ['execution-outcome', 'execution-duration', 'execution-comment', 'execution-failure'];
@@ -31,7 +32,7 @@ function browser(options = {}) {
     removeClass(names) { return this.each(function () { names.split(' ').forEach(name => this.classes.delete(name)); }); }
     toggleClass(names, force) { return this.each(function () { names.split(' ').forEach(name => { if (force ?? !this.classes.has(name)) this.classes.add(name); else this.classes.delete(name); }); }); }
     hasClass(name) { return this[0]?.classes.has(name) || false; }
-    find(selector) { let items = this.flatMap(node => descendants(node)); if (selector === 'input,select,textarea') items = formIds.map(id => $('#' + id)[0]); else if (selector === ':selected') items = items.filter(node => node.tag === 'option' && node.value === this[0].value); return collection(items); }
+    find(selector) { let items = this.flatMap(node => descendants(node)); if (selector === 'input,select,textarea') items = formIds.map(id => $('#' + id)[0]); else if (selector === ':selected') items = items.filter(node => node.tag === 'option' && node.value === this[0].value); else if (/^\[[\w-]+\]$/.test(selector)) items = items.filter(node => node.attributes[selector.slice(1, -1)] !== undefined); return collection(items); }
     map(fn) { const values = Array.from(this, (node, index) => fn.call(node, index, node)); return { get: () => values }; }
     trigger(name) { return this.each(function () { (this.handlers[name] || []).forEach(fn => fn.call(this, { preventDefault() {}, originalEvent: {} })); if (name === 'focus') this.focused = true; }); }
     remove() { return this.each(function () { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); if (this.id) nodes.delete('#' + this.id); }); }
@@ -68,17 +69,18 @@ function browser(options = {}) {
     read: () => route,
     href(view, context) { const query = new URLSearchParams(context); return 'http://localhost/index.html?' + query + '#' + view; },
     select(view, context) { route = { view, ...context }; },
-    open(view, context) { route = { view, ...context }; navigation.push(route); emit('veriqra:view', { view, projectId: route.projectId, context: route }); }
+    open(view, context) { if (options.beforeNavigate) options.beforeNavigate(view, context, guards.get('execution')); route = { view, ...context }; navigation.push(route); emit('veriqra:view', { view, projectId: route.projectId, context: route }); }
   };
   function request(method, url, body) {
     let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
     const call = { method, url, body, resolve, reject };
-    if (url.endsWith('/completion-impact')) { impactCalls.push(call); if (!options.manualImpact) resolve({ runId: 40, status: 'IN_PROGRESS', outcomes: { PASS: 1, FAIL: 1, BLOCKED: 0, SKIPPED: 0, NOT_RUN: 0 }, openDefectCount: 1, pendingRetestDefectCount: 1 }); }
+    if (url.endsWith('/defects')) { defectCalls.push(call); if (!options.manualDefects) resolve(options.defects || []); }
+    else if (url.endsWith('/completion-impact')) { impactCalls.push(call); if (!options.manualImpact) resolve({ runId: 40, status: 'IN_PROGRESS', outcomes: { PASS: 1, FAIL: 1, BLOCKED: 0, SKIPPED: 0, NOT_RUN: 0 }, openDefectCount: 1, pendingRetestDefectCount: 1 }); }
     else calls.push(call);
     return promise;
   }
   const api = { get: url => request('GET', url), post: (url, body) => request('POST', url, body), put: (url, body) => request('PUT', url, body) };
-  const window = { VeriqraApi: api, VeriqraQaNavigation: nav, confirm: () => true, I18n: {
+  const window = { VeriqraApi: api, VeriqraQaNavigation: nav, VeriqraQaContext: { load: () => options.contextFailure ? Promise.reject({ status: 403, message: 'Permissions unavailable' }) : Promise.resolve(context) }, VeriqraDraftGuard: { register: (owner, config) => guards.set(owner, config) }, confirm: () => true, I18n: {
     t: (key, values, fallback) => ((locale === 'zh-CN' && chinese[key]) || fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''), enumLabel: value => value, formatNumber: String, formatDateTime: value => value || '—'
   } };
   let sequence = 0;
@@ -90,7 +92,7 @@ function browser(options = {}) {
   const open = async (view, context) => { nav.open(view, { projectId: '12', ...context }); await flush(); };
   const textOf = node => node.content + node.children.map(child => child instanceof Element ? textOf(child) : String(child)).join(' ');
   const find = (selector, text) => descendants($(selector)[0]).find(node => node.content === text);
-  return { $, nodes, calls, impactCalls, emit, navigation, nav, click, submit, respond, open, textOf, find, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
+  return { $, nodes, calls, impactCalls, defectCalls, guards, emit, navigation, nav, click, submit, respond, open, textOf, find, context(value) { context = { ...context, ...value }; }, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
 }
 
 function run(outcomes = ['NOT_RUN', 'FAIL', 'PASS'], status = 'IN_PROGRESS') {
@@ -98,7 +100,11 @@ function run(outcomes = ['NOT_RUN', 'FAIL', 'PASS'], status = 'IN_PROGRESS') {
 }
 const attempt = (id = 60, outcome = 'FAIL', key = 'prior-key', number = 1) => ({ id, runCaseId: 50, attemptNo: number, outcome, submissionKey: key, comment: 'Earlier result', failureMessage: outcome === 'FAIL' ? 'Failure detail' : null });
 const planDetail = (id = 31, count = 2, status = 'READY') => ({ plan: { id, keyNo: id, name: 'Plan ' + id, status }, testCaseIds: Array.from({ length: count }, (_, index) => 20 + index) });
-async function loadCase(ui, caseId = '50', history = [], value = run(), targetAttempt) { await ui.open('runs', { runId: '40', runCaseId: caseId, attemptId: targetAttempt }); await ui.respond(ui.calls.at(-1), value); await ui.respond(ui.calls.at(-1), history); }
+async function loadCase(ui, caseId = '50', history = [], value = run(), targetAttempt) {
+  await ui.open('runs', { runId: '40', runCaseId: caseId, attemptId: targetAttempt }); await ui.respond(ui.calls.at(-1), value); await ui.respond(ui.calls.at(-1), history);
+  // Legacy positive submission tests explicitly choose an outcome as a user action. The separate R2 gate checks the unselected initial form.
+  if (!ui.$('#execution-outcome').val()) ui.$('#execution-outcome').val('PASS');
+}
 
 test('run progress counts every recorded outcome and completion requires all cases', async () => {
   const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN', 'PASS', 'FAIL', 'BLOCKED', 'SKIPPED']));
@@ -147,9 +153,11 @@ test('case-origin plan creation and existing membership use only existing projec
   await ui.respond(ui.calls.at(-1), [{ id: 30, keyNo: 2, name: 'Existing', status: 'READY', version: 7 }]);
   assert.equal(ui.$('#execution-select-case-20').prop('checked'), true);
   ui.$('#execution-existing-plan').val('30'); await ui.click(ui.$('#execution-add-existing')[0]);
+  assert.equal(ui.calls.at(-1).url, 'projects/12/test-plans/30');
+  const latest = planDetail(30, 0); latest.plan.version = 8; await ui.respond(ui.calls.at(-1), latest);
   assert.equal(ui.calls.at(-1).url, 'projects/12/test-plans/30/test-cases/20');
-  assert.equal(ui.calls.at(-1).body.expectedVersion, 7);
-  assert.equal(ui.calls.filter(call => call.method === 'GET').length, 2, 'No per-plan membership fetch');
+  assert.equal(ui.calls.at(-1).body.expectedVersion, 8, 'Fresh scope/version, not the cached selector version');
+  assert.equal(ui.calls.filter(call => call.method === 'GET').length, 3);
 });
 
 test('create-plan locale refresh translates cached source context and placeholder while preserving all inputs and selections', async () => {
@@ -176,9 +184,13 @@ test('READY plan origin is preselected and rapid run submission makes one POST',
   assert.equal(ui.$('#execution-origin').val(), 'plan'); assert.equal(ui.$('#execution-plan').val(), '31');
   assert.equal(ui.calls.at(-1).url, 'projects/12/test-plans/31'); assert.equal(ui.$('#execution-save').prop('disabled'), true);
   await ui.respond(ui.calls.at(-1), planDetail());
+  await ui.respond(ui.calls.at(-1), [{ id: 20, keyNo: 1, title: 'Case A', status: 'READY' }, { id: 21, keyNo: 2, title: 'Case B', status: 'READY' }]);
   assert.match(ui.textOf(ui.$('#execution-plan-preview')[0]), /2 included case\(s\) will be captured/);
   assert.match(ui.textOf(ui.$('#execution-plan-preview')[0]), /freezes the included test cases and steps/);
   ui.$('#execution-name').val('Release'); await ui.submit('execution-form'); await ui.submit('execution-form');
+  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 0, 'Current definition is rechecked immediately before submission');
+  await ui.respond(ui.calls.at(-1), planDetail());
+  await ui.respond(ui.calls.at(-1), [{ id: 20, keyNo: 1, title: 'Case A', status: 'READY' }, { id: 21, keyNo: 2, title: 'Case B', status: 'READY' }]);
   const posts = ui.calls.filter(call => call.method === 'POST'); assert.equal(posts.length, 1); assert.equal(posts[0].body.testPlanId, 31); assert.equal(posts[0].body.testCaseIds, undefined);
 });
 
@@ -187,7 +199,7 @@ test('selected plan preview rejects late selection and project responses without
   await ui.respond(ui.calls.at(-1), [{ id: 30, keyNo: 1, name: 'A', status: 'READY' }, { id: 31, keyNo: 2, name: 'B', status: 'READY' }]);
   const a = ui.calls.at(-1); ui.$('#execution-plan').val('31').trigger('change'); await flush(); const b = ui.calls.at(-1);
   assert.equal(a.url, 'projects/12/test-plans/30'); assert.equal(b.url, 'projects/12/test-plans/31');
-  await ui.respond(b, planDetail(31, 3)); await ui.respond(a, planDetail(30, 9));
+  await ui.respond(b, planDetail(31, 3)); await ui.respond(ui.calls.at(-1), [20, 21, 22].map(id => ({ id, keyNo: id, title: 'Case ' + id, status: 'READY' }))); await ui.respond(a, planDetail(30, 9));
   assert.match(ui.textOf(ui.$('#execution-plan-preview')[0]), /3 included case/); assert.doesNotMatch(ui.textOf(ui.$('#execution-plan-preview')[0]), /9 included case/);
   assert.match(ui.find('#execution-plan-preview', 'View source plan').attributes.href, /planId=31/);
   ui.$('#execution-plan').val('30').trigger('change'); await flush(); const old = ui.calls.at(-1);
@@ -226,7 +238,11 @@ test('unchanged uncertain retry retains its UUID after leaving and returning to 
   await loadCase(ui, '51', [], run()); await loadCase(ui); assert.equal(ui.$('#execution-comment').val(), 'New result');
   await ui.submit(); const retry = ui.calls.at(-1); assert.equal(retry.body.submissionKey, first.body.submissionKey);
   retry.reject({ status: 0, message: 'Network error' }); await flush(); ui.$('#execution-comment').val('Changed result'); await ui.submit();
-  assert.notEqual(ui.calls.at(-1).body.submissionKey, first.body.submissionKey);
+  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 2, 'An unknown request cannot be replaced with a new key for edited values');
+  assert.match(ui.$('#execution-attempt-error').text(), /unconfirmed result/);
+  await ui.click(ui.find('#execution-attempt-error', 'Read current attempt history'));
+  await ui.respond(ui.calls.at(-1), run(['PASS'])); await ui.respond(ui.calls.at(-1), [attempt(62, 'PASS', first.body.submissionKey)]);
+  assert.equal(ui.$('#execution-comment').val(), 'Changed result'); await ui.submit(); assert.notEqual(ui.calls.at(-1).body.submissionKey, first.body.submissionKey);
 });
 
 test('successful save refreshes append-only history and a terminal run remains read-only', async () => {
@@ -246,6 +262,20 @@ test('record and next advances only after accepted submission and does not advan
   await ui.respond(ui.calls.at(-1), attempt(62, 'PASS', write.body.submissionKey)); assert.equal(ui.navigation.at(-1).runCaseId, '51');
   await ui.respond(ui.calls.at(-1), run(['PASS', 'NOT_RUN', 'PASS'])); await ui.respond(ui.calls.at(-1), []);
   assert.match(ui.$('#execution-notice').text(), /Attempt #1 recorded/);
+});
+
+test('accepted record-and-next is clean only while the current values match the accepted body', async () => {
+  for (const changedInFlight of [false, true]) {
+    const observed = [];
+    const ui = browser({ beforeNavigate: (view, context, guard) => observed.push(guard && guard.dirty()) });
+    await loadCase(ui); ui.$('#execution-comment').val('Submitted result');
+    await ui.submit('execution-attempt-form', ui.$('#execution-record-next')[0]);
+    const write = ui.calls.at(-1);
+    assert.equal(ui.guards.get('execution').dirty(), true, 'In-flight values remain protected');
+    if (changedInFlight) ui.$('#execution-comment').val('New unsaved input while POST is in flight');
+    await ui.respond(write, attempt(62, 'PASS', write.body.submissionKey));
+    assert.equal(observed.at(-1), changedInFlight, 'Only the exact accepted values bypass the leave-draft warning');
+  }
 });
 
 test('in-flight submission owns its case through navigation and accepted late response cannot duplicate', async () => {
@@ -382,23 +412,22 @@ test('locale refresh preserves unresolved retry key and clears unchanged confirm
   assert.equal(ui.$('#execution-comment').val(), ''); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 2);
 });
 
-test('FAIL launches creation or association with exact evidence and known links need no defect fanout', async () => {
-  const ui = browser(); ui.emit('veriqra:defect-linked', { projectId: '12', runId: '40', runCaseId: '50', attemptId: '60', defectId: '70' }); await loadCase(ui, '50', [attempt()]);
-  assert.match(ui.find('#execution-history', 'View defect #70').attributes.href, /defectId=70/);
-  assert.equal(ui.calls.some(call => call.url.includes('defects')), false);
+test('FAIL reads persisted defect associations after refresh and retains exact source for create/link', async () => {
+  const ui = browser({ defects: [{ id: 70, keyNo: 3, title: 'Persisted defect', status: 'OPEN' }] }); await loadCase(ui, '50', [attempt()]);
+  assert.match(ui.find('#execution-history', 'BUG-003 · Persisted defect · OPEN').attributes.href, /defectId=70/);
+  assert.equal(ui.defectCalls.length, 1); assert.equal(ui.defectCalls[0].url, 'projects/12/runs/40/cases/50/attempts/60/defects');
   await ui.click(ui.find('#execution-history', 'Link to existing defect')); assert.equal(ui.navigation.at(-1).action, 'link'); assert.equal(ui.navigation.at(-1).failureAttemptId, '60');
 });
 
-test('verified unlink removes only that defect association in the matching project and attempt', async () => {
-  const ui = browser();
-  for (const defectId of ['70', '71']) ui.emit('veriqra:defect-linked', { projectId: '12', attemptId: '60', defectId });
-  ui.emit('veriqra:defect-unlinked', { projectId: '99', attemptId: '60', defectId: '70' });
-  await loadCase(ui, '50', [attempt()]); assert.ok(ui.find('#execution-history', 'View defect #70'));
-  ui.emit('veriqra:defect-unlinked', { projectId: '12', attemptId: '60', defectId: '70' });
-  await loadCase(ui, '50', [attempt()]); assert.equal(ui.find('#execution-history', 'View defect #70'), undefined); assert.ok(ui.find('#execution-history', 'View defect #71'));
-  ui.emit('veriqra:defect-unlinked', { projectId: '12', attemptId: '60', defectId: '71' });
-  await loadCase(ui, '50', [attempt()]); assert.equal(ui.find('#execution-history', 'Known linked defects in this session'), undefined);
-  assert.equal(ui.calls.some(call => call.url.includes('defects')), false);
+test('persisted association failure is honest, scoped Retry works and stale results cannot enter a new case', async () => {
+  const ui = browser({ manualDefects: true }); await loadCase(ui, '50', [attempt()]);
+  ui.defectCalls[0].reject({ status: 500, message: 'Unavailable' }); await flush();
+  assert.match(ui.textOf(ui.$('#execution-history')[0]), /does not mean there are none/);
+  await ui.click(ui.find('#execution-history', 'Retry loading')); const retry = ui.defectCalls.at(-1);
+  await loadCase(ui, '51', [], run()); await ui.respond(retry, [{ id: 70, keyNo: 3, title: 'Old defect', status: 'CLOSED' }]);
+  assert.doesNotMatch(ui.textOf(ui.$('#execution-history')[0]), /Old defect/);
+  await loadCase(ui, '50', [attempt()]); await ui.respond(ui.defectCalls.at(-1), []);
+  assert.match(ui.textOf(ui.$('#execution-history')[0]), /No defects are linked/);
 });
 
 test('completion confirmation refreshes real outcomes and pending defects before explicitly finishing a run containing failures', async () => {
@@ -483,6 +512,7 @@ function expectRetestIdentity(context) {
 }
 function routeFromHref(href) { const url = new URL(href); return { view: url.hash.slice(1), ...Object.fromEntries(url.searchParams) }; }
 async function respondRunCase(ui, current, history = []) {
+  await flush();
   await ui.respond(ui.calls.at(-1), current); await ui.respond(ui.calls.at(-1), history);
 }
 
@@ -529,4 +559,124 @@ test('plain Run navigation stays free of unrelated defect context', async () => 
   const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN']));
   const plain = routeFromHref(ui.find('#execution-actions', 'Continue execution').attributes.href);
   for (const key of Object.keys(retestIdentity)) assert.equal(key in plain, false);
+});
+
+const member = (id, status = 'READY', title = 'Case ' + id) => ({ id, keyNo: id, title, status });
+function preparedPlan(ids = [20], status = 'DRAFT', version = 3) { return { plan: { id: 31, keyNo: 1, name: 'Core checks', description: 'Scope', status, version }, testCaseIds: ids }; }
+async function loadPlan(ui, current = preparedPlan(), cases = [member(20), member(21)]) {
+  await ui.open('test-plans', { planId: '31' }); await ui.respond(ui.calls.at(-1), current); await ui.respond(ui.calls.at(-1), cases);
+}
+test('R2 READY is a saved plan state, not proof that later changed members are executable', async () => {
+  const ui = browser(); await loadPlan(ui, preparedPlan([20, 21], 'READY'), [member(20), member(21, 'DRAFT', 'Edited checkout')]);
+  assert.match(ui.textOf(ui.$('#execution-progress')[0]), /Saved plan status: READY/);
+  assert.match(ui.textOf(ui.$('#execution-progress')[0]), /currently blocked/);
+  assert.match(ui.find('#execution-progress', 'TC-021 · Edited checkout').attributes.href, /testCaseId=21/);
+  assert.equal(ui.find('#execution-actions', 'Create run from this plan'), undefined);
+  assert.equal(ui.calls.filter(call => call.method !== 'GET').length, 0, 'A status drift does not rewrite plan state');
+});
+test('R2 plan has an explicit readiness CTA and rechecks all members before a legal versioned PUT', async () => {
+  const ui = browser(); await loadPlan(ui);
+  assert.equal(ui.$('#execution-plan-ready').prop('disabled'), false); await ui.click(ui.$('#execution-plan-ready')[0]);
+  await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 8)); await ui.respond(ui.calls.at(-1), [member(20)]);
+  const put = ui.calls.at(-1); assert.equal(put.method, 'PUT'); assert.equal(put.body.expectedVersion, 8); assert.equal(put.body.status, 'READY');
+  await ui.respond(put, { id: 31 }); await ui.respond(ui.calls.at(-1), preparedPlan([20], 'READY', 9));
+  await ui.respond(ui.calls.at(-1), preparedPlan([20], 'READY', 9)); await ui.respond(ui.calls.at(-1), [member(20)]);
+  assert.ok(ui.find('#execution-actions', 'Create run from this plan'));
+});
+test('R2 member drift at readiness submission blocks PUT and retains the actual saved plan state', async () => {
+  const ui = browser(); await loadPlan(ui); await ui.click(ui.$('#execution-plan-ready')[0]);
+  await ui.respond(ui.calls.at(-1), preparedPlan()); await ui.respond(ui.calls.at(-1), [member(20, 'DRAFT')]);
+  assert.equal(ui.calls.some(call => call.method === 'PUT'), false); assert.match(ui.$('#execution-notice').text(), /plan or its cases changed/);
+});
+test('R2 searched multi-selection uses fresh version per addition and confirms each scope before sending the next', async () => {
+  const ui = browser(); await loadPlan(ui, preparedPlan([], 'DRAFT', 2), [member(20), member(21), member(22, 'DRAFT')]);
+  for (const id of [20, 21, 22]) assert.equal(ui.$('#execution-add-case-' + id).prop('checked'), false);
+  ui.$('#execution-plan-case-search').val('case 21').trigger('input');
+  assert.equal(ui.$('#execution-add-case-20')[0].parent.classes.has('d-none'), true);
+  ui.$('#execution-add-case-20').prop('checked', true); ui.$('#execution-add-case-21').prop('checked', true);
+  await ui.click(ui.$('#execution-add-selected')[0]); await ui.respond(ui.calls.at(-1), preparedPlan([], 'DRAFT', 7));
+  const first = ui.calls.at(-1); assert.equal(first.url, 'projects/12/test-plans/31/test-cases/20'); assert.equal(first.body.expectedVersion, 7);
+  await ui.respond(first, {}); assert.equal(ui.calls.at(-1).method, 'GET'); await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 8));
+  assert.equal(ui.calls.at(-1).method, 'GET', 'The second item obtains another fresh scope'); await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 9));
+  const second = ui.calls.at(-1); assert.equal(second.url, 'projects/12/test-plans/31/test-cases/21'); assert.equal(second.body.expectedVersion, 9);
+  await ui.respond(second, {}); await ui.respond(ui.calls.at(-1), preparedPlan([20, 21], 'DRAFT', 10));
+  await ui.respond(ui.calls.at(-1), preparedPlan([20, 21], 'DRAFT', 10)); await ui.respond(ui.calls.at(-1), [member(20), member(21), member(22, 'DRAFT')]);
+  assert.match(ui.$('#execution-notice').text(), /2 selected case\(s\) are confirmed/); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 2);
+});
+test('R2 unknown member addition stops the batch, reconciles by GET and does not replay after revisiting', async () => {
+  const ui = browser(); await loadPlan(ui, preparedPlan([]));
+  ui.$('#execution-add-case-20').prop('checked', true); ui.$('#execution-add-case-21').prop('checked', true);
+  await ui.click(ui.$('#execution-add-selected')[0]); await ui.respond(ui.calls.at(-1), preparedPlan([], 'DRAFT', 4));
+  const write = ui.calls.at(-1); write.reject({ status: 0, message: 'Response lost' }); await flush();
+  assert.equal(ui.calls.at(-1).method, 'GET'); await ui.respond(ui.calls.at(-1), preparedPlan([], 'DRAFT', 4));
+  await ui.respond(ui.calls.at(-1), preparedPlan([], 'DRAFT', 4)); await ui.respond(ui.calls.at(-1), [member(20), member(21)]);
+  assert.match(ui.$('#execution-notice').text(), /Stopped after 0 confirmed/); assert.match(ui.textOf(ui.$('#execution-actions')[0]), /unconfirmed result/);
+  await loadPlan(ui, preparedPlan([])); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1);
+  assert.match(ui.textOf(ui.$('#execution-actions')[0]), /will not resend/);
+});
+test('R2 context is fail closed, read-only roles do not receive write controls and force-check blocks identity changes', async () => {
+  const unavailable = browser({ contextFailure: true }); await unavailable.open('runs', { action: 'create' });
+  assert.equal(unavailable.calls.length, 0); assert.equal(unavailable.$('#execution-save').prop('disabled'), true);
+  const readonly = browser({ context: { canWriteAssets: false, projectRole: 'DEVELOPER' } }); await loadPlan(readonly);
+  assert.equal(readonly.find('#execution-actions', 'Edit plan'), undefined); assert.match(readonly.textOf(readonly.$('#execution-actions')[0]), /ADMIN or active TESTER/);
+  const ui = browser(); await loadCase(ui); ui.context({ actorId: 99 }); await ui.submit();
+  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 0); assert.match(ui.$('#execution-attempt-error').text(), /identity changed/);
+});
+test('R2 result recording starts unselected and rejects every value outside the authoritative outcome enum', async () => {
+  const ui = browser(); await ui.open('runs', { runId: '40', runCaseId: '50' }); await respondRunCase(ui, run());
+  assert.equal(ui.$('#execution-outcome').val(), ''); await ui.submit(); assert.match(ui.$('#execution-attempt-error').text(), /Choose the actual outcome/);
+  ui.$('#execution-outcome').val('NOT_RUN'); await ui.submit(); assert.equal(ui.calls.some(call => call.method === 'POST'), false);
+  ui.$('#execution-outcome').val('BLOCKED'); await ui.submit(); assert.equal(ui.calls.at(-1).body.outcome, 'BLOCKED');
+});
+test('R2 run list filters current NOT_RUN cases without rewriting snapshots or attempting requests', async () => {
+  const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN', 'FAIL', 'PASS']));
+  const filter = ui.$('#execution-items')[0].children[0]; filter.value = 'NOT_RUN'; ui.$(filter).trigger('change');
+  const rows = ui.$('#execution-items')[0].children.slice(1); assert.equal(rows[0].classes.has('d-none'), false); assert.equal(rows[1].classes.has('d-none'), true); assert.equal(rows[2].classes.has('d-none'), true);
+  assert.equal(ui.calls.filter(call => call.method !== 'GET').length, 0);
+});
+test('R2 unsubmitted attempt draft remains scoped to case and actor, survives navigation and safe reauthentication', async () => {
+  const ui = browser(); await loadCase(ui); ui.$('#execution-comment').val('Unsaved long result'); ui.$('#execution-outcome').val('FAIL');
+  assert.equal(ui.guards.get('execution').dirty(), true); await loadCase(ui, '51'); assert.equal(ui.$('#execution-comment').val(), '');
+  await loadCase(ui); assert.equal(ui.$('#execution-comment').val(), 'Unsaved long result'); assert.equal(ui.$('#execution-outcome').val(), 'FAIL');
+  ui.emit('veriqra:reauthenticated', { user: { id: 5 } }); await flush(); assert.equal(ui.$('#execution-comment').val(), 'Unsaved long result'); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 0);
+  ui.context({ actorId: 99 }); await loadCase(ui, '51'); await loadCase(ui); assert.equal(ui.$('#execution-comment').val(), '');
+});
+test('R2 uncertain non-idempotent create preserves input and locks automatic resubmission across revisits', async () => {
+  const ui = browser(); await ui.open('test-plans', { action: 'create' }); await ui.respond(ui.calls.at(-1), [member(20)]);
+  ui.$('#execution-name').val('My uncertain plan'); await ui.submit('execution-form'); const write = ui.calls.at(-1); assert.equal(write.method, 'POST');
+  write.reject({ status: 0, message: 'No response' }); await flush(); assert.equal(ui.$('#execution-name').val(), 'My uncertain plan'); assert.equal(ui.$('#execution-save').prop('disabled'), true);
+  assert.match(ui.$('#execution-form-error').text(), /no confirmed result/); await ui.submit('execution-form'); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1);
+  await ui.open('runs', {}); await ui.open('test-plans', { action: 'create' }); await ui.respond(ui.calls.at(-1), [member(20)]);
+  assert.equal(ui.$('#execution-name').val(), 'My uncertain plan'); assert.equal(ui.$('#execution-save').prop('disabled'), true);
+});
+test('R2 conflict recovery shows the saved version, requires acknowledgement and retains every typed field', async () => {
+  const ui = browser(); await loadPlan(ui); await ui.click(ui.find('#execution-actions', 'Edit plan'));
+  ui.$('#execution-name').val('My revised scope'); ui.$('#execution-description').val('Long draft survives conflict'); ui.$('#execution-status').val('DRAFT');
+  await ui.submit('execution-form'); const write = ui.calls.at(-1); assert.equal(write.body.expectedVersion, 3); write.reject({ status: 409, message: 'Version changed' }); await flush();
+  assert.equal(ui.$('#execution-description').val(), 'Long draft survives conflict');
+  await ui.click(ui.find('#execution-form-context', 'Review latest saved version; keep my draft'));
+  const latest = preparedPlan([20], 'DRAFT', 8); latest.plan.name = 'Other editor scope'; await ui.respond(ui.calls.at(-1), latest);
+  assert.match(ui.textOf(ui.$('#execution-form-context')[0]), /Saved version 8: Other editor scope/);
+  assert.equal(ui.calls.filter(call => call.method === 'PUT').length, 1);
+  await ui.click(ui.find('#execution-form-context', 'I reviewed this version; keep my inputs for a new save'));
+  assert.equal(ui.$('#execution-name').val(), 'My revised scope'); await ui.submit('execution-form');
+  assert.equal(ui.calls.at(-1).body.expectedVersion, 8); assert.equal(ui.calls.at(-1).body.description, 'Long draft survives conflict');
+});
+test('R2 a case becoming DRAFT between preview and run submit blocks the POST while retaining the typed run', async () => {
+  const ui = browser(); await ui.open('runs', { action: 'create', sourcePlanId: '31' }); await ui.respond(ui.calls.at(-1), [member(20)]);
+  await ui.respond(ui.calls.at(-1), [preparedPlan([20], 'READY').plan]); await ui.respond(ui.calls.at(-1), preparedPlan([20], 'READY')); await ui.respond(ui.calls.at(-1), [member(20)]);
+  ui.$('#execution-name').val('Specific run name'); ui.$('#execution-environment').val('QA sandbox'); await ui.submit('execution-form');
+  await ui.respond(ui.calls.at(-1), preparedPlan([20], 'READY')); await ui.respond(ui.calls.at(-1), [member(20, 'DRAFT')]);
+  assert.equal(ui.calls.some(call => call.method === 'POST'), false); assert.equal(ui.$('#execution-name').val(), 'Specific run name');
+  assert.equal(ui.$('#execution-environment').val(), 'QA sandbox'); assert.equal(ui.$('#execution-save').prop('disabled'), true);
+  assert.match(ui.textOf(ui.$('#execution-plan-preview')[0]), /DRAFT.*review this case/);
+});
+test('R2 a rejected second addition reports the confirmed partial scope and never sends the third selection', async () => {
+  const ui = browser(); await loadPlan(ui, preparedPlan([]), [member(20), member(21), member(22)]);
+  [20, 21, 22].forEach(id => ui.$('#execution-add-case-' + id).prop('checked', true)); await ui.click(ui.$('#execution-add-selected')[0]);
+  await ui.respond(ui.calls.at(-1), preparedPlan([], 'DRAFT', 3)); await ui.respond(ui.calls.at(-1), {}); await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 4));
+  await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 4)); ui.calls.at(-1).reject({ status: 409, message: 'Changed by another editor' }); await flush();
+  await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 5)); await ui.respond(ui.calls.at(-1), preparedPlan([20], 'DRAFT', 5)); await ui.respond(ui.calls.at(-1), [member(20), member(21), member(22)]);
+  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 2); assert.equal(ui.calls.some(call => call.url.endsWith('/test-cases/22')), false);
+  assert.match(ui.$('#execution-notice').text(), /Stopped after 1 confirmed/);
 });

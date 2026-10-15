@@ -52,6 +52,8 @@ class ExecutionWebTest {
             capture(m.getName(),a);
             return switch(m.getName()){
                 case "listByProject" -> List.of(defect);
+                case "listForAttempt" -> List.of(new Defect(71L,7L,2L,"closed bug",null,DefectSeverity.HIGH,
+                        Priority.HIGH,DefectStatus.CLOSED,1L,null,"fixed",null,null,4));
                 case "getDetails" -> new DefectDetails(defect,List.of(new DefectDetails.Evidence(new TestAttemptDefect(60L,70L,1L,null),attempt,40L)));
                 case "addEvidence" -> new TestAttemptDefect(60L,70L,1L,null);
                 case "removeEvidence" -> null;
@@ -119,6 +121,19 @@ class ExecutionWebTest {
         assertEquals(50L,cmd.runCaseId());assertEquals(TestAttemptStatus.FAIL,cmd.status());assertNull(cmd.failureMessage());
         expect(200,"GET",ATTEMPTS,null);
         assertEquals("listAttempts",invoked);assertArrayEquals(new Object[]{1L,7L,40L,50L},arguments);
+    }
+    @Test void exactAttemptDefectsReturnsPersistedClosedSummaryAndAllPathParents() throws Exception {
+        var result = expect(200, "GET", ATTEMPTS + "/60/defects", null);
+        assertEquals("listForAttempt", invoked);
+        assertArrayEquals(new Object[]{1L,7L,40L,50L,60L}, arguments);
+        assertTrue(result.isArray());
+        assertEquals("CLOSED", result.at("/0/status").asText());
+        assertEquals(4, result.at("/0/version").asInt());
+        assertEquals("closed bug", result.at("/0/title").asText());
+        invoked = null;
+        expect(400, "GET", ATTEMPTS + "/60/defects?latest=true", null);
+        assertNull(invoked);
+        expect(405, "POST", ATTEMPTS + "/60/defects", "{}");
     }
     @Test void defectsMapCommandsAndExplicitActionsAndSmallEvidenceProjection() throws Exception {
         expect(201,"POST",DEFECTS,CREATE_DEFECT);

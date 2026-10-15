@@ -19,6 +19,9 @@
   let projectRequest = 0;
   let desiredProject = null;
   let handledRoute = null;
+  let workflowRequest = 0;
+  let workflowSummary = null;
+  function mayLeave() { return !window.VeriqraDraftGuard || window.VeriqraDraftGuard.allowLeave(); }
   const routeIds = ['projectId', 'requirementId', 'testCaseId', 'planId', 'runId', 'runCaseId', 'attemptId', 'defectId',
     'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId'];
   const routeFields = {
@@ -62,7 +65,11 @@
     if (routeUrl() && window.history) window.history[replace ? 'replaceState' : 'pushState'](null, '', String(url));
     else location.hash = '#' + view;
   }
-  function applyRoute() {
+  function applyRoute(approved) {
+    if (approved !== true && handledRoute && location.href !== handledRoute && !mayLeave()) {
+      if (window.history) window.history.pushState(null, '', handledRoute);
+      return;
+    }
     const context = readRoute();
     handledRoute = location.href || null;
     setView(context.view, true);
@@ -83,7 +90,8 @@
     href: function (view, context) { return String(makeRoute(view, context || {})); },
     select: function (view, context) { writeRoute(view, context, true); },
     open: function (view, context) {
-      writeRoute(view, context, false); applyRoute();
+      if (String(makeRoute(view, context || {})) !== location.href && !mayLeave()) return;
+      writeRoute(view, context, false); applyRoute(true);
     }
   });
 
@@ -105,7 +113,10 @@
     $('#collaboration-workspace').toggleClass('d-none', currentView !== 'collaboration' || !selectedId);
     $('#sidebar').removeClass('open');
     $('#sidebar-toggle').attr('aria-expanded', 'false');
-    if (!silent) announce('view', { view: currentView, projectId: selectedId, context: readRoute() });
+    if (!silent) {
+      announce('view', { view: currentView, projectId: selectedId, context: readRoute() });
+      if (currentView === 'dashboard' && selectedId && activeProject && window.VeriqraQaContext) loadWorkflowSummary();
+    }
   }
 
   function savedProject() { try { return sessionStorage.getItem(projectStorageKey); } catch (_) { return null; } }
@@ -148,7 +159,7 @@
     $('#project-hero').toggleClass('is-archived', project.status !== 'ACTIVE');
     $('.project-monogram').text((project.name || 'V').trim().charAt(0).toUpperCase());
     $('#account-name').text(currentUser.username);
-    $('#access-summary').text(t("shell.verifiedProjectAccess", null, 'Verified project access'));
+    renderAccess();
   }
   function chooseProject(id) {
     if (!projects.some(function (p) { return String(p.id) === String(id); })) return;
@@ -238,6 +249,7 @@
     api.get('auth/me')
       .done(function (user) {
         currentUser = user;
+        announce('identity', { user: user });
         $('#current-user').text(user.username);
         $('#admin-entry, #project-create-open').toggleClass('d-none', user.systemRole !== 'ADMIN');
         $('#project-create-form').addClass('d-none');
@@ -303,7 +315,10 @@
     announce('collaboration-area', { area: 'people' });
   });
 
-  picker.on('change', function () { writeRoute(currentView, { projectId: this.value }, false); chooseProject(this.value); });
+  picker.on('change', function () {
+    if (!mayLeave()) { picker.val(selectedId); return; }
+    writeRoute(currentView, { projectId: this.value }, false); chooseProject(this.value);
+  });
   $('a[data-view]').on('click', function (event) {
     if (event && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0)) return;
     if (event) event.preventDefault();
@@ -316,6 +331,7 @@
   });
   $(window).on('popstate', applyRoute);
   $('#logout-button').on('click', function () {
+    if (!mayLeave()) return;
     const button = $(this);
     if (button.prop('disabled')) return;
     button.prop('disabled', true);
@@ -351,7 +367,67 @@
       card.append($('<span class="workflow-later">').text(t('qa.openArea')));
       $('#workflow').append(card);
     });
+    if (activeProject && window.VeriqraQaContext) loadWorkflowSummary();
   }
+  function renderAccess() {
+    const context = workflowSummary && String(workflowSummary.projectId) === String(selectedId) ? workflowSummary : null;
+    $('#access-summary').text(context ? t('r2.role.' + (context.systemRole === 'ADMIN' ? 'ADMIN' : context.projectRole || 'READER')) : t('r2.loadingRole'));
+    $('#access-help').text(context ? t(context.canWriteAssets ? 'r2.testerHelp' : 'r2.readerHelp') : t('r2.roleReadRequired'));
+  }
+  function loadWorkflowSummary() {
+    const token = ++workflowRequest;
+    const projectId = selectedId;
+    if (!projectId) return;
+    workflowSummary = null; renderAccess();
+    const panel = $('#qa-next-step').empty().append($('<p>').text(t('r2.loadingNext')));
+    function current() { return token === workflowRequest && String(selectedId) === String(projectId); }
+    function failed() {
+      if (!current()) return;
+      workflowSummary = null; renderAccess();
+      panel.empty().append($('<p role="status">').text(t('r2.nextUnavailable')))
+        .append($('<button type="button" class="btn btn-outline-secondary">').text(t('common.retry')).on('click', loadWorkflowSummary));
+    }
+    window.VeriqraQaContext.load(projectId).done(async function (context) {
+      if (!current()) return;
+      workflowSummary = context; renderAccess();
+      try {
+        const paths = ['requirements', 'test-cases', 'test-plans', 'runs', 'defects'];
+        const data = await Promise.all(paths.map(function (path) { return api.get('projects/' + projectId + '/' + path); }));
+        if (!current()) return;
+        if (!data.every(Array.isArray)) { failed(); return; }
+        const requirements = data[0], cases = data[1], plans = data[2], runs = data[3], defects = data[4];
+        const usableRequirements = requirements.filter(function (row) { return row.status !== 'ARCHIVED'; });
+        const usableCases = cases.filter(function (row) { return row.status !== 'ARCHIVED'; });
+        const usablePlans = plans.filter(function (row) { return row.status !== 'ARCHIVED'; });
+        let next;
+        const draftCase = cases.find(function (row) { return row.status === 'DRAFT'; });
+        const draftPlan = plans.find(function (row) { return row.status === 'DRAFT'; });
+        const activeRun = runs.find(function (row) { return row.status === 'IN_PROGRESS'; });
+        const resolved = defects.find(function (row) { return row.status === 'RESOLVED'; });
+        const assigned = defects.find(function (row) { return String(row.assigneeId) === String(context.actorId) && ['OPEN','IN_PROGRESS'].includes(row.status); });
+        if (context.projectStatus !== 'ACTIVE') next = ['r2.projectReadOnly', 'requirements', {}];
+        else if (!context.canWriteAssets) next = assigned ? ['r2.handleAssigned', 'defects', { defectId: assigned.id }] : ['r2.inspectResults', 'runs', {}];
+        else if (resolved) next = ['r2.reviewRetest', 'defects', { defectId: resolved.id }];
+        else if (activeRun) next = ['r2.continueRun', 'runs', { runId: activeRun.id }];
+        else if (!usableRequirements.length) next = ['r2.createRequirement', 'requirements', { action: 'create' }];
+        else if (!usableCases.length) next = ['r2.createCoveredCase', 'test-cases', { action: 'create', sourceRequirementId: usableRequirements[0].id }];
+        else if (draftCase) next = ['r2.reviewCase', 'test-cases', { testCaseId: draftCase.id }];
+        else if (!usablePlans.length) next = ['r2.createPlan', 'test-plans', { action: 'create', sourceTestCaseId: (usableCases.find(function (row) { return row.status === 'READY'; }) || usableCases[0]).id }];
+        else if (draftPlan) next = ['r2.reviewPlan', 'test-plans', { planId: draftPlan.id }];
+        else next = ['r2.checkPlan', 'test-plans', { planId: usablePlans[0].id }];
+        panel.empty().append($('<h3 class="fs-5">').text(t('r2.nextStep')))
+          .append($('<p>').text(t('r2.loadedCounts', { requirements: requirements.length, cases: cases.length, plans: plans.length, runs: runs.length, defects: defects.length })))
+          .append($('<a class="btn btn-primary">').attr('href', window.VeriqraQaNavigation.href(next[1], next[2])).text(t(next[0])).on('click', function (event) {
+            if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0) return;
+            event.preventDefault(); window.VeriqraQaNavigation.open(next[1], next[2]);
+          }))
+          .append($('<p class="text-secondary small mt-2 mb-0">').text(t('r2.workflowHelp')));
+      } catch (_) { failed(); }
+    }).fail(failed);
+  }
+  document.addEventListener('veriqra:reauthenticated', function () {
+    if (activeProject && window.VeriqraQaContext) loadWorkflowSummary();
+  });
   function renderProjectLinks() {
     ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'collaboration'].forEach(function (view) {
       $('[data-view="' + view + '"]').attr('href', window.VeriqraQaNavigation.href(view, { projectId: selectedId || desiredProject }));

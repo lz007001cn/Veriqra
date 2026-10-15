@@ -138,7 +138,9 @@ class R1RetestWebTest {
         serviceFailure = new ConflictException("credential-secret-should-never-leak");
         error = expect(409, "POST", DEFECT + "/retests", LINK);
         assertFalse(error.toString().contains("credential-secret"));
-        assertTrue(error.at("/error/reasonCode").isNull());
+        // R2 adds a fixed manual-QA correction hint; the original exception remains hidden.
+        assertEquals("QA_STATE_CONFLICT", error.at("/error/reasonCode").asText());
+        assertTrue(error.at("/error/field").isNull());
         serviceFailure = new ValidationException("credential-secret-should-never-leak");
         assertFalse(expect(400, "POST", DEFECT + "/retests", LINK).toString().contains("credential-secret"));
     }

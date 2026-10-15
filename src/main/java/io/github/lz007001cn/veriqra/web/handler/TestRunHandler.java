@@ -60,6 +60,15 @@ public final class TestRunHandler {
             }
             return;
         }
+        if (path.length == 10 && path[5].equals("cases") && path[7].equals("attempts") && path[9].equals("defects")) {
+            JsonHttp.method(res, method, "GET");
+            if (!req.getParameterMap().isEmpty())
+                throw new HttpFailure(400, "INVALID_QUERY", "Invalid query parameters");
+            JsonHttp.write(res, 200, s.defects().listForAttempt(actor, project,
+                    JsonHttp.positiveId(path[4]), JsonHttp.positiveId(path[6]), JsonHttp.positiveId(path[8]))
+                    .stream().map(DefectResponse::from).toList());
+            return;
+        }
         throw new HttpFailure(404, "NOT_FOUND", "Resource not found");
     }
 }

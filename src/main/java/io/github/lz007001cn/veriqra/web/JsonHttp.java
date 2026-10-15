@@ -23,8 +23,11 @@ public final class JsonHttp {
             T value = JsonMapperProvider.readerFor(type).readValue(text);
             if (value == null) throw new HttpFailure(400, "INVALID_JSON", "Expected a JSON object");
             return value;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException | CharacterCodingException e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             // Jackson messages can include caller-supplied secrets. Never expose or log the parse exception.
+            throw new HttpFailure(400, "INVALID_JSON", "Malformed JSON, unknown field or invalid field type",
+                    QaErrorDetails.forJsonFailure(e));
+        } catch (CharacterCodingException e) {
             throw new HttpFailure(400, "INVALID_JSON", "Malformed JSON, unknown field or invalid field type");
         }
     }

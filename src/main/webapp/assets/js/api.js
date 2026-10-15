@@ -13,7 +13,16 @@
   };
 
   function onLoginPage() { return global.location.pathname.endsWith('/login.html'); }
-  function signIn() { global.location.replace(new URL('login.html', document.baseURI).href); }
+  let authPaused = false;
+  function signIn() {
+    const target = global.VeriqraSessionRecovery ? global.VeriqraSessionRecovery.loginUrl() : new URL('login.html', document.baseURI).href;
+    global.location.replace(target);
+  }
+  function unauthorized() {
+    authPaused = true;
+    if (global.VeriqraSessionRecovery && global.VeriqraSessionRecovery.unauthorized()) return;
+    signIn();
+  }
   function errorFrom(xhr, loginAttempt) {
     const status = xhr.status || 0;
     const retryHeader = xhr.getResponseHeader('Retry-After');
@@ -38,8 +47,15 @@
     }
     const code = xhr.responseJSON && xhr.responseJSON.error && xhr.responseJSON.error.code;
     const reasonCode = xhr.responseJSON && xhr.responseJSON.error && xhr.responseJSON.error.reasonCode;
+    const field = xhr.responseJSON && xhr.responseJSON.error && xhr.responseJSON.error.field;
+    const qaReasons = ['QA_FIELD_REQUIRED','QA_FIELD_TOO_LONG','QA_STEPS_INVALID','QA_CASE_STEPS_REQUIRED','QA_CASE_NOT_READY',
+      'QA_PLAN_NOT_READY','QA_PLAN_EMPTY','QA_SCOPE_CHANGED','QA_ARCHIVED_READ_ONLY','QA_STALE_VERSION','QA_INVALID_RELATION',
+      'QA_FORBIDDEN','QA_INVALID_INPUT','QA_STATE_CONFLICT'];
+    if (qaReasons.includes(reasonCode)) {
+      messageKey = 'r2Error.' + reasonCode; messageArgs = null; message = t(messageKey, null, messageFallback);
+    }
     // UI descriptors let visible failures follow a locale change without another request.
-    return { status: status, message: global.I18n.error({ code: code, message: message }), code: code, reasonCode: reasonCode,
+    return { status: status, message: qaReasons.includes(reasonCode) ? message : global.I18n.error({ code: code, message: message }), code: code, reasonCode: reasonCode, field: field,
       messageKey: messageKey, messageArgs: messageArgs, messageFallback: messageFallback,
       retryAfterSeconds: Number.isFinite(seconds) && seconds > 0 ? seconds : null };
   }
@@ -47,6 +63,11 @@
     const settings = options || {};
     const url = new URL('api/' + path.replace(/^\/+/, ''), document.baseURI);
     const isWrite = !['GET', 'HEAD'].includes(method);
+    if (isWrite && authPaused && !['auth/login', 'auth/logout'].includes(path)) {
+      const paused = $.Deferred();
+      paused.reject({ status: 401, message: t('r2.sessionExpired'), code: 'UNAUTHENTICATED', messageKey: 'r2.sessionExpired' });
+      return paused.promise();
+    }
     const call = $.ajax({
       url: url.href, method: method, dataType: 'json',
       contentType: isWrite ? 'application/json; charset=UTF-8' : undefined,
@@ -58,12 +79,16 @@
     call.done(function (data) { result.resolve(data); });
     call.fail(function (xhr) {
       const error = errorFrom(xhr, method === 'POST' && path === 'auth/login');
-      if (error.status === 401 && settings.authRequired !== false && !onLoginPage()) signIn();
+      if (error.status === 401 && settings.authRequired !== false && !onLoginPage()) unauthorized();
       result.reject(error);
     });
     return result.promise();
   }
   function xml(path, file) {
+    if (authPaused) {
+      const paused = $.Deferred(); paused.reject({ status: 401, message: t('r2.sessionExpired'), code: 'UNAUTHENTICATED' });
+      return paused.promise();
+    }
     const url = new URL('api/' + path.replace(/^\/+/, ''), document.baseURI);
     const result = $.Deferred();
     $.ajax({ url: url.href, method: 'POST', data: file, processData: false,
@@ -71,7 +96,7 @@
       .done(function (data) { result.resolve(data); })
       .fail(function (xhr) {
         const error = errorFrom(xhr, false);
-        if (error.status === 401 && !onLoginPage()) signIn();
+        if (error.status === 401 && !onLoginPage()) unauthorized();
         result.reject(error);
       });
     return result.promise();
@@ -83,6 +108,7 @@
     delete: function (path, options) { return request('DELETE', path, undefined, options); },
     action: request,
     xml: xml,
-    signIn: signIn
+    signIn: signIn,
+    resumeSession: function () { authPaused = false; }
   });
 })(window, jQuery);

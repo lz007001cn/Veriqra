@@ -23,8 +23,15 @@ abstract class MysqlFixture {
 
     @BeforeAll void openFixture() throws Exception {
         Properties p=new Properties();
+        String r2Selected=System.getProperty("r2.fixture.config");
         String r1Selected=System.getProperty("r1.fixture.config");
-        if(r1Selected!=null) {
+        if(r2Selected!=null && r1Selected!=null)
+            throw new IllegalStateException("Select exactly one dedicated fixture configuration");
+        if(r2Selected!=null) {
+            // R2 keeps its own account/schema/instance identity and never weakens the R1 guard.
+            try(var r=Files.newBufferedReader(Path.of(r2Selected))) { p.load(r); }
+            R2MysqlTarget.validate(p);
+        } else if(r1Selected!=null) {
             // An explicitly selected R1 target always wins. Missing/invalid files fail closed;
             // neither TEST_CONFIG nor TEST_* environment variables can redirect this fixture.
             try(var r=Files.newBufferedReader(Path.of(r1Selected))) { p.load(r); }
@@ -43,7 +50,7 @@ abstract class MysqlFixture {
         config=new DatabaseConfig(url,p.getProperty("username"),p.getProperty("password"),2,4,Duration.ofSeconds(2));
         Properties credentials=new Properties(); credentials.setProperty("user",config.username()); credentials.setProperty("password",config.password());
         credentials.setProperty("connectTimeout","3000"); credentials.setProperty("socketTimeout","10000");
-        owner=r1Selected!=null?R1MysqlTarget.open():DriverManager.getConnection(url,credentials);
+        owner=r2Selected!=null?R2MysqlTarget.open(p):r1Selected!=null?R1MysqlTarget.open():DriverManager.getConnection(url,credentials);
         if(!schemaName.equals(owner.getCatalog())) throw new IllegalStateException("Unexpected selected schema");
         try(var s=owner.prepareStatement("SELECT VERSION(), GET_LOCK(?,0)")) {
             s.setString(1,"veriqra-jdbc-tests:"+UUID.nameUUIDFromBytes(schemaName.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
