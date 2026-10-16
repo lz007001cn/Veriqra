@@ -59,7 +59,7 @@ mvn validate
 mvn clean package
 ```
 
-输出为 `target/veriqra-0.1.0-SNAPSHOT.war`。普通 `mvn test` 运行不依赖数据库的测试；
+输出为 `target/veriqra-0.2.0.war`。普通 `mvn test` 运行不依赖数据库的测试；
 配置独立空测试库后使用 `mvn -Pmysql-tests test` 或 `mvn -Pmysql-tests clean package`，同时运行真实 MySQL 测试。
 集成测试拒绝开发库及非空库，不使用开发 seed。配置、连接生命周期、事务示例和本轮实测见 [Phase 2 JDBC 说明](docs/PHASE2-JDBC-FOUNDATION.md)。
 
