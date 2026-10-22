@@ -27,6 +27,33 @@ public final class DefaultTestImportService implements TestImportService {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    @Override public List<TestImport> list(Long actor, Long project, Long runId) {
+        return transactions.execute(c -> {
+            ServiceDaos daos = daoFactory.create(c);
+            daos.projects().findById(project).orElseThrow(() -> new NotFoundException("Project does not exist"));
+            access.requireProjectRead(daos.users(), daos.members(), actor, project);
+            if (runId != null) {
+                daos.testRuns().findById(runId).filter(r -> Objects.equals(r.projectId(), project))
+                        .orElseThrow(() -> new NotFoundException("Run does not exist in project"));
+                return daos.imports().listByRun(runId);
+            }
+            return daos.imports().listByProject(project);
+        });
+    }
+
+    @Override public ImportExecutionResult get(Long actor, Long project, Long id, UUID requestKey) {
+        return transactions.execute(c -> {
+            ServiceDaos daos = daoFactory.create(c);
+            daos.projects().findById(project).orElseThrow(() -> new NotFoundException("Project does not exist"));
+            access.requireProjectRead(daos.users(), daos.members(), actor, project);
+            TestImport row = (requestKey == null ? daos.imports().findById(id) : daos.imports().findByRequestKey(requestKey))
+                    .orElseThrow(() -> new NotFoundException("Import does not exist"));
+            TestRun run = daos.testRuns().findById(row.testRunId()).filter(r -> Objects.equals(r.projectId(), project))
+                    .orElseThrow(() -> new NotFoundException("Import does not exist in project"));
+            return new ImportExecutionResult(row, run, daos.runCases().listByRun(run.id()), daos.attempts().listByImport(row.id()), true);
+        });
+    }
+
     @Override public ImportPreview analyzeImport(Long actorUserId, AnalyzeTestImportCommand command) {
         ServiceValidation.required(command, "command");
         ServiceValidation.required(command.projectId(), "projectId");

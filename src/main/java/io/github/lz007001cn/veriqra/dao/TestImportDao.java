@@ -12,4 +12,6 @@ public interface TestImportDao {
     Optional<TestImport> findByRequestKey(UUID requestKey);
     /** Ordered by importedAt, then id. */
     List<TestImport> listByRun(Long testRunId);
+    /** Newest first across all Runs in the project. */
+    List<TestImport> listByProject(Long projectId);
 }
