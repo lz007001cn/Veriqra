@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic demonstration report, not an actual ZZZSwitch test run. -->
+<testsuite name="ZZZSwitch DEMO simulated v1.4.0" tests="3" failures="1" errors="0" skipped="1" time="0.35">
+  <testcase classname="demo.zzzswitch.EmptyCacheRegression" name="normal_cache_switch" time="0.20"/>
+  <testcase classname="demo.zzzswitch.EmptyCacheRegression" name="empty_overlay_switch" time="0.15">
+    <failure message="[演示模拟] 合法空热更新覆盖层应允许切换">预期：目录存在且为零文件时允许预检并切换。模拟实际结果：Blocks 目录为空，不能初始化热更新缓存。</failure>
+  </testcase>
+  <testcase classname="demo.zzzswitch.EmptyCacheRegression" name="switch_back_without_launch" time="0">
+    <skipped message="[演示模拟] 本轮已发现空缓存问题，往返组合场景暂未执行，待修复版验证。"/>
+  </testcase>
+</testsuite>
