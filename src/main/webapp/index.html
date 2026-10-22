@@ -14,9 +14,11 @@
   <script defer src="assets/js/workflow-context.js"></script>
   <script defer src="assets/js/app.js"></script>
   <script defer src="assets/js/test-assets.js"></script>
+  <script defer src="assets/js/ai-cases.js"></script>
   <script defer src="assets/js/execution.js"></script>
   <script defer src="assets/js/defects.js"></script>
   <script defer src="assets/js/automation-imports.js"></script>
+  <script defer src="assets/js/import-history.js"></script>
   <script defer src="assets/js/collaboration.js"></script>
   <script defer src="assets/js/shell.js"></script>
 </head>
@@ -316,6 +318,8 @@
           </div>
         </section>
         <section id="automation-workspace" class="d-none" aria-label="Automation and JUnit imports" data-i18n-aria-label="shell.automationAndJUnitImports">
+          <p class="alert alert-info" data-i18n="imports.workflow">Select XML → preview → register unknown identities → map each to a READY case → preview again → import. Each report supports one classname.</p>
+          <p><a href="samples/junit-demo.xml" download data-i18n="imports.sample">Download PASS / FAIL / SKIPPED sample</a> · <code>demo.LoginTest</code></p>
           <div id="automation-notice" class="alert d-none" role="status" aria-live="polite"></div>
           <section class="asset-panel" aria-label="Automation identities and mappings" data-i18n-aria-label="shell.automationIdentitiesAndMappings">
             <div class="asset-panel-heading"><h2 data-i18n="shell.automationIdentitiesMappings">Automation identities &amp; mappings</h2><button id="automation-refresh" class="btn btn-outline-secondary" type="button" data-i18n="common.refresh">Refresh</button></div>

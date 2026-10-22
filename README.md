@@ -15,6 +15,8 @@ v0.2.0 已部署到 ECS，备份位置与验证结果见 [部署记录](docs/ECS
 
 期末展示安排见 [开发与精简计划](docs/DEVELOPMENT-ROADMAP.md)：v0.3.0 补齐 JUnit 导入与 AI 用例生成，v0.9.0 打磨展示并在最后精简外围功能。
 
+v0.3 开发功能与本地配置见 [AI 用例与 JUnit 导入](docs/V0.3.md)。
+
 ## 技术约束
 
 - 目标环境：JDK 21 LTS、Maven 3.9.x、MySQL 8.0.46、Tomcat 10.1.x。
@@ -24,7 +26,7 @@ v0.2.0 已部署到 ECS，备份位置与验证结果见 [部署记录](docs/ECS
 - DAO 必须分离接口与实现；业务规则和事务控制归 Service，Servlet 只处理 HTTP。
 - 前端使用 HTML、CSS、JavaScript、jQuery、Bootstrap 和 AJAX，不引入前端构建系统。
 - 前端界面支持 English / 简体中文切换；语言偏好仅保存在浏览器本地，时间统一按 `Asia/Shanghai` 显示，详见 [R5.1 国际化说明](docs/PHASE5-R5.1-I18N.md)。
-- 使用 JUnit 5、Mockito、JaCoCo 和隔离 MySQL/HTTP 集成测试验证实现。
+- 使用 JUnit 5、Node.js 测试及隔离 MySQL/HTTP 集成测试验证实现。
 
 运行依赖为 Jakarta Servlet 6（provided）、Jackson JSON 和 MySQL Connector/J；JUnit 5 与嵌入式 Tomcat 仅用于测试。
 
@@ -63,7 +65,7 @@ mvn validate
 mvn clean package
 ```
 
-输出为 `target/veriqra-0.2.0.war`。普通 `mvn test` 运行不依赖数据库的测试；
+输出为 `target/veriqra-0.3.0-SNAPSHOT.war`。普通 `mvn test` 运行不依赖数据库的测试；
 配置独立空测试库后使用 `mvn -Pmysql-tests test` 或 `mvn -Pmysql-tests clean package`，同时运行真实 MySQL 测试。
 集成测试拒绝开发库及非空库，不使用开发 seed。配置、连接生命周期、事务示例和本轮实测见 [Phase 2 JDBC 说明](docs/PHASE2-JDBC-FOUNDATION.md)。
 

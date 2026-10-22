@@ -517,6 +517,7 @@
   }
   function renderRun(current) {
     const run = current.run;
+    if (run.testPlanId == null) $('#execution-context').append(routeLink(t('imports.source'), 'automation', { runId: idText(run.id) }));
     if (run.testPlanId != null) $('#execution-context').append(routeLink(t('execution.viewSourcePlan', null, 'View source plan'), 'test-plans',
       { planId: idText(run.testPlanId) }));
     const status = progress(current, '#execution-progress');

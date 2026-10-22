@@ -23,13 +23,14 @@
   let workflowSummary = null;
   function mayLeave() { return !window.VeriqraDraftGuard || window.VeriqraDraftGuard.allowLeave(); }
   const routeIds = ['projectId', 'requirementId', 'testCaseId', 'planId', 'runId', 'runCaseId', 'attemptId', 'defectId',
-    'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId'];
+    'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId', 'importId'];
   const routeFields = {
     requirements: ['requirementId', 'sourceTestCaseId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId'],
     'test-cases': ['testCaseId', 'sourceRequirementId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId'],
     'test-plans': ['planId', 'sourceTestCaseId'],
     runs: ['runId', 'runCaseId', 'attemptId', 'sourcePlanId', 'sourceTestCaseId', 'defectId', 'failureAttemptId'],
-    defects: ['defectId', 'runId', 'runCaseId', 'failureAttemptId']
+    defects: ['defectId', 'runId', 'runCaseId', 'failureAttemptId'],
+    automation: ['importId', 'runId']
   };
   function routeUrl() {
     // The fallback keeps source-only previews and simple test harnesses usable.
