@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class BuildInfoTest {
     @Test void filteredBuildMetadataIsSafeAndHasUtcTime() {
         BuildInfo info = BuildInfo.current();
-        assertEquals("0.2.0", info.version());
+        assertTrue(info.version().matches("[0-9]+\\.[0-9]+\\.[0-9]+(?:-SNAPSHOT)?"), info.version());
         assertTrue(info.commit().equals("unknown") || info.commit().matches("[0-9a-f]{40}"), info.commit());
         if (!info.buildTime().equals("unknown")) assertDoesNotThrow(() -> Instant.parse(info.buildTime()));
     }

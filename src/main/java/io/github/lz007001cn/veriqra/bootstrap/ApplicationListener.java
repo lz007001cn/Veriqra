@@ -15,6 +15,7 @@ import java.util.*;
 /** Composition root only: owns the application pool, never handles an HTTP request. */
 public final class ApplicationListener implements ServletContextListener {
     private ConnectionPool pool;
+    private io.github.lz007001cn.veriqra.service.ai.VertexAiProvider aiProvider;
     private final List<Driver> ownedDrivers = new ArrayList<>();
     @Override public void contextInitialized(ServletContextEvent event) {
         var context = event.getServletContext();
@@ -43,6 +44,10 @@ public final class ApplicationListener implements ServletContextListener {
             var daos = new JdbcServiceDaoFactory();
             var access = new ProjectAccessPolicy();
             var passwords = new PasswordVerifier();
+            aiProvider = new io.github.lz007001cn.veriqra.service.ai.VertexAiProvider(io.github.lz007001cn.veriqra.config.AiConfig.load());
+            context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName(),
+                    new io.github.lz007001cn.veriqra.service.ai.AiCaseService(transactions, daos, access,
+                            aiProvider));
             var adminPolicy = new AdminAccessPolicy();
             context.setAttribute(AdminServices.ATTRIBUTE, new AdminServices(
                     new AdminUserService(transactions, adminPolicy, passwords),
@@ -75,11 +80,13 @@ public final class ApplicationListener implements ServletContextListener {
     }
     @Override public void contextDestroyed(ServletContextEvent event) {
         event.getServletContext().removeAttribute(WebServices.ATTRIBUTE);
+        event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName());
         event.getServletContext().removeAttribute(AdminServices.ATTRIBUTE);
         event.getServletContext().removeAttribute(CollaborationService.class.getName());
         closePool(event.getServletContext());
     }
     private void closePool(ServletContext context) {
+        if (aiProvider != null) { aiProvider.close(); aiProvider = null; }
         if (pool != null) {
             try { pool.close(); } catch (SQLException e) { context.log("Connection pool cleanup failed"); }
             pool = null;

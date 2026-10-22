@@ -341,7 +341,7 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         var system = call("GET", "/admin/system", null);
         assertEquals(200, system.statusCode());
         var runtime = json(system);
-        assertEquals("0.2.0", runtime.get("veriqraVersion").asText());
+        assertEquals(io.github.lz007001cn.veriqra.web.BuildInfo.current().version(), runtime.get("veriqraVersion").asText());
         assertTrue(runtime.get("buildCommit").asText().matches("[0-9a-f]{40}"));
         assertDoesNotThrow(() -> java.time.Instant.parse(runtime.get("buildTime").asText()));
         assertEquals("UP", runtime.get("databaseStatus").asText());

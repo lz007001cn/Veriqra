@@ -10,6 +10,10 @@ public final class RequirementHandler {
     public static void handle(HttpServletRequest req, HttpServletResponse res, WebServices s,
                               Long actor, Long project, String[] path) throws IOException {
         String method = req.getMethod();
+        if (path.length >= 6 && path[5].equals("ai-cases")) {
+            AiCaseHandler.handle(req, res, actor, project, path);
+            return;
+        }
         if (path.length == 4) {
             JsonHttp.method(res, method, "GET", "POST");
             if (method.equals("GET")) {
