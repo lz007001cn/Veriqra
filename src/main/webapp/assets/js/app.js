@@ -72,6 +72,7 @@
       return;
     }
     const context = readRoute();
+    closeProjectCreation(false);
     handledRoute = location.href || null;
     setView(context.view, true);
     if (!projects.length) return;
@@ -98,7 +99,13 @@
 
   function announce(name, detail) { document.dispatchEvent(new CustomEvent('veriqra:' + name, { detail: detail })); }
   function setView(view, silent) {
-    currentView = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'collaboration'].includes(view) ? view : 'dashboard';
+    const nextView = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'collaboration'].includes(view) ? view : 'dashboard';
+    if (nextView !== currentView) {
+      closeProjectCreation(false);
+      dismissProjectCreated();
+    }
+    currentView = nextView;
+    $('#project-create-open').toggleClass('d-none', !currentUser || currentUser.systemRole !== 'ADMIN' || currentView !== 'dashboard');
     $('[data-view]').removeClass('active').removeAttr('aria-current');
     $('[data-view="' + currentView + '"]').addClass('active').attr('aria-current', 'page');
     const labels = { dashboard: [t("shell.overview", null, 'OVERVIEW'), t("shell.projectDashboard", null, 'Project dashboard'), t("shell.yourCurrentQualityWorkspace", null, 'Your current quality workspace.')], requirements: [t("shell.testASSETS", null, 'TEST ASSETS'), t("common.requirements", null, 'Requirements'), t("shell.manageRequirementsAndTheirTestCoverage", null, 'Manage requirements and their test coverage.')], 'test-cases': [t("shell.testASSETS", null, 'TEST ASSETS'), t("common.testCases", null, 'Test cases'), t("shell.maintainCurrentTestDefinitionsAndSteps", null, 'Maintain current test definitions and steps.')], 'test-plans': [t("shell.planning", null, 'PLANNING'), t("common.testPlans", null, 'Test plans'), t("shell.defineTheCasesToExecute", null, 'Define the cases to execute.')], runs: [t("shell.execution", null, 'EXECUTION'), t("common.testRuns", null, 'Test runs'), t("shell.inspectFrozenSnapshotsAndRecordAttempts", null, 'Inspect frozen snapshots and record attempts.')], defects: [t("shell.quality", null, 'QUALITY'), t("common.defects", null, 'Defects'), t("shell.trackFailuresRetestsAndClosureEvidence", null, 'Track failures, retests and closure evidence.')], automation: [t("shell.automation", null, 'AUTOMATION'), t("common.automationImports", null, 'Automation & imports'), t("shell.confirmMappingsAndImportJUnitResults", null, 'Confirm mappings and import JUnit results.')], collaboration: [t('collab.eyebrow', null, 'COLLABORATION'), t('collab.navigation', null, 'Teams & tasks'), t('collab.description', null, 'Organize project teams and review assigned work.')] };
@@ -165,6 +172,8 @@
   function chooseProject(id) {
     if (!projects.some(function (p) { return String(p.id) === String(id); })) return;
     if (creatingProject) return;
+    closeProjectCreation(false);
+    if (String(id) !== String(createdProjectId)) createdProjectId = null;
     const request = ++projectRequest;
     desiredProject = String(id);
     renderProjectLinks();
@@ -252,7 +261,8 @@
         currentUser = user;
         announce('identity', { user: user });
         $('#current-user').text(user.username);
-        $('#admin-entry, #project-create-open').toggleClass('d-none', user.systemRole !== 'ADMIN');
+        $('#admin-entry').toggleClass('d-none', user.systemRole !== 'ADMIN');
+        $('#project-create-open').toggleClass('d-none', user.systemRole !== 'ADMIN' || currentView !== 'dashboard');
         $('#project-create-form').addClass('d-none');
         $('#project-create-open').attr('aria-expanded', 'false');
         showShell();
@@ -270,18 +280,24 @@
   function projectCreationError(message) {
     $('#project-create-error').text(message || '').toggleClass('d-none', !message);
   }
-  function closeProjectCreation() {
+  function closeProjectCreation(focus) {
     $('#project-create-form').addClass('d-none');
-    $('#project-create-open').attr('aria-expanded', 'false').trigger('focus');
+    $('#project-create-open').attr('aria-expanded', 'false');
+    if (focus !== false) $('#project-create-open').trigger('focus');
+  }
+  function dismissProjectCreated() {
+    createdProjectId = null;
+    $('#project-created').addClass('d-none');
   }
   $('#project-create-open').on('click', function () {
-    if (!currentUser || currentUser.systemRole !== 'ADMIN' || creatingProject) return;
+    if (!currentUser || currentUser.systemRole !== 'ADMIN' || creatingProject || currentView !== 'dashboard') return;
     $('#project-create-form').removeClass('d-none');
     $(this).attr('aria-expanded', 'true');
     projectCreationError('');
     $('#project-create-key').trigger('focus');
   });
   $('#project-create-cancel').on('click', closeProjectCreation);
+  $('#project-created-dismiss').on('click', dismissProjectCreated);
   $('#project-create-form').on('submit', function (event) {
     event.preventDefault();
     if (!currentUser || currentUser.systemRole !== 'ADMIN' || creatingProject) return;
@@ -298,9 +314,9 @@
     api.post('projects', { projectKey: key, name: name, description: $('#project-create-description').val().trim() || null })
       .done(function (project) {
         creatingProject = false;
-        createdProjectId = project.id;
         form.reset(); closeProjectCreation();
         location.hash = '#dashboard'; setView('dashboard');
+        createdProjectId = project.id;
         // Only expose setup after the returned project has been loaded and selected.
         $('#project-created').addClass('d-none');
         loadProjects(project.id);
