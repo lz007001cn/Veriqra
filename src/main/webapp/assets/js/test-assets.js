@@ -65,7 +65,7 @@
       priority: $('#asset-priority').val(), status: $('#asset-status').val(), preconditions: $('#asset-preconditions').val(),
       steps: $('#step-editor .step-editor-row').map(function () { return { action: $(this).find('.step-action').val(), expected: $(this).find('.step-expected').val() }; }).get() });
   }
-  function dirty() { return writing || uncertainWrites.size > 0 || !!(pendingLink && pendingLink.uncertain) || (formBaseline !== null && draftValue() !== null && formBaseline !== draftValue()); }
+  function dirty() { return !!(window.VeriqraAiCases && window.VeriqraAiCases.hasDraft()) || writing || uncertainWrites.size > 0 || !!(pendingLink && pendingLink.uncertain) || (formBaseline !== null && draftValue() !== null && formBaseline !== draftValue()); }
   function confirmDiscard() { return !dirty() || window.confirm(t('r2Assets.discardDraft', null, 'Discard the unsaved draft?')); }
   function guard() {
     if (window.VeriqraDraftGuard) window.VeriqraDraftGuard.register(draftOwner, { dirty: dirty, clear: function () { formBaseline = null; pendingLink = null; uncertainWrites.clear(); } });
@@ -285,6 +285,7 @@
   function recoveryMessage(message) { recoveryDescriptor = descriptor(message); renderFormFeedback(); }
   function focusHeading(selector) { $(selector).attr('tabindex', '-1').trigger('focus'); }
   function reset() {
+    if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
     generation++;
     rows = [];
     detail = null;
@@ -325,6 +326,7 @@
 
   async function list() {
     if (!projectId || !active()) return;
+    if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
     const token = ++generation;
     detail = null; detailId = null; writing = false; formBaseline = null;
     pendingLink = null;
@@ -433,6 +435,7 @@
     } }
   }
   function renderPrimaryActions() {
+    if (window.VeriqraAiCases) window.VeriqraAiCases.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable() } : null);
     const current = routeContext();
     const target = $('#asset-primary-actions').empty();
     if (current.sourceRequirementId && view === 'test-cases') target.append(linkTo('requirements',

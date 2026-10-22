@@ -1,13 +1,13 @@
 # Veriqra V1 数据库
 
-核心模型冻结版本：[Freeze v1.0](../docs/DOMAIN-FREEZE-v1.0.md)，目标 MySQL 8.0.46，19 表、154 字段。Phase 5 R5 增加 5 张 Administration 表；项目协作增量再增加 5 张表，当前空库安装为 29 表。增量结构分别见 [R5 说明](../docs/PHASE5-R5-ADMINISTRATION.md) 和 [项目协作说明](../docs/PROJECT-COLLABORATION.md)。
+核心模型冻结版本：[Freeze v1.0](../docs/DOMAIN-FREEZE-v1.0.md)，目标 MySQL 8.0.46，19 表、154 字段。Phase 5 R5 增加 5 张 Administration 表；项目协作增量再增加 5 张表，当前 schema.sql 为 32 表，执行 R1 缺陷复测迁移后为 35 表。增量结构分别见 [R5 说明](../docs/PHASE5-R5-ADMINISTRATION.md) 和 [项目协作说明](../docs/PROJECT-COLLABORATION.md)。
 见 [完整设计](../docs/DATABASE-DESIGN-DRAFT.md) 和 [实测报告](../docs/DATABASE-VALIDATION-v1.0.md)。
 
 ## 执行文件
 
 | 文件 | 作用 |
 | --- | --- |
-| schema.sql | 当前 29 表空库建表及约束；不含建库/删库或 IF NOT EXISTS |
+| schema.sql | 当前 32 表空库建表及约束；不含建库/删库或 IF NOT EXISTS |
 | schema-v1-frozen.sql | 原 19 表冻结 DDL，保留给 V1 验证脚本复现历史结果 |
 | migrations/20260924-admin.sql | 已有 19 表安装的单次升级脚本；新增索引、5 表并为已有用户补 0 余额账户；必须先备份并在选定目标库人工执行 |
 | migrations/20260926-collaboration.sql | 已有 24 表（含 Administration）安装的单次升级脚本；增加项目负责人、小组、任务和历史事件 5 表。不得跳过备份或在本地开发时自动执行 |
@@ -21,7 +21,7 @@
 
 ## 当前安装与历史验证
 
-新安装在空库执行 `schema.sql`。已有 19 表的环境必须先迁移 Administration；已有 24 表的环境先备份、核对当前结构，再审查并单次执行 `migrations/20260926-collaboration.sql`。迁移必须由具备 DDL 权限的数据库管理员执行，不能使用只有 DML 权限的运行用户 `veriqra_app`。迁移 SQL 不含 `USE`，必须显式选择目标库；不使用 `--force`，失败时保留现场并调查，不盲目重跑。此轮没有对生产或日常开发库执行迁移。旧版 680 行 seed 和 178 项约束测试只对应冻结的 19 表；历史验证脚本继续使用冻结 DDL，不把它误称为当前 29 表验证。
+新安装在空库依次执行 `schema.sql` 和 `migrations/20261014-r1-defect-retest.sql`（共 35 表）。已有 19 表的环境必须先迁移 Administration；已有 24 表的环境先备份、核对当前结构，再审查并单次执行 `migrations/20260926-collaboration.sql`。迁移必须由具备 DDL 权限的数据库管理员执行，不能使用只有 DML 权限的运行用户 `veriqra_app`。迁移 SQL 不含 `USE`，必须显式选择目标库；不使用 `--force`，失败时保留现场并调查，不盲目重跑。此轮没有对生产或日常开发库执行迁移。旧版 680 行 seed 和 178 项约束测试只对应冻结的 19 表；历史验证脚本继续使用冻结 DDL，不把它误称为当前 32 表验证。
 
 ## 从空库复现历史 V1 验证
 

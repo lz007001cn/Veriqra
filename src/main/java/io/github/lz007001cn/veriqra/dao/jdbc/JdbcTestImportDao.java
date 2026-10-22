@@ -19,6 +19,9 @@ public final class JdbcTestImportDao implements TestImportDao {
     @Override public List<TestImport> listByRun(Long runId) {
         return query(SELECT + " WHERE test_run_id=? ORDER BY imported_at, id", runId);
     }
+    @Override public List<TestImport> listByProject(Long projectId) {
+        return query(SELECT + " WHERE test_run_id IN (SELECT id FROM test_runs WHERE project_id=?) ORDER BY imported_at DESC, id DESC", projectId);
+    }
     private List<TestImport> query(String sql, Long id) {
         try (PreparedStatement s = connection.prepareStatement(sql)) {
             s.setObject(1, id, Types.BIGINT);

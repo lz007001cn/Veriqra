@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="Veriqra demo" tests="3" failures="1" skipped="1">
+  <testcase classname="demo.LoginTest" name="validLogin" time="0.12"/>
+  <testcase classname="demo.LoginTest" name="invalidPassword" time="0.08">
+    <failure message="Expected invalid password message">Message was not visible</failure>
+  </testcase>
+  <testcase classname="demo.LoginTest" name="emptyUsername" time="0">
+    <skipped message="Demo environment unavailable"/>
+  </testcase>
+</testsuite>

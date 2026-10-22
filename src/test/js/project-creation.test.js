@@ -69,7 +69,7 @@ async function browser(role = 'ADMIN') {
     $('#project-create-key').val(key); $('#project-create-name').val('Quality project');
     $('#project-create-description').val('   ');
   }
-  return { $, calls, events, stored, fields, submit };
+  return { $, calls, events, stored, fields, submit, window };
 }
 
 test('ADMIN can create the first project, select its returned identity and open member setup', async () => {
@@ -126,4 +126,39 @@ test('failed project-list reload cannot expose a setup link for the previous pro
   assert.equal(ui.$('#project-created').hidden, true);
   assert.equal(ui.$('#page-alert').content, 'Unavailable');
   assert.equal(ui.events.some(event => event.type === 'veriqra:project' && event.detail.project?.id === 10), false);
+});
+
+test('navigating to test work closes the global create form while keeping an unfinished project draft', async () => {
+  const ui = await browser();
+  ui.$('#project-create-open').handlers.click.call(ui.$('#project-create-open'));
+  ui.fields('DRAFT2026');
+  ui.window.VeriqraQaNavigation.open('test-plans', {});
+  assert.equal(ui.$('#project-create-form').hidden, true);
+  assert.equal(ui.$('#project-create-open')['aria-expanded'], 'false');
+  assert.equal(ui.$('#project-create-open').hidden, true);
+  assert.equal(ui.$('#project-create-key').val(), 'DRAFT2026');
+  ui.window.VeriqraQaNavigation.open('dashboard', {});
+  ui.$('#project-create-open').handlers.click.call(ui.$('#project-create-open'));
+  assert.equal(ui.$('#project-create-form').hidden, false);
+  assert.equal(ui.$('#project-create-key').val(), 'DRAFT2026');
+});
+
+test('project-created message is dismissed when navigating away and does not return with the dashboard', async () => {
+  const ui = await browser(); ui.fields(); ui.submit();
+  const project = {id:10,projectKey:'QA2026',name:'Quality project',status:'ACTIVE'};
+  ui.calls[2].call.resolve(project); ui.calls[3].call.resolve([project]); ui.calls[4].call.resolve(project);
+  assert.equal(ui.$('#project-created').hidden, false);
+  ui.window.VeriqraQaNavigation.open('requirements', {});
+  assert.equal(ui.$('#project-created').hidden, true);
+  ui.window.VeriqraQaNavigation.open('dashboard', {});
+  assert.equal(ui.$('#project-created').hidden, true);
+});
+
+test('project-created message can be closed before continuing on the dashboard', async () => {
+  const ui = await browser(); ui.fields(); ui.submit();
+  const project = {id:10,projectKey:'QA2026',name:'Quality project',status:'ACTIVE'};
+  ui.calls[2].call.resolve(project); ui.calls[3].call.resolve([project]); ui.calls[4].call.resolve(project);
+  assert.equal(ui.$('#project-created').hidden, false);
+  ui.$('#project-created-dismiss').handlers.click();
+  assert.equal(ui.$('#project-created').hidden, true);
 });

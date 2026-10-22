@@ -59,6 +59,13 @@ class TestImportServiceIntegrationTest extends ServiceFixture {
         assertNull(result.testRun().testPlanId());
         assertEquals(4, result.runCases().size());
         assertEquals(4, result.attempts().size());
+        assertEquals(1, imports.list(s.developer().id(),s.project().id(),null).size());
+        assertEquals(1, imports.list(s.developer().id(),s.project().id(),result.testRun().id()).size());
+        assertEquals(result.testImport(), imports.get(s.developer().id(),s.project().id(),result.testImport().id(),null).testImport());
+        assertEquals(result.testRun(), imports.get(s.developer().id(),s.project().id(),null,request).testRun());
+        Scenario other = scenario("IMPOTHER");
+        assertThrows(NotFoundException.class,()->imports.get(other.tester().id(),other.project().id(),null,request));
+        assertThrows(NotFoundException.class,()->imports.list(other.tester().id(),other.project().id(),result.testRun().id()));
         assertArrayEquals(MessageDigest.getInstance("SHA-256").digest(payload), result.testImport().reportSha256());
         assertEquals(List.of(TestAttemptStatus.PASS, TestAttemptStatus.FAIL, TestAttemptStatus.FAIL,
                         TestAttemptStatus.SKIPPED), result.attempts().stream().map(TestAttempt::status).toList());

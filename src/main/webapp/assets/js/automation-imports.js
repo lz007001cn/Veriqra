@@ -58,6 +58,7 @@
     notice('');
   }
   function conflict(error, operation) {
+    if (error.code && error.code.startsWith('IMPORT_')) return t('imports.' + error.code);
     return error.status === 409
       ? operation === 'import'
         ? t('automation.importConflict', null, 'Import conflicts with current mappings or this request key was used with different data. Review the preview and selected file; do not assume partial success.')
@@ -307,7 +308,7 @@
       $('#import-submit').prop('disabled', !result.readyToImport);
       status(result.readyToImport ? t("automation.previewIsReadyConfirmTheImportDetailsBeforeSubmitting", null, 'Preview is ready. Confirm the import details before submitting.')
         : t("automation.previewIsReadOnlyRegisterAndMapUnknownIdentitiesThenPreviewAgain", null, 'Preview is read-only. Register and map unknown identities, then preview again.'), !result.readyToImport);
-    } catch (error) { if (valid(token) && uploadToken === uploadGeneration) status(error.message, true); }
+    } catch (error) { if (valid(token) && uploadToken === uploadGeneration) status(conflict(error, 'import'), true); }
     finally { if (valid(token) && uploadToken === uploadGeneration) $('#import-preview-button').prop('disabled', false); }
   });
   $('#import-form').on('submit', async function (event) {
@@ -331,7 +332,10 @@
     $('#import-file, #import-namespace, #import-run-name, #import-environment, #import-build').prop('disabled', true);
     status(t("automation.importingMappedResultsAtomically", null, 'Importing mapped results atomically…'));
     try {
+      if (window.VeriqraImportHistory) pendingImport.requestKey = await window.VeriqraImportHistory.begin(file, signature);
+      if (!valid(token) || uploadToken !== uploadGeneration || file !== selectedFile) return;
       const result = await api.xml(queryPath(false, pendingImport.requestKey), file);
+      if (valid(token) && window.VeriqraImportHistory) window.VeriqraImportHistory.complete();
       if (!valid(token) || uploadToken !== uploadGeneration || file !== selectedFile) return;
       pendingImport = null;
       renderImport(result);
@@ -351,6 +355,15 @@
         $('#import-submit').prop('disabled', !preview);
         $('#import-file, #import-namespace, #import-run-name, #import-environment, #import-build').prop('disabled', false);
       }
+    }
+  });
+  document.addEventListener('veriqra:import-recovered', function (event) {
+    if (active() && String(event.detail.projectId) === String(projectId)) {
+      pendingImport = null; importBusy = false; selectedFile = null;
+      invalidatePreview(false); $('#import-file').val('');
+      $('#import-file, #import-namespace, #import-run-name, #import-environment, #import-build').prop('disabled', false);
+      $('#import-file-status').text(t('automation.importCompleteSelectANewXMLFileForAnotherImport'));
+      renderImport(event.detail.result);
     }
   });
 })(jQuery, window.VeriqraApi);

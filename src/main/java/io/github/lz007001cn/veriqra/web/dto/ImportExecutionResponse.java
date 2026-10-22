@@ -18,7 +18,7 @@ public record ImportExecutionResponse(ImportRecordResponse testImport, RunRespon
     public record ImportRecordResponse(Long id, Long testRunId, UUID requestKey, String reportSha256,
                                        String sourceNamespace, String originalFilename, Long importedBy,
                                        LocalDateTime importedAt) {
-        static ImportRecordResponse from(TestImport value) {
+        public static ImportRecordResponse from(TestImport value) {
             return new ImportRecordResponse(value.id(), value.testRunId(), value.requestKey(),
                     HexFormat.of().formatHex(value.reportSha256()), value.sourceNamespace(), value.originalFilename(),
                     value.importedBy(), value.importedAt());

@@ -29,6 +29,9 @@ public final class ApiExceptionFilter implements Filter {
             String message = "An internal error occurred";
             String reasonCode = null;
             if (failure instanceof HttpFailure f) { status = f.status(); code = f.code(); message = f.getMessage(); }
+            else if (failure instanceof io.github.lz007001cn.veriqra.service.ai.AiUnavailableException f) {
+                status = f.code().equals("AI_TIMEOUT") ? 504 : 503; code = f.code(); message = "AI generation is unavailable; manual case creation remains available";
+            }
             else if (failure instanceof AdminConflictException f) { status = 409; code = f.code(); message = f.getMessage(); }
             else if (failure instanceof io.github.lz007001cn.veriqra.web.security.LoginRateLimiter.Limited f) {
                 status = 429; code = "TOO_MANY_REQUESTS"; message = "Login temporarily unavailable; retry later";

@@ -7,9 +7,15 @@ Software Test & Quality Management Platform · 软件测试与质量管理平台
 
 公开域名目标：[https://veriqra.xyz](https://veriqra.xyz)。仓库包含 REST 后端、主业务前端、Administration Console 和项目协作界面。
 
-核心业务模型冻结为 19 表 / 154 字段；Phase 5 R5 新增 5 张 Administration 表，项目协作再新增 5 张表，当前空库 `schema.sql` 共 29 表。JDBC、Service、登录/会话、测试资产、执行、缺陷、自动化、JUnit 导入和项目协作 API 均已实现。公开部署安全基线包括登录限流、严格 Origin/Host 校验、同源写请求头和安全 Session Cookie。现有环境升级步骤分别见 [Administration 说明](docs/PHASE5-R5-ADMINISTRATION.md) 与 [项目协作说明](docs/PROJECT-COLLABORATION.md)；仓库结构不代表生产库已完成相应迁移。
+核心业务模型冻结为 19 表 / 154 字段；Phase 5 R5 新增 5 张 Administration 表，项目协作再新增 5 张表，当前空库 `schema.sql` 共 32 表，执行 R1 缺陷复测迁移后为 35 表。JDBC、Service、登录/会话、测试资产、执行、缺陷、自动化、JUnit 导入和项目协作 API 均已实现。公开部署安全基线包括登录限流、严格 Origin/Host 校验、同源写请求头和安全 Session Cookie。现有环境升级步骤分别见 [Administration 说明](docs/PHASE5-R5-ADMINISTRATION.md) 与 [项目协作说明](docs/PROJECT-COLLABORATION.md)；仓库结构不代表生产库已完成相应迁移。
 
 QATrack → Veriqra 的更名与部署历史见 [更名与部署说明](docs/VERIQRA-RENAME.md)。
+
+v0.2.0 已部署到 ECS，备份位置与验证结果见 [部署记录](docs/ECS-DEPLOYMENT.md)。
+
+期末展示安排见 [开发与精简计划](docs/DEVELOPMENT-ROADMAP.md)：v0.3.0 补齐 JUnit 导入与 AI 用例生成，v0.9.0 打磨展示并在最后精简外围功能。
+
+v0.3 开发功能与本地配置见 [AI 用例与 JUnit 导入](docs/V0.3.md)。
 
 ## 技术约束
 
@@ -20,7 +26,7 @@ QATrack → Veriqra 的更名与部署历史见 [更名与部署说明](docs/VER
 - DAO 必须分离接口与实现；业务规则和事务控制归 Service，Servlet 只处理 HTTP。
 - 前端使用 HTML、CSS、JavaScript、jQuery、Bootstrap 和 AJAX，不引入前端构建系统。
 - 前端界面支持 English / 简体中文切换；语言偏好仅保存在浏览器本地，时间统一按 `Asia/Shanghai` 显示，详见 [R5.1 国际化说明](docs/PHASE5-R5.1-I18N.md)。
-- 使用 JUnit 5、Mockito、JaCoCo 和隔离 MySQL/HTTP 集成测试验证实现。
+- 使用 JUnit 5、Node.js 测试及隔离 MySQL/HTTP 集成测试验证实现。
 
 运行依赖为 Jakarta Servlet 6（provided）、Jackson JSON 和 MySQL Connector/J；JUnit 5 与嵌入式 Tomcat 仅用于测试。
 
@@ -59,7 +65,7 @@ mvn validate
 mvn clean package
 ```
 
-输出为 `target/veriqra-0.2.0.war`。普通 `mvn test` 运行不依赖数据库的测试；
+输出为 `target/veriqra-0.3.0.war`。普通 `mvn test` 运行不依赖数据库的测试；
 配置独立空测试库后使用 `mvn -Pmysql-tests test` 或 `mvn -Pmysql-tests clean package`，同时运行真实 MySQL 测试。
 集成测试拒绝开发库及非空库，不使用开发 seed。配置、连接生命周期、事务示例和本轮实测见 [Phase 2 JDBC 说明](docs/PHASE2-JDBC-FOUNDATION.md)。
 
@@ -75,7 +81,7 @@ Maven runner 均应选择 JDK 21，语言级别以 POM 中的 `maven.compiler.re
 - [数据库设计](docs/DATABASE-DESIGN-DRAFT.md)：19 表、154 字段及与真实 DDL 一致的约束和索引。
 - [Mermaid ER 源文件](docs/V1-ER.mmd)：19 表、40 条外键关系。
 - [Freeze v1.0 决策](docs/DOMAIN-FREEZE-v1.0.md)：Run 直接保存非空 project_id 的七维比较。
-- [数据库执行说明](database/README.md)：冻结 19 表验证、当前 29 表空库安装及增量迁移。
+- [数据库执行说明](database/README.md)：冻结 19 表验证、当前 32 表空库安装及增量迁移。
 - [数据库实测报告](docs/DATABASE-VALIDATION-v1.0.md)：178 项测试、22 项数据一致性检查及对象统计。
 - [上一轮设计审计](docs/V1-DESIGN-AUDIT.md)：20 表阶段的历史记录，已由冻结模型取代。
 
