@@ -1,4 +1,30 @@
-# v0.2.0 部署到 ECS
+# ECS 部署记录
+
+## v0.3.0：AI 用例、导入恢复与本地演示数据
+
+2026-10-22 已部署到 [veriqra.xyz](https://veriqra.xyz)。
+
+- 发布提交：`eaae3db9c9a54996727e2b99155b347243a5f149`；[PR #3](https://github.com/lz007001cn/Veriqra/pull/3) 已合并。
+- 候选 `v0.3.0-rc.1` 与正式 `v0.3.0` 使用同一提交、同一 WAR；[正式发布](https://github.com/lz007001cn/Veriqra/releases/tag/v0.3.0)。
+- WAR：5,716,594 字节；SHA-256：`c0a85856372d612f4e4a0e6668d25cc6c3432a628eb69e8dcb350bc2bca89d3d`。
+- 沿用 35 张表，未执行结构迁移；线上原有两个项目保留。
+- Vertex 配置位于 `/opt/veriqra/config/ai.properties`，通过 systemd 外部配置加载；真实后端生成返回 HTTP 200、3 条候选。
+
+用户本地创建的 `QA20261022`／ZZZSwitch 项目已增量同步为线上项目 ID `3`：1 条需求、5 条用例、1 个计划、1 次运行、5 个运行用例及步骤快照，同时保留需求关联、项目成员、负责人和两个小组设置。44 条记录按映射后的 ID 逐字段核对通过，包含原始保存时间。
+
+本地 `v03demo` 的操作映射至现有线上账号 `lz007001cn`；未复制演示账号密码或登录会话。同步时本地没有已提交的 Attempt 或新缺陷，线上这次运行仍为 `IN_PROGRESS`、5 条 `NOT_RUN`。可从[同步后的运行](https://veriqra.xyz/index.html?projectId=3&runId=3#runs)继续。
+
+此次是一次快照迁移；本地与线上后续修改不自动互相同步。界面内尚未提交的表单不属于已保存数据。
+
+验证：发布包 Java 基础测试、272 项前端测试；线上版本及 Commit、登录、项目与资产读取、运行快照、真实 AI 生成均通过。相关 MySQL 服务与 HTTP 测试已在开发阶段验证；本次保留用户本地业务记录，未清空该本地测试库。
+
+升级前备份：
+
+- ECS：`/root/veriqra-backup-v030-20261022T085716Z`。
+- 本机：`E:/Veriqra-private-backups/v030-local-sync-20261022/veriqra-backup-v030-20261022T085716Z.tar.gz`。
+- 包含原数据库、原 WAR、配置、本地最终快照与 ID 映射。代码回退和数据恢复分别按实际需要处理，避免覆盖上线后新记录。
+
+## v0.2.0
 
 2026-10-21 08:46（Asia/Singapore）已部署 v0.2.0：[veriqra.xyz](https://veriqra.xyz)。
 
