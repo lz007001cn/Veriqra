@@ -149,6 +149,7 @@ function browser(initial = { view: 'requirements', projectId: '7', requirementId
   const caseRow = (id = 20, status = 'DRAFT') => ({ id, projectId: 7, keyNo: id, title: 'Case ' + id, status, priority: 'MEDIUM', version: 3 });
   const requirement = (id = 10, status = 'ACTIVE') => ({ id, projectId: 7, keyNo: id, title: 'Requirement ' + id, status, priority: 'MEDIUM', version: 2 });
   return { $, nodes, requests, sourceReads, nav: integrated ? window.VeriqraQaNavigation : nav, navigation, dispatchProject, click, submit, caseRow, requirement, fire,
+    fireAiSaved: detail => document.dispatchEvent({ type: 'veriqra:ai-saved', detail }),
     pageshow: () => fire(windowNode, 'pageshow'), locale: () => document.dispatchEvent({ type: 'veriqra:localechange' }), reauth: () => document.dispatchEvent({ type: 'veriqra:reauthenticated' }),
     location, permissions: qaPermissions, permissionReads, guards, window, setLocale(value) { currentLocale = value; document.dispatchEvent({ type: 'veriqra:localechange' }); }, route: () => integrated ? window.VeriqraQaNavigation.read() : route, focused: () => document.activeElement };
 }
@@ -574,10 +575,68 @@ test('asset search and state filter apply to the loaded list with an honest resu
   const ui = browser({ view: 'test-cases', projectId: '7' }); ui.dispatchProject();
   ui.requests[0].resolve([{ ...ui.caseRow(20, 'READY'), title: 'Login with valid password' }, { ...ui.caseRow(21), title: 'Logout' }]); await flush();
   ui.$('#asset-search').val('login'); await ui.fire(ui.$('#asset-search')[0], 'input');
-  assert.equal(ui.$('#asset-list').children().length, 1); assert.match(ui.$('#asset-filter-count').text(), /Showing 1 of 2 loaded/);
+  assert.equal(ui.$('#asset-list').children().length, 1); assert.match(ui.$('#asset-filter-count').text(), /Showing 1 of 2 saved/);
   ui.$('#asset-status-filter').val('DRAFT'); await ui.fire(ui.$('#asset-status-filter')[0], 'change');
   assert.match(ui.$('#asset-list').children()[0].content, /No matching/); assert.equal(ui.requests.length, 1);
   ui.$('#asset-search').val('TC-021'); await ui.fire(ui.$('#asset-search')[0], 'input'); assert.equal(ui.$('#asset-list').children().length, 1);
+});
+
+test('empty asset lists lead to creation without showing a search field as an input form', async () => {
+  for (const view of ['requirements', 'test-cases']) {
+    const ui = browser({ view, projectId: '7' }); ui.dispatchProject();
+    ui.requests[0].resolve([]); await flush();
+    assert.equal(ui.$('#asset-list-filters').hasClass('d-none'), true);
+    assert.equal(ui.$('#asset-filter-count').hasClass('d-none'), true);
+    assert.ok(ui.$('#asset-list-status').text().includes(ui.$('#asset-new').text()));
+    assert.equal(ui.$('#asset-permission-note').hasClass('d-none'), true);
+    await ui.click('#asset-new');
+    assert.equal(ui.$('#asset-form').hasClass('d-none'), false);
+    assert.equal(ui.route().action, 'create');
+    assert.match(ui.$('#asset-form-guidance').text(), view === 'requirements' ? /acceptance criteria/ : /save the draft/);
+    ui.$('#asset-title').val('Unsaved entry'); ui.locale(); await flush();
+    assert.equal(ui.$('#asset-title').val(), 'Unsaved entry');
+    assert.match(ui.$('#asset-form-guidance').text(), view === 'requirements' ? /acceptance criteria/ : /save the draft/);
+    assert.equal(ui.requests.length, 1, 'Opening and translating a create form does not write or load another record.');
+  }
+});
+
+test('read-only users retain an explanation and cannot use the creation action', async () => {
+  const ui = browser({ view: 'requirements', projectId: '7' }, false, { canWriteAssets: false, projectRole: 'READER' });
+  ui.dispatchProject(); ui.requests[0].resolve([]); await flush();
+  assert.equal(ui.$('#asset-permission-note').hasClass('d-none'), false);
+  assert.match(ui.$('#asset-permission-note').text(), /Read-only access/);
+  assert.equal(ui.$('#asset-new').prop('disabled'), true);
+  await ui.click('#asset-new');
+  assert.equal(ui.$('#asset-form').hasClass('d-none'), true);
+  assert.equal(ui.requests.length, 1);
+});
+
+test('a case opened from a plan leads back to that plan instead of creating another one', async () => {
+  const ui = browser({ view: 'test-cases', projectId: '7', testCaseId: '20', sourcePlanId: '30' });
+  ui.dispatchProject(); ui.requests[0].resolve({ testCase: ui.caseRow(), steps: completeSteps }); await flush();
+  const links = ui.$('#asset-primary-actions').find('a').get();
+  const back = links.find(link => link.classes.has('btn-primary'));
+  assert.ok(back);
+  const url = new URL(back.attributes.href, 'http://localhost/');
+  assert.equal(url.hash, '#test-plans'); assert.equal(url.searchParams.get('planId'), '30');
+  assert.equal(url.searchParams.get('sourceTestCaseId'), '20');
+  assert.equal(links.some(link => /action=create/.test(link.attributes.href) && /#test-plans$/.test(link.attributes.href)), false);
+  assert.equal(ui.requests.length, 1);
+});
+
+test('AI save refreshes current requirement coverage and an older empty response cannot replace it', async () => {
+  const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+  assert.equal(ui.requests[1].url, 'projects/7/requirements/10/test-cases');
+  ui.fireAiSaved({ projectId: '7', requirementId: '10' });
+  assert.equal(ui.requests[2].url, 'projects/7/requirements/10/test-cases');
+  ui.requests[2].resolve([{ testCase: ui.caseRow(), status: 'NEEDS_REVIEW' }]); await flush();
+  assert.equal(ui.$('#asset-traces').find('a').length, 1);
+  ui.requests[1].resolve([]); await flush();
+  assert.equal(ui.$('#asset-traces').find('a').length, 1);
+  ui.fireAiSaved({ projectId: '8', requirementId: '10' });
+  ui.fireAiSaved({ projectId: '7', requirementId: '11' });
+  assert.equal(ui.requests.length, 3);
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
 });
 
 test('unknown create preserves draft and blocks same-session resubmission even after route change', async () => {

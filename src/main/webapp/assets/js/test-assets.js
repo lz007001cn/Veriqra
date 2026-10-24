@@ -12,6 +12,7 @@
   let editing = false;
   let projectArchived = false;
   let traceState = 'idle';
+  let traceRequest = 0;
   let writing = false;
   let formContext = {};
   let pendingLink = null;
@@ -116,7 +117,9 @@
     guard();
   }
   function translateExtras() {
-    $('#asset-search-label').text(t('r2Assets.search', null, 'Search title, key or description'));
+    $('#asset-search-label').text(t('r2Assets.search', null, 'Search saved items'));
+    $('#asset-search').attr('placeholder', t(view === 'requirements' ? 'assets.searchRequirements' : 'assets.searchCases', null,
+      view === 'requirements' ? 'Filter existing requirements by title, key or description' : 'Filter existing cases by title, key or description'));
     $('#asset-status-filter-label').text(t('common.status', null, 'Status'));
     $('#asset-description-help').text(t('r2Assets.descriptionHelp', null, 'Describe the user need and acceptance criteria. The template is optional and fully editable.'));
     $('#asset-description-template').text(t('r2Assets.useTemplate', null, 'Use acceptance criteria template'));
@@ -128,11 +131,18 @@
     $('#asset-source-retry').text(t('r2Assets.retrySourceRead', null, 'Read source requirement again'));
     renderSourceContext(); renderFormFeedback();
     if (latestFormValue) renderLatestSummary(latestFormValue);
-    if (!$('#asset-form').hasClass('d-none')) $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save definition') : t('common.save', null, 'Save'));
+    renderFormGuidance();
+    if (!$('#asset-form').hasClass('d-none')) $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save case') : t('common.save', null, 'Save'));
     const statuses = view === 'requirements' ? ['DRAFT', 'ACTIVE', 'ARCHIVED'] : ['DRAFT', 'READY', 'ARCHIVED'];
     $('#asset-status-filter').empty().append($('<option>').val('').text(t('r2Assets.allStates', null, 'All states')));
     statuses.forEach(function (value) { $('#asset-status-filter').append($('<option>').val(value).text(label(value))); });
     $('#asset-status-filter').val(statusFilter);
+  }
+  function renderFormGuidance() {
+    $('#asset-form-guidance').text(editing
+      ? t(view === 'test-cases' ? 'assets.definitionChangeHint' : 'assets.requirementChangeHint')
+      : t(view === 'test-cases' ? 'assets.newCaseHint' : 'assets.newRequirementHint', null,
+        view === 'test-cases' ? 'Enter the case and its steps, then save the draft.' : 'Describe the requirement and acceptance criteria. After saving, you can generate test cases with AI.'));
   }
   function loadPermissions(force) {
     const selected = projectId;
@@ -187,7 +197,7 @@
     const target = $('#asset-form-context').empty();
     if (sourceRequirementState === 'ready' && sourceRequirement) target.text(t('r2Assets.namedRequirementContext',
       { name: 'REQ-' + String(sourceRequirement.keyNo).padStart(3, '0') + ' · ' + sourceRequirement.title },
-      'Source requirement: {name}. Saving this case will then create its coverage link as a separate operation. Review that link explicitly afterwards.'));
+      'Source requirement: {name}. The saved case will be linked to this requirement for coverage review.'));
     else target.text(t(sourceRequirementState === 'loading' ? 'r2Assets.loadingSource' : 'r2Assets.sourceUnavailable', null,
       sourceRequirementState === 'loading' ? 'Checking the source requirement before creating a linked case…' : 'The source requirement could not be verified. No case has been created. Read it again or return to a valid requirement.')
       + (sourceFailure ? ' ' + feedbackText(sourceFailure) : ''));
@@ -255,10 +265,10 @@
     $('#asset-traces button, #asset-primary-actions a').attr('aria-disabled', writing ? 'true' : 'false');
     $('#asset-traces button, #asset-primary-actions button').prop('disabled', writing);
     $('#asset-partial-link-retry').prop('disabled', writing || !canWrite());
-    $('#asset-permission-note').text(permissionState === 'loading' ? t('r2Assets.permissionsLoading', null, 'Checking project permissions…')
+    $('#asset-permission-note').toggleClass('d-none', !!canWrite()).text(permissionState === 'loading' ? t('r2Assets.permissionsLoading', null, 'Checking project permissions…')
       : permissionState !== 'loaded' ? t('r2Assets.permissionsUnknown', null, 'Permissions could not be verified. Reopen the project after signing in; changes are disabled.')
-      : canWrite() ? t('r2Assets.writerRole', { role: label(qaContext.systemRole === 'ADMIN' ? 'ADMIN' : qaContext.projectRole || qaContext.systemRole) }, 'Your role: {role}. You can maintain QA assets; review links and Ready states explicitly.')
-      : t('r2Assets.readerRole', { role: label(qaContext.projectRole || qaContext.systemRole) }, 'Your role: {role}. QA assets are read-only. Ask a project TESTER or platform ADMIN to maintain them; a PM title alone does not grant this permission.'));
+      : canWrite() ? ''
+      : t('r2Assets.readerRole', { role: label(qaContext.projectRole || qaContext.systemRole) }, 'Read-only access. Ask a project tester or administrator to make changes.'));
   }
   function conflict(failure) { return failure.status === 409 ? t('assets.conflict', null,
     'This item changed or cannot be edited in its current state. Reload its latest details before trying again.') : failure.message || t('r2Assets.requestFailed', null, 'The request could not be completed. Check your session and reload the saved state.'); }
@@ -335,6 +345,7 @@
     $('#asset-list-title').text(view === 'requirements' ? t("common.requirements", null, 'Requirements') : t("common.testCases", null, 'Test cases'));
     $('#asset-new').text(view === 'requirements' ? t("assets.createRequirement", null, 'Create requirement') : t("assets.createTestCase", null, 'Create test case'));
     $('#asset-list').empty();
+    $('#asset-list-filters, #asset-filter-count').addClass('d-none');
     $('#asset-list-status').text(t("common.loading", null, 'Loading…'));
     focusHeading('#asset-list-title');
     try {
@@ -342,7 +353,7 @@
       if (!valid(token)) return;
       rows = result;
       $('#asset-list-status').text(result.length ? t('assets.itemCount', { count: window.I18n.formatNumber(result.length) }, '{count} item(s)')
-        : t("assets.noItemsYetCreateTheFirstOne", null, 'No items yet. Create the first one.'));
+        : t('assets.noItemsYetCreateTheFirstOne', { action: $('#asset-new').text() }, 'No items yet. Click “{action}” to add the first one.'));
       translateExtras(); renderList();
     } catch (failure) { if (valid(token)) {
       rows = [];
@@ -356,8 +367,9 @@
     const filtered = rows.filter(function (item) { return (!statusFilter || item.status === statusFilter)
       && (!query || [key(item), item.title, item.description || ''].join(' ').toLocaleLowerCase().includes(query)); });
     $('#asset-search').val(searchText); $('#asset-status-filter').val(statusFilter);
+    $('#asset-list-filters, #asset-filter-count').toggleClass('d-none', !rows.length);
     $('#asset-list').empty();
-    $('#asset-filter-count').text(t('r2Assets.filterCount', { shown: filtered.length, total: rows.length }, 'Showing {shown} of {total} loaded items. Search applies to this loaded project list.'));
+    $('#asset-filter-count').text(t('r2Assets.filterCount', { shown: filtered.length, total: rows.length }, 'Showing {shown} of {total} saved items.'));
     if (rows.length && !filtered.length) $('#asset-list').append($('<p class="text-secondary">').text(t('r2Assets.noMatches', null, 'No matching items. Clear the search or change the state filter.')));
       filtered.forEach(function (item) {
         const card = $('<div class="asset-list-row">');
@@ -442,12 +454,19 @@
       Object.assign(originContext(), { requirementId: current.sourceRequirementId, sourceTestCaseId: String(detail.row.id) }), t('assets.backToRequirement')));
     if (current.sourceTestCaseId && view === 'requirements') target.append(linkTo('test-cases',
       Object.assign(originContext(), { testCaseId: current.sourceTestCaseId }), t('assets.backToTestCase')));
-    if (current.sourcePlanId) target.append(linkTo('test-plans', { projectId: projectId, planId: current.sourcePlanId }, t('assets.backToPlan')));
+    const returnToPlan = !!current.sourcePlanId && view === 'test-cases' && writable();
+    if (current.sourcePlanId) {
+      const destination = { projectId: projectId, planId: current.sourcePlanId };
+      if (view === 'test-cases') destination.sourceTestCaseId = String(detail.row.id);
+      target.append(linkTo('test-plans', destination,
+        returnToPlan ? t('assets.returnToPlanWithCase', null, 'Return to source plan with this case') : t('assets.backToPlan'), returnToPlan));
+    }
     if (current.runId && current.runCaseId) target.append(linkTo('runs',
       { projectId: projectId, runId: current.runId, runCaseId: current.runCaseId, attemptId: current.attemptId }, t('shell.backToRun')));
     if (!writable()) return;
+    if (returnToPlan) return;
     target.append(view === 'requirements' ? linkTo('test-cases',
-      { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('assets.createLinkedTestCase'), true)
+      { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('assets.createLinkedTestCase'), false)
       : linkTo('test-plans', { projectId: projectId, action: 'create', sourceTestCaseId: String(detail.row.id) }, t('assets.createPlanWithCase'), true));
   }
   function readyProblems(value) {
@@ -475,8 +494,8 @@
     if (!detail || view !== 'test-cases') return;
     const problems = readyProblems(detail);
     $('#asset-ready-checks').text(detail.row.status === 'READY'
-      ? t('r2Assets.alreadyReady', null, 'This case is Ready. Changing its title, description, preconditions or steps will require review again; execution history stays frozen.')
-      : (problems.length ? problems.join(' ') : t('r2Assets.readyComplete', null, 'The saved steps are complete. Check the saved definition, then explicitly mark it Ready. Coverage links still require a separate human review.')));
+      ? t('r2Assets.alreadyReady', null, 'This case is Ready and can be added to a test plan.')
+      : (problems.length ? problems.join(' ') : t('r2Assets.readyComplete', null, 'Review the complete steps and mark this case Ready to add it to a plan. Review requirement coverage below.')));
     const lock = uncertainWrites.get(scopeKey('ready', detail.row.id));
     if (lock && detail.row.status === 'READY' && sameReadyDefinition(detail, lock.body) && detail.row.version > lock.body.expectedVersion) uncertainWrites.delete(scopeKey('ready', detail.row.id));
     $('#asset-ready').toggleClass('d-none', detail.row.status === 'ARCHIVED' || detail.row.status === 'READY');
@@ -514,19 +533,20 @@
         .text(t('r2Assets.reconcile', null, 'Check saved state (read only)')).on('click', function () { if (valid(token)) return openDetail(id); }));
     } } finally { if (valid(token)) { writing = false; updateControls(); } }
   }
-  async function loadTraceability() {
-    if (!detail || traceState === 'loading' || writing) return;
+  async function loadTraceability(force) {
+    if (!detail || (traceState === 'loading' && !force) || writing) return;
     const id = detail.row.id;
     const token = generation;
+    const request = ++traceRequest;
     traceState = 'loading'; currentLinks = [];
     $('#asset-traces').empty(); $('#trace-form').addClass('d-none');
     $('#asset-trace-load, #asset-trace-retry').addClass('d-none');
     $('#asset-trace-status').text(t('assets.loadingTraceability', null, 'Loading traceability…')); updateControls();
     try {
       const links = view === 'requirements' ? await api.get(base('requirements') + '/' + id + '/test-cases') : await linksForCase(id, token);
-      if (!valid(token) || !detail || !sameId(detail.row.id, id)) return;
+      if (!valid(token) || request !== traceRequest || !detail || !sameId(detail.row.id, id)) return;
       traceState = 'loaded'; $('#asset-trace-status').text(''); renderLinks(links); updateControls();
-    } catch (failure) { if (valid(token) && detail && sameId(detail.row.id, id)) {
+    } catch (failure) { if (valid(token) && request === traceRequest && detail && sameId(detail.row.id, id)) {
       traceState = 'error';
       $('#asset-trace-status').text(t('assets.traceLoadFailed', null, 'Traceability could not be loaded. Retry before changing links.') + ' ' + failure.message);
       $('#asset-trace-retry').removeClass('d-none'); updateControls();
@@ -630,7 +650,7 @@
     $('#asset-form-title').text(t(update ? (view === 'requirements' ? 'assets.editRequirement' : 'assets.editTestCase')
       : (view === 'requirements' ? 'assets.createRequirement' : 'assets.createTestCase')));
     renderSourceContext();
-    $('#asset-form-guidance').text(t(view === 'test-cases' ? 'assets.definitionChangeHint' : 'assets.requirementChangeHint'));
+    renderFormGuidance();
     $('#asset-title').val(row ? row.title : '');
     $('#asset-description').val(row ? row.description || '' : '');
     $('#asset-priority').val(row ? row.priority : 'MEDIUM');
@@ -646,7 +666,7 @@
     if (view === 'test-cases' && update) detail.steps.forEach(stepRow);
     panels('form');
     $('#asset-description-tools').toggleClass('d-none', view !== 'requirements');
-    $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save definition') : t('common.save', null, 'Save'));
+    $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save case') : t('common.save', null, 'Save'));
     formBaseline = draftValue(); updateControls();
     $('#asset-title').trigger('focus');
     if (!update && view === 'test-cases' && formContext.sourceRequirementId) verifySourceRequirement(generation);
@@ -709,6 +729,11 @@
   }
 
   ensureExtras();
+  document.addEventListener('veriqra:ai-saved', function (event) {
+    const saved = event.detail;
+    if (saved && view === 'requirements' && detail && sameId(saved.projectId, projectId)
+      && sameId(saved.requirementId, detail.row.id) && $('#asset-form').hasClass('d-none')) loadTraceability(true);
+  });
   $(document).on('veriqra:project', function (event) {
     reset();
     const project = event.originalEvent.detail.project;
@@ -734,7 +759,7 @@
         : (view === 'requirements' ? 'assets.createRequirement' : 'assets.createTestCase')));
       $('#asset-status option').each(function () { $(this).text(label(this.value)); });
       renderSourceContext();
-      $('#asset-form-guidance').text(t(view === 'test-cases' ? 'assets.definitionChangeHint' : 'assets.requirementChangeHint'));
+      renderFormGuidance();
       $('#step-editor .step-editor-row').each(function () {
         $(this).find('.step-action').prev('label').text(t('assets.actionMessage'));
         $(this).find('.step-expected').prev('label').text(t('assets.expectedResult'));
@@ -832,7 +857,7 @@
       else await openDetail(saved.id, update && view === 'test-cases' && saved.status === 'DRAFT' && (body.status === 'READY' || previousStatus === 'READY')
         ? t('assets.savedDraft', null, 'Saved as Draft because the definition changed. Review affected links before marking Ready.')
         : t(view === 'requirements' ? 'r2Assets.requirementSaved' : 'r2Assets.caseSaved', null,
-          view === 'requirements' ? 'Requirement saved. Next, create a linked test case.' : 'Case definition saved. Next, check and mark it Ready, then review requirement coverage.'));
+          view === 'requirements' ? 'Requirement saved. Generate cases with AI below, or create a case manually.' : 'Case definition saved. Next, check and mark it Ready, then review requirement coverage.'));
     } catch (failure) {
       if (valid(token)) {
         if (unknown(failure)) uncertainWrites.set(lockKey, { body: body, expectedStatus: expectedStatus });

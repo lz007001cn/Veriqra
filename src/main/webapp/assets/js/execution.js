@@ -76,6 +76,8 @@
     region.append($('<p class="small mb-1">').text(t('r2Exec.planStateSeparate', { status: label(current.plan.status) },
       'Saved plan status: {status}. Current case readiness is checked separately; later case edits may block a READY plan.')));
     if (!current.testCaseIds.length) region.append($('<p class="text-danger">').text(t('r2Exec.emptyPlan', null, 'Add at least one test case before marking this plan READY.')));
+    if (requireReady && current.plan.status !== 'READY') region.append($('<p class="text-danger">').text(t('execution.planMustBeReady', null,
+      'Open the source plan and mark it Ready before creating a run.')));
     blockers.forEach(function (id) {
       const row = byId.get(idText(id));
       region.append($('<div class="asset-link-row">').append(row ? routeLink('TC-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title, 'test-cases', { testCaseId: idText(id), sourcePlanId: idText(current.plan.id) }, '') : $('<span>').text(t('r2Exec.missingCase', null, 'A plan member is unavailable. Reload or remove it from this plan.')),
@@ -394,22 +396,38 @@
         .on('click', function () { changeMember(plan, id, title, 'remove'); }));
       $('#execution-items').append(row);
     });
-    if (plan.status === 'READY' && prep.ready && canWrite()) $('#execution-actions').append(routeLink(t('execution.createRunFromPlan', null, 'Create run from this plan'), 'runs',
-      { action: 'create', sourcePlanId: idText(plan.id) }, 'btn btn-primary'));
+    const sourceCandidate = sourceCase && byId.get(String(sourceCase));
+    if (sourceCandidate && sourceCandidate.status !== 'ARCHIVED' && !current.testCaseIds.some(function (id) { return sameId(id, sourceCase); })
+      && plan.status !== 'ARCHIVED' && canWrite() && !planIntents.has(intentKey(plan.id))) $('#execution-actions').append(
+      $('<button type="button" class="btn btn-primary">').attr('id', 'execution-add-source-case')
+        .text(t('execution.addSourceCaseToPlan', null, 'Add this case to the plan')).on('click', function () { addMembers(plan, [sourceCandidate.id]); }));
+    if (plan.status === 'READY' && prep.ready && canWrite() && !planIntents.has(intentKey(plan.id))) $('#execution-actions').append(
+      $('<p class="w-100 mb-0">').text(t('execution.planNextCreateRun', { count: window.I18n.formatNumber(current.testCaseIds.length) },
+        'Next: create a run to record results for these {count} cases.')),
+      routeLink(t('execution.createRunFromPlan', null, 'Create run from this plan'), 'runs',
+        { action: 'create', sourcePlanId: idText(plan.id) }, 'btn btn-primary').attr('id', 'execution-create-plan-run'));
     if (plan.status === 'READY' && !prep.ready) $('#execution-progress').append($('<p class="alert alert-warning">').text(t('r2Exec.readyButBlocked', null, 'This plan is saved as READY, but it is currently blocked. Open the listed cases, review them and mark them READY.')));
     if (plan.status === 'ARCHIVED' || !canWrite()) return;
     if (planIntents.has(intentKey(plan.id))) {
       $('#execution-actions').append($('<p class="text-danger">').text(t('r2Exec.planWriteUnknown', null, 'A previous plan change has an unconfirmed result. Review the latest scope; this page will not resend it automatically.'))); return;
     }
-    if (plan.status === 'DRAFT') $('#execution-actions').append($('<button type="button" class="btn btn-primary">').attr('id', 'execution-plan-ready').text(t('r2Exec.markPlanReady', null, 'Check and mark plan READY')).prop('disabled', !prep.ready)
-      .on('click', function () { markPlanReady(plan); }));
-    $('#execution-actions').append($('<p class="text-secondary small w-100 mb-0">').text(t('execution.planMembershipDraftHint', null,
-      'Adding or removing cases returns this plan to Draft. Mark it Ready again to create a run.')));
+    if (plan.status === 'DRAFT') {
+      if (prep.ready) $('#execution-actions').append($('<p class="w-100 mb-0">').text(t('execution.planNextReady', null,
+        'Next: mark this plan Ready, then create its test run.')));
+      $('#execution-actions').append($('<button type="button" class="btn btn-primary">').attr('id', 'execution-plan-ready').text(t('r2Exec.markPlanReady', null, 'Check and mark plan READY')).prop('disabled', !prep.ready)
+        .on('click', function () { markPlanReady(plan); }));
+    }
     $('#execution-actions').append($('<button type="button" class="btn btn-outline-primary">').text(t("execution.editPlan", null, 'Edit plan'))
       .on('click', function () { showForm(true); }));
     $('#execution-actions').append($('<button type="button" class="btn btn-outline-danger">').text(t("execution.archivePlan", null, 'Archive plan'))
       .on('click', function () { archivePlan(plan); }));
     const available = cases.filter(function (item) { return item.status !== 'ARCHIVED' && !current.testCaseIds.some(function (id) { return sameId(id, item.id); }); });
+    if (!current.testCaseIds.length) {
+      if (available.length) $('#execution-actions').append($('<button type="button" class="btn btn-primary">').text(t('execution.choosePlanCases', null, 'Choose cases to add'))
+        .on('click', function () { $('#execution-plan-case-search').trigger('focus'); }));
+      else $('#execution-actions').append(routeLink(t('execution.createFirstPlanCase', null, 'Create a test case first'), 'test-cases',
+        { action: 'create', sourcePlanId: idText(plan.id) }, 'btn btn-primary'));
+    }
     if (available.length) {
       const chooser = $('<fieldset class="w-100 mt-3">').append($('<legend class="fs-6">').text(t('r2Exec.addSelectedCases', null, 'Add selected cases')));
       const search = $('<input type="search" class="form-control mb-2">').attr('id', 'execution-plan-case-search').attr('aria-label', t('r2Exec.searchCases', null, 'Search these project cases')).attr('placeholder', t('r2Exec.searchCases', null, 'Search these project cases'));
@@ -548,8 +566,10 @@
     permissionNote('#execution-actions');
     if (run.status === 'IN_PROGRESS' && canWrite()) {
       const next = current.cases.find(function (item) { return item.currentOutcome === 'NOT_RUN'; });
-      if (next) $('#execution-actions').append(routeLink(t('execution.continueExecution', null, 'Continue execution'), 'runs',
-        { runId: idText(run.id), runCaseId: idText(next.runCaseId) }, 'btn btn-primary'));
+      if (next) $('#execution-actions').append(
+        $('<p class="w-100 mb-0">').text(t('execution.runNextCase', { title: next.snapshotTitle }, 'Next: record the result for “{title}”.')),
+        routeLink(t('execution.continueExecution', null, 'Continue execution'), 'runs',
+          { runId: idText(run.id), runCaseId: idText(next.runCaseId) }, 'btn btn-primary').attr('id', 'execution-continue-run'));
       else $('#execution-progress').append($('<p class="text-secondary">').text(t('execution.allCasesRecorded', null, 'Every case has an attempt.')));
       if (!status.total || status.remaining) $('#execution-progress').append($('<p class="text-secondary">').text(t('execution.completionRequiresAllCases', null,
         'Record at least one attempt for every case before completing this run.')));
@@ -684,7 +704,26 @@
         routeLink(t('execution.viewTestCase', null, 'View current test case'), 'test-cases', { testCaseId: idText(item.testCaseId), runId: idText(runId), runCaseId: idText(id), attemptId: selectedAttemptId }));
       if (current.run.testPlanId != null) $('#execution-case-context').append(routeLink(t('execution.viewSourcePlan', null, 'View source plan'), 'test-plans', { planId: idText(current.run.testPlanId) }));
       progress(current, '#execution-case-progress');
+      const latestAttempt = history.length ? history[history.length - 1] : null;
+      if (latestAttempt && latestAttempt.outcome === 'FAIL' && canWrite()) $('#execution-case-progress').append(
+        routeLink(t('execution.createDefectFromThisFAIL', null, 'Create defect from this FAIL'), 'defects',
+          { action: 'create', runId: idText(runId), runCaseId: idText(id), attemptId: idText(latestAttempt.id), failureAttemptId: idText(latestAttempt.id) }, 'btn btn-danger btn-sm mb-2')
+          .attr('id', 'execution-latest-failure-defect'));
       const position = current.cases.indexOf(item);
+      if (current.run.status === 'IN_PROGRESS' && canWrite()) {
+        if (!history.length) $('#execution-case-progress').append($('<p class="mb-2">').text(t('execution.caseNextRecord', null,
+          'Next: follow the frozen steps below, choose the actual outcome, and save the result.')));
+        else {
+          const remaining = current.cases.slice(position + 1).concat(current.cases.slice(0, position)).find(function (row) { return row.currentOutcome === 'NOT_RUN'; });
+          if (remaining) $('#execution-case-progress').append($('<p class="mb-1">').text(t('execution.caseResultSaved', null, 'This case has a recorded result.')),
+            routeLink(t('execution.nextUnrecordedCase', { title: remaining.snapshotTitle }, 'Next unrecorded case: {title}'), 'runs',
+              { runId: idText(runId), runCaseId: idText(remaining.runCaseId) }, 'btn btn-primary btn-sm mb-2'));
+          else $('#execution-case-progress').append(routeLink(t('execution.reviewRunToComplete', null, 'Review results and complete the run'), 'runs',
+            { runId: idText(runId) }, 'btn btn-primary btn-sm mb-2'));
+        }
+        $('#execution-case-navigation').append($('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('execution.goToRecordResult', null, 'Record a result'))
+          .on('click', function () { $('#execution-outcome').trigger('focus'); }));
+      }
       $('#execution-case-navigation').append($('<span class="align-self-center">').text(t('execution.casePosition',
         { position: window.I18n.formatNumber(position + 1), total: window.I18n.formatNumber(current.cases.length) }, 'Case {position} of {total}')));
       [['execution.previousCase', 'Previous case', position - 1], ['execution.nextCase', 'Next case', position + 1]].forEach(function (entry) {

@@ -137,16 +137,17 @@
           <section id="execution-case-panel" class="asset-panel d-none" aria-label="Run case snapshot and attempts" data-i18n-aria-label="shell.runCaseSnapshotAndAttempts">
             <div class="asset-panel-heading"><h2 id="execution-case-title"></h2><button id="execution-case-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToRun">Back to run</button></div>
             <div id="execution-case-context" class="step-actions mb-2"></div><div id="execution-case-progress" role="status" aria-live="polite"></div><div id="execution-case-navigation" class="step-actions mb-3"></div>
+            <p class="text-secondary small" data-i18n="shell.snapshotCapturedWhenThisRunWasCreatedLaterEditsToTheTestCaseDoNotChangeIt">Use the case definition captured when this run was created.</p>
+            <div id="execution-snapshot"></div>
             <form id="execution-attempt-form" class="mt-4 d-none" novalidate>
-              <h3 class="fs-5" data-i18n="shell.recordANewAttempt">Record a new attempt</h3><p class="text-secondary small" data-i18n="shell.retestingAppendsANewAttemptEarlierResultsRemainVisible">Retesting appends a new attempt. Earlier results remain visible.</p>
+              <h3 class="fs-5" data-i18n="shell.recordANewAttempt">Record test result</h3><p class="text-secondary small" data-i18n="shell.retestingAppendsANewAttemptEarlierResultsRemainVisible">Retests keep earlier results in the history below.</p>
               <div id="execution-attempt-error" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
               <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-outcome" class="form-label" data-i18n="shell.outcome">Outcome</label><select id="execution-outcome" class="form-select" required><option value="" data-i18n="r2Exec.chooseOutcome">Choose the actual result</option><option value="PASS" data-i18n="status.pass">PASS</option><option value="FAIL" data-i18n="status.fail">FAIL</option><option value="BLOCKED" data-i18n="status.blocked">BLOCKED</option><option value="SKIPPED" data-i18n="status.skipped">SKIPPED</option></select></div><div class="col-sm-6"><label for="execution-duration" class="form-label" data-i18n="shell.durationMsOptional">Duration (ms, optional)</label><input id="execution-duration" class="form-control" type="number" min="0" step="1"></div></div>
               <div class="mb-3"><label for="execution-comment" class="form-label" data-i18n="shell.actualResultComment">Actual result / comment</label><textarea id="execution-comment" class="form-control" rows="3"></textarea></div>
               <div id="execution-failure-wrap" class="mb-3 d-none"><label for="execution-failure" class="form-label" data-i18n="shell.failureMessage">Failure message</label><textarea id="execution-failure" class="form-control" rows="2"></textarea></div>
-              <button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Record new attempt</button>
+              <button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Save test result</button>
             </form>
-            <p class="text-secondary" data-i18n="shell.snapshotCapturedWhenThisRunWasCreatedLaterEditsToTheTestCaseDoNotChangeIt">Snapshot captured when this run was created. Later edits to the test case do not change it.</p>
-            <div id="execution-snapshot"></div><h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Attempt history</h3>
+            <h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Execution history</h3>
             <p id="execution-history-status" role="status" aria-live="polite"></p><div id="execution-history"></div>
 
           </section>
