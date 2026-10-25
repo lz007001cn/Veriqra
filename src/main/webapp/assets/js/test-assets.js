@@ -225,7 +225,7 @@
     const context = { projectId: projectId };
     context[view === 'requirements' ? 'requirementId' : 'testCaseId'] = String(id);
     const current = routeContext();
-    ['sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId'].forEach(function (name) {
+    ['sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId', 'defectId'].forEach(function (name) {
       if (current[name]) context[name] = String(current[name]);
     });
     return context;
@@ -233,7 +233,7 @@
   function originContext() {
     const context = { projectId: projectId };
     const current = routeContext();
-    ['sourcePlanId', 'runId', 'runCaseId', 'attemptId'].forEach(function (name) {
+    ['sourcePlanId', 'runId', 'runCaseId', 'attemptId', 'defectId'].forEach(function (name) {
       if (current[name]) context[name] = String(current[name]);
     });
     return context;
@@ -454,6 +454,9 @@
       Object.assign(originContext(), { requirementId: current.sourceRequirementId, sourceTestCaseId: String(detail.row.id) }), t('assets.backToRequirement')));
     if (current.sourceTestCaseId && view === 'requirements') target.append(linkTo('test-cases',
       Object.assign(originContext(), { testCaseId: current.sourceTestCaseId }), t('assets.backToTestCase')));
+    const returnToDefect = !!current.defectId;
+    if (returnToDefect) target.append(linkTo('defects', { projectId: projectId, defectId: current.defectId },
+      t('assets.backToDefect', null, 'Return to defect'), true));
     const returnToPlan = !!current.sourcePlanId && view === 'test-cases' && writable();
     if (current.sourcePlanId) {
       const destination = { projectId: projectId, planId: current.sourcePlanId };
@@ -464,7 +467,7 @@
     if (current.runId && current.runCaseId) target.append(linkTo('runs',
       { projectId: projectId, runId: current.runId, runCaseId: current.runCaseId, attemptId: current.attemptId }, t('shell.backToRun')));
     if (!writable()) return;
-    if (returnToPlan) return;
+    if (returnToPlan || returnToDefect) return;
     target.append(view === 'requirements' ? linkTo('test-cases',
       { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('assets.createLinkedTestCase'), false)
       : linkTo('test-plans', { projectId: projectId, action: 'create', sourceTestCaseId: String(detail.row.id) }, t('assets.createPlanWithCase'), true));

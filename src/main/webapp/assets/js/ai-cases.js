@@ -7,7 +7,7 @@
   function text(tag, key, fallback) { return $(tag).attr('data-ai-text', key).attr('data-ai-fallback', fallback || '').text(tr(key, fallback)); }
   function clear() { ++epoch; context = null; preview = null; busy = false; uncertain = false; statusKey = null; panel.empty().addClass('d-none'); }
   function hasDraft() { return busy || !!preview || uncertain; }
-  function message(key, error) { statusKey = key; panel.find('.ai-status').text(tr(key)).toggleClass('text-danger', !!error); }
+  function message(key, error) { statusKey = key; panel.find('.ai-status').text(key ? tr(key) : '').toggleClass('text-danger', !!error); }
   function path(action) { return 'projects/' + context.projectId + '/requirements/' + context.requirement.id + '/ai-cases/' + action; }
   function controls() {
     panel.find('input,textarea,select,button').prop('disabled', busy || uncertain);
@@ -27,17 +27,21 @@
   }
   function renderCandidates() {
     const target = panel.find('.ai-candidates').empty();
-    preview.candidates.forEach(function (item) {
+    preview.candidates.forEach(function (item, index) {
       const card = $('<article class="ai-candidate border rounded p-3 my-3">');
       card.append(text('<label class="form-check-label d-block">', 'select').prepend('<input type="checkbox" class="ai-select form-check-input me-2" checked>'),
-        editor('title', item.title, false, 240), editor('description', item.description, true), editor('preconditions', item.preconditions, true));
+        editor('title', item.title, false, 240));
+      const details = $('<details class="ai-candidate-details mt-2">').prop('open', index === 0).append(
+        text('<summary class="text-primary">', 'candidateDetails', 'Review steps and details'),
+        editor('description', item.description, true), editor('preconditions', item.preconditions, true));
       const priority = $('<select class="ai-priority form-select">');
       ['LOW', 'MEDIUM', 'HIGH'].forEach(function (value) { priority.append($('<option>').val(value).text(window.I18n.enumLabel(value))); });
-      card.append(text('<label class="form-label d-block mt-2">', 'priority').append(priority.val(item.priority)));
+      details.append(text('<label class="form-label d-block mt-2">', 'priority').append(priority.val(item.priority)));
       const steps = $('<div class="ai-steps">'); item.steps.forEach(function (step) { steps.append(stepEditor(step)); });
-      card.append(steps, text('<button type="button" class="btn btn-outline-secondary btn-sm me-2">', 'addStep').on('click', function () {
+      details.append(steps, text('<button type="button" class="btn btn-outline-secondary btn-sm me-2">', 'addStep').on('click', function () {
         if (steps.children().length < 30) steps.append(stepEditor({}));
-      }), text('<button type="button" class="btn btn-outline-danger btn-sm">', 'reject').on('click', function () {
+      }));
+      card.append(details, text('<button type="button" class="btn btn-outline-danger btn-sm mt-2">', 'reject').on('click', function () {
         card.remove(); if (!target.children().length) { preview = null; panel.find('.ai-save,.ai-discard').addClass('d-none'); }
         controls();
       }));
@@ -99,7 +103,7 @@
       const saved = await api.post(path('accept'), { expectedVersion: preview.expectedVersion, candidates: rows });
       if (token !== epoch) return;
       preview = null; panel.find('.ai-candidates').empty(); panel.find('.ai-save,.ai-discard').addClass('d-none');
-      message('saved');
+      message(null);
       renderSaved(saved);
       document.dispatchEvent(new CustomEvent('veriqra:ai-saved', { detail: { projectId: context.projectId, requirementId: context.requirement.id } }));
     } catch (error) {
@@ -113,13 +117,18 @@
     if (!next || !next.writable) { clear(); return; }
     if (context && String(context.projectId) === String(next.projectId) && context.requirement.id === next.requirement.id && context.requirement.version === next.requirement.version) return;
     clear(); context = next;
-    panel.removeClass('d-none').append(text('<h3 class="fs-5">', 'heading'), text('<p class="small text-secondary">', 'help'),
+    const requirement = context.requirement;
+    const identity = (requirement.keyNo == null ? '' : 'REQ-' + String(requirement.keyNo).padStart(3, '0') + ' · ') + (requirement.title || '');
+    const basis = $('<div class="ai-basis small border-start ps-3 mb-3">').append(
+      text('<strong>', 'basisLabel', 'Generation basis'), $('<p class="ai-basis-requirement mb-1">').text(identity),
+      text('<p class="mb-0 text-secondary">', 'basisDescription', 'Generate 3–5 candidates from this requirement’s description, including acceptance criteria, and the additional instructions below.'));
+    panel.removeClass('d-none').append(text('<h3 class="fs-5">', 'heading'), basis,
       editor('instruction', '', true, 2000), text('<button type="button" class="ai-generate btn btn-outline-primary">', 'generate').on('click', generate),
       $('<p class="ai-status mt-2" role="status" aria-live="polite">'), $('<div class="ai-candidates">'),
       text('<button type="button" class="ai-save btn btn-primary d-none me-2">', 'save').on('click', save),
       text('<button type="button" class="ai-discard btn btn-outline-secondary d-none">', 'discard').on('click', function () {
         preview = null; panel.find('.ai-candidates').empty(); panel.find('.ai-save,.ai-discard').addClass('d-none'); message('discarded');
-      }), $('<div class="ai-saved alert alert-success mt-3 d-none">'));
+      }), $('<div class="ai-saved alert alert-success mt-3 d-none" role="status" aria-live="polite">'));
   }
   panel.on('change', '.ai-select', controls);
   document.addEventListener('veriqra:localechange', function () {

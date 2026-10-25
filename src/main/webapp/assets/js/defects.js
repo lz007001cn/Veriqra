@@ -255,10 +255,20 @@
     const actions = $('#defect-actions').empty();
     const tester = canManage();
     const processor = tester || canProcess(defect);
+    const closeReady = !!(tester && !retestPending && !closureLoading && closureEligibility && closureEligibility.canClose && closureEligibility.defectVersion === defect.version);
+    const hint = defect.status === 'CLOSED' ? ['defects.nextClosed', 'Closed. Review the original failure and retest results below.']
+      : ['OPEN', 'REOPENED'].includes(defect.status) ? (processor ? ['defects.nextStart', 'Next: start work on this defect.'] : ['defects.nextWaitStart', 'Waiting for the assignee to start work.'])
+      : defect.status === 'IN_PROGRESS' ? (processor ? ['defects.nextResolve', 'Next: enter the fix details and mark the defect resolved.'] : ['defects.nextWaitResolve', 'Waiting for the assignee to record the fix.'])
+      : closeReady ? ['defects.nextClose', 'Retest passed. Next: close the defect.'] : ['defects.nextRetest', 'Next: retest the original failure and link its passing result.'];
+    actions.append($('<p class="w-100 fw-semibold mb-1" role="status">').text(t(hint[0], null, hint[1])));
+    if (processor && ['OPEN', 'REOPENED'].includes(defect.status)) actions.append(actionButton(t("defects.startWork", null, 'Start work'), function () { return transition('start'); }, true));
+    if (processor && defect.status === 'IN_PROGRESS') actions.append(actionButton(t("defects.resolve", null, 'Resolve'), function () { showAction('resolve'); }, true));
+    if (tester && defect.status === 'RESOLVED') {
+      if (!closeReady) actions.append(actionButton(t('defects.enterRetest', null, 'Review retest results'), function () { focusHeading('#defect-closure-heading'); }, true));
+      actions.append(actionButton(t("common.close", null, 'Close'), function () { return transition('close'); }, closeReady)
+        .prop('disabled', mutating || !!retestPending || !closeReady));
+    }
     if (tester && defect.status !== 'CLOSED') actions.append(actionButton(t('defects.editDefect', null, 'Edit and reassign'), function () { showAction('edit'); }));
-    if (processor && ['OPEN', 'REOPENED'].includes(defect.status)) actions.append(actionButton(t("defects.startWork", null, 'Start work'), function () { return transition('start'); }));
-    if (processor && defect.status === 'IN_PROGRESS') actions.append(actionButton(t("defects.resolve", null, 'Resolve'), function () { showAction('resolve'); }));
-    if (tester && defect.status === 'RESOLVED') actions.append(actionButton(t("common.close", null, 'Close'), function () { return transition('close'); }).prop('disabled', mutating || !!retestPending || closureLoading || !closureEligibility || !closureEligibility.canClose || closureEligibility.defectVersion !== defect.version));
     if (tester && ['RESOLVED', 'CLOSED'].includes(defect.status)) actions.append(actionButton(t("defects.reopenWithNewFAIL", null, 'Reopen with new FAIL'), function () { showAction('reopen'); }));
     if (tester && defect.status !== 'CLOSED') actions.append(actionButton(t("defects.addFailureEvidence", null, 'Add failure evidence'), function () { showAction('add'); }));
     const members = detailMemberState();
@@ -284,7 +294,7 @@
       if (detail) { renderActions(detail.defect); renderClosure(); if (evidenceValues) renderEvidence(detail); recoverStoredOperation(); }
     } catch (error) { if (valid(token) && accessToken === accessGeneration) { actor = null; if (detail) { renderActions(detail.defect); renderClosure(); } } }
   }
-  function actionButton(text, callback) { return $('<button type="button" class="btn btn-outline-primary">').text(text).prop('disabled', mutating).on('click', function () { if (!mutating) return callback(); }); }
+  function actionButton(text, callback, primary) { return $('<button type="button" class="btn ' + (primary ? 'btn-primary' : 'btn-outline-primary') + '">').text(text).prop('disabled', mutating).on('click', function () { if (!mutating) return callback(); }); }
   async function transition(mode) {
     const defect = detail && detail.defect;
     if (mode === 'close' && (retestPending || closureLoading || !canManage() || !closureEligibility || !closureEligibility.canClose || closureEligibility.defectVersion !== defect.version)) return;
@@ -292,7 +302,7 @@
       { key: 'BUG-' + defect.keyNo }, mode === 'close' ? 'Close {key}?' : 'Start {key}?'))) return;
     const token = generation;
     const operation = mode === 'close' ? { action: 'CLOSE', body: { expectedVersion: defect.version }, defectId: String(defect.id), projectId: projectId, actorId: String(actor.id) } : null;
-    if (operation) { retestPending = operation; persistOperation(operation); }
+    if (operation) { retestPending = operation; persistOperation(operation); operation.submitting = true; }
     mutationState(true);
     try {
       await api.post(defectPath(defect.id) + '/' + mode, { expectedVersion: defect.version });
@@ -304,7 +314,7 @@
       if (operation && retestPending) renderOperationRecovery();
       if (mode === 'close') loadEligibility(detail, token, true);
     } }
-    finally { if (valid(token)) mutationState(false); }
+    finally { if (operation) operation.submitting = false; if (valid(token)) mutationState(false); }
   }
   async function removeEvidence(link, defect) {
     if (mutating || !detail || !sameId(detail.defect.id, defect.id) || !window.confirm(t('defects.removeEvidenceConfirm', { number: link.attemptNo },
@@ -358,6 +368,11 @@
     if (!detail) return;
     captureRetestDraft();
     const target = $('#defect-closure').empty();
+    if (!['RESOLVED', 'CLOSED'].includes(detail.defect.status)) {
+      target.append($('<p class="small text-secondary">').text(t('defects.retestAfterResolution', null, 'Record the fix first. Retest and closure actions will appear when the defect is resolved.')),
+        $('<div class="mt-3" role="status">').attr('id', 'defect-operation-status'));
+      renderOperationRecovery(); return;
+    }
     if (closureLoading || !closureEligibility) {
       if (closureLoading) target.text(t('defects.checkingEligibility', null, 'Checking closure eligibility…'));
       else if (closureFailure) {
@@ -395,10 +410,9 @@
         else card.append($('<p class="small">').text(t('defects.sameRunAutomatic', null, 'A later current PASS on the original Run Case satisfies the existing same-run rule.')));
       }
       if (canManage() && detail.defect.status !== 'CLOSED') {
-        if (failure.canRetestOriginal) card.append(routeLink(t('defects.goRetest', null, 'Go to retest'), 'runs', executionContext(source)).addClass('mt-2'));
-        else if (failure.currentCaseCompatible && source.currentCase && source.currentCase.status === 'READY') card.append(routeLink(t('defects.retestInNewRun', null, 'Retest in a new run'), 'runs', {
+        if (failure.currentCaseCompatible && source.currentCase && source.currentCase.status === 'READY') card.append(routeLink(t('defects.retestInNewRun', null, 'Retest in a new run'), 'runs', {
           action: 'create', sourceTestCaseId: String(source.currentCase.id), runId: String(source.run.id), runCaseId: String(source.runCase.id), failureAttemptId: id, defectId: String(detail.defect.id)
-        }).addClass('mt-2'));
+        }).removeClass('btn-outline-primary').addClass('btn-primary mt-2'));
         else {
           card.append($('<p class="small text-secondary mt-2">').text(source.currentCase && source.currentCase.status !== 'READY' ? t('defects.currentCaseNotReady', null, 'The current Test Case must be READY before creating a new retest run.') : t('defects.currentDefinitionChanged', null, 'The current Test Case definition differs from this frozen failure. A new run from it cannot be used to close this failure.')));
           if (source.currentCase && !failure.currentCaseCompatible) {
@@ -406,7 +420,10 @@
             (differences.length ? differences.map(function (name) { return t('execution.' + name, null, name); }) : [t('defects.orderedSteps', null, 'ordered steps')])
               .forEach(function (name) { card.append($('<p class="small text-danger">').text(t('defects.definitionDifference', { field: name }, 'Frozen definition differs: {field}'))); });
           }
+          if (source.currentCase) card.append(routeLink(t('defects.openCurrentCase', null, 'Open current test case'), 'test-cases',
+            { testCaseId: String(source.currentCase.id), runId: String(source.run.id), runCaseId: String(source.runCase.id), defectId: String(detail.defect.id) }).addClass('mt-2'));
         }
+        if (failure.canRetestOriginal) card.append(routeLink(t('defects.goRetest', null, 'Go to retest'), 'runs', executionContext(source)).addClass('mt-2 ms-2'));
         card.append($('<button type="button" class="btn btn-outline-primary btn-sm mt-2 ms-2">').text(t('defects.findRetestPass', null, 'Find retest PASS'))
           .prop('disabled', mutating || !!retestPending).on('click', function () { if (!mutating && !retestPending) return loadCandidates(failure); }));
         if (failure.selection && !failure.selection.revocation) card.append($('<button type="button" class="btn btn-outline-danger btn-sm mt-2 ms-2">').text(t('defects.revokeRetest', null, 'Revoke selected PASS'))
@@ -539,7 +556,7 @@
   }
   async function submitRetestOperation(operation, token) {
     if (!valid(token) || retestPending !== operation) return;
-    operation.checking = false; operation.notFound = false;
+    operation.checking = false; operation.notFound = false; operation.submitting = true;
     mutationState(true); actionStatus(''); renderOperationRecovery();
     try {
       await api.post(operation.path, operation.body);
@@ -550,8 +567,8 @@
       if (!valid(token) || retestPending !== operation) return;
       if ([400, 403, 404, 409].includes(error.status) && error.reasonCode !== 'CONCURRENT_CHANGE') { persistOperation(null); retestPending = null; }
       actionStatus(function () { return error.reasonCode ? reasonText(error.reasonCode) : conflict(error); }, true);
-      if (retestPending) { operation.failed = true; operation.rolledBack = error.reasonCode === 'CONCURRENT_CHANGE'; persistOperation(operation); renderOperationRecovery(); }
-    } finally { if (valid(token)) { mutationState(false); renderActions(detail.defect); renderRetestEditor(); } }
+      if (retestPending) { operation.submitting = false; operation.failed = true; operation.rolledBack = error.reasonCode === 'CONCURRENT_CHANGE'; persistOperation(operation); renderOperationRecovery(); }
+    } finally { operation.submitting = false; if (valid(token)) { mutationState(false); renderActions(detail.defect); renderRetestEditor(); } }
   }
   async function recoverOperation(operation, token) {
     if (!valid(token) || retestPending !== operation || operation.checking) return;
@@ -577,6 +594,7 @@
     const target = $('#defect-operation-status').empty();
     if (!retestPending) return;
     const operation = retestPending, token = generation;
+    if (operation.submitting) { target.append($('<p class="small" role="status">').text(t('defects.savingOperation', null, 'Saving the result…'))); return; }
     target.append($('<p class="small fw-semibold">').text(operation.checking ? t('defects.checkingOperation', null, 'Checking the submitted operation…') : operation.rolledBack ? reasonText('CONCURRENT_CHANGE') : t('defects.uncertainOperation', null, 'A submitted operation has an uncertain response. Check its result before starting another operation.')),
       $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('defects.checkOperation', null, 'Check submitted operation')).prop('disabled', mutating || !!operation.checking).on('click', function () { return recoverOperation(operation, token); }));
     if (operation.notFound && operation.action !== 'CLOSE') target.append($('<button type="button" class="btn btn-outline-primary btn-sm ms-2">').text(t('defects.replayOperation', null, 'Replay original request')).prop('disabled', mutating || !!operation.checking).on('click', function () { return submitRetestOperation(operation, token); }));
@@ -707,6 +725,7 @@
   function memberName(row) { return (row.displayName || row.username) + (row.displayName && row.username ? ' (@' + row.username + ')' : '') + ' · ' + t('collab.' + row.projectRole.toLowerCase(), null, label(row.projectRole)); }
   function projectUserName(id) {
     const row = projectMembers.find(function (member) { return sameId(member.userId, id); });
+    if (!row && actor && sameId(actor.id, id) && (actor.displayName || actor.username)) return actor.displayName || actor.username;
     return row ? memberName(row) : t('defects.projectIdentityUnavailable', null, 'Identity unavailable in the current project members');
   }
   function assigneeName(id) {

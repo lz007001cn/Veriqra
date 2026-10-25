@@ -161,12 +161,8 @@
           <div id="defect-detail-panel" class="asset-panel d-none">
             <div class="asset-panel-heading"><h2 id="defect-detail-title"></h2><button id="defect-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToDefects">Back to defects</button></div>
             <div id="defect-detail"></div>
-            <h3 class="fs-5 mt-4" data-i18n="shell.failureEvidenceAndRetests">Failure evidence and retests</h3>
-            <p class="text-secondary small" data-i18n="shell.evidenceLinksPointToFAILAttemptsRetestsRemainInTheOriginalRunCaseHistoryCloseIsDecidedByTheServer">Evidence links point to FAIL attempts. Retests remain in the original Run Case history; Close is decided by the server.</p>
-            <p id="defect-evidence-status" role="status" aria-live="polite"></p><div id="defect-evidence"></div>
             <div id="defect-actions" class="step-actions"></div>
             <div id="defect-action-status" class="alert d-none mt-3" role="status" aria-live="polite"></div>
-            <section class="mt-4" aria-labelledby="defect-closure-heading"><h3 id="defect-closure-heading" class="fs-5" data-i18n="defects.retestAndClosure">Retest and closure</h3><div id="defect-closure" aria-live="polite"></div></section>
             <form id="defect-action-form" class="mt-4 d-none" novalidate>
               <h3 id="defect-action-title" class="fs-5"></h3>
               <p id="defect-action-help" class="text-secondary small"></p>
@@ -185,6 +181,10 @@
               </div>
               <div class="d-flex flex-wrap gap-2"><button id="defect-action-submit" class="btn btn-primary" type="submit" data-i18n="common.confirm">Confirm</button><button id="defect-action-cancel" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
             </form>
+            <section class="mt-4" aria-labelledby="defect-closure-heading"><h3 id="defect-closure-heading" class="fs-5" data-i18n="defects.retestAndClosure">Retest and closure</h3><div id="defect-closure" aria-live="polite"></div></section>
+            <h3 class="fs-5 mt-4" data-i18n="shell.failureEvidenceAndRetests">Failure evidence and retests</h3>
+            <p class="text-secondary small" data-i18n="shell.evidenceLinksPointToFAILAttemptsRetestsRemainInTheOriginalRunCaseHistoryCloseIsDecidedByTheServer">Evidence links point to FAIL attempts. Retests remain in the original Run Case history; Close is decided by the server.</p>
+            <p id="defect-evidence-status" role="status" aria-live="polite"></p><div id="defect-evidence"></div>
           </div>
           <form id="defect-create-form" class="asset-panel d-none" novalidate>
             <div class="asset-panel-heading"><h2 id="defect-create-heading" data-i18n="shell.createDefect">Create defect</h2><button id="defect-create-cancel" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>

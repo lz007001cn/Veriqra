@@ -624,6 +624,22 @@ test('a case opened from a plan leads back to that plan instead of creating anot
   assert.equal(ui.requests.length, 1);
 });
 
+test('a defect source survives opening and reviewing a current case so it can return directly to retesting', async () => {
+  const ui = browser({ view: 'test-cases', projectId: '7', testCaseId: '20', defectId: '90', runId: '40', runCaseId: '50' }, true);
+  await ui.pageshow(); ui.requests[0].resolve({ id: 1, username: 'tester', systemRole: 'USER', status: 'ACTIVE' }); await flush();
+  ui.requests[1].resolve([{ id: 7, projectKey: 'QA', name: 'Quality', status: 'ACTIVE' }]); await flush();
+  ui.requests[2].resolve({ id: 7, projectKey: 'QA', name: 'Quality', status: 'ACTIVE' }); await flush();
+  ui.requests[3].resolve({ testCase: ui.caseRow(), steps: completeSteps }); await flush();
+  assert.equal(ui.route().defectId, '90');
+  await ui.click('#asset-edit'); ui.$('#asset-title').val('Retained draft'); ui.locale(); await flush();
+  assert.equal(ui.route().defectId, '90'); assert.equal(ui.$('#asset-title').val(), 'Retained draft');
+  await ui.click('#asset-form-cancel'); ui.requests.at(-1).resolve({ testCase: ui.caseRow(), steps: completeSteps }); await flush();
+  const back = ui.$('#asset-primary-actions').find('a').get().find(link => /#defects$/.test(link.attributes.href));
+  assert.ok(back); assert.match(back.attributes.href, /defectId=90/);
+  assert.equal(ui.$('#asset-primary-actions').find('a').get().some(link => /action=create/.test(link.attributes.href)), false);
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
 test('AI save refreshes current requirement coverage and an older empty response cannot replace it', async () => {
   const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
   assert.equal(ui.requests[1].url, 'projects/7/requirements/10/test-cases');

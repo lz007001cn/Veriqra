@@ -547,6 +547,49 @@ async function chooseCandidate(ui, value = { execution: executionEvidence(17, 'P
   await ui.fire(button(ui, 'defect-closure', 'Use this PASS'));
 }
 
+test('unresolved defects lead with processing and hold retest details until the fix is recorded', async () => {
+  for (const [state, label, hint] of [['OPEN', 'Start work', /start work/], ['IN_PROGRESS', 'Resolve', /enter the fix details/]]) {
+    const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+    await openClosure(ui, eligibility(), state);
+    assert.match(ui.$('#defect-actions').text(), hint);
+    assert.equal(button(ui, 'defect-actions', label).classes.has('btn-primary'), true);
+    assert.match(ui.$('#defect-closure').text(), /Record the fix first/);
+    assert.doesNotMatch(ui.$('#defect-closure').text(), /Closure is currently blocked|Original FAIL|Retest in a new run/);
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  }
+});
+
+test('resolved next action focuses retest details until closure is available', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  await openClosure(ui);
+  await ui.fire(button(ui, 'defect-actions', 'Review retest results'));
+  assert.equal(ui.focused(), ui.nodes.get('defect-closure-heading'));
+  assert.equal(button(ui, 'defect-actions', 'Close').disabled, true);
+  const ready = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  await openClosure(ready, eligibility({ canClose: true }));
+  assert.equal(button(ready, 'defect-actions', 'Review retest results'), undefined);
+  assert.equal(button(ready, 'defect-actions', 'Close').classes.has('btn-primary'), true);
+  assert.equal(ui.calls.concat(ready.calls).every(call => call.method === 'GET'), true);
+});
+
+test('an active original run also offers a separate retest run, while Draft cases lead to the current definition', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  const value = eligibility(); value.failures[0].canRetestOriginal = true;
+  await openClosure(ui, value);
+  const links = ui.nodes.get('defect-closure').all().filter(node => node.tag === 'a');
+  assert.ok(links.find(node => node.content === 'Go to retest'));
+  const retest = new URL(links.find(node => node.content === 'Retest in a new run').attrs.href);
+  assert.equal(retest.searchParams.get('defectId'), '9'); assert.equal(retest.searchParams.get('failureAttemptId'), '6');
+  const draft = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  const blocked = eligibility(); blocked.failures[0].source.currentCase.status = 'DRAFT';
+  await openClosure(draft, blocked);
+  const caseLink = draft.nodes.get('defect-closure').all().find(node => node.tag === 'a' && node.content === 'Open current test case');
+  const target = new URL(caseLink.attrs.href);
+  assert.equal(target.hash, '#test-cases'); assert.equal(target.searchParams.get('testCaseId'), '3'); assert.equal(target.searchParams.get('defectId'), '9');
+  assert.equal(draft.nodes.get('defect-closure').all().some(node => node.content === 'Retest in a new run'), false);
+  assert.equal(ui.calls.concat(draft.calls).every(call => call.method === 'GET'), true);
+});
+
 test('terminal FAIL offers a named READY new-run route, per-failure blocking reason, honest import review and disabled incompatible PASS', async () => {
   const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true }); await openClosure(ui);
   assert.equal(button(ui, 'defect-actions', 'Close').disabled, true);
@@ -598,6 +641,28 @@ test('uncertain LINK recovers after refresh using its original actor-scoped key 
   const replay = refreshed.fire(button(refreshed, 'defect-closure', 'Replay original request')); await flush(); const repeated = refreshed.calls.at(-1);
   assert.deepEqual(repeated.body, first.body); assert.equal(repeated.url, first.url);
   repeated.reject({ status: 409, message: 'Changed' }); await replay; assert.equal(storage.size, 0);
+});
+
+test('a pending retest shows saving until the request fails, then retains its original recovery action', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  await openClosure(ui); await chooseCandidate(ui);
+  ui.$('#defect-retest-note').val('Observed the same scenario passing after the fix.'); ui.$('#defect-retest-confirm').prop('checked', true);
+  const saving = ui.fire(ui.nodes.get('defect-retest-form'), 'submit'); await flush();
+  const write = ui.calls.at(-1);
+  assert.match(ui.$('#defect-operation-status').text(), /Saving the result/);
+  assert.doesNotMatch(ui.$('#defect-operation-status').text(), /uncertain response/);
+  write.reject({ status: 0, message: 'Connection closed' }); await saving;
+  assert.match(ui.$('#defect-operation-status').text(), /uncertain response/);
+  assert.ok(button(ui, 'defect-operation-status', 'Check submitted operation'));
+  const operation = JSON.parse([...ui.storage.values()][0]);
+  assert.equal(operation.body.requestKey, write.body.requestKey); assert.equal(operation.submitting, false);
+});
+
+test('the current platform user keeps their name on their own defect outside project membership', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { actor: { id: 1, username: 'demo-admin', displayName: 'Demo Admin', systemRole: 'ADMIN', status: 'ACTIVE' } });
+  ui.calls[0].resolve({ defect: { ...defect(), reporterId: 1 }, evidence: [] }); await flush();
+  assert.match(ui.$('#defect-detail').text(), /Demo Admin/);
+  assert.doesNotMatch(ui.$('#defect-detail').text(), /Identity unavailable/);
 });
 
 test('replace and revoke use separate explicit reasons and versioned request keys without mutating original FAIL evidence', async () => {
@@ -706,7 +771,7 @@ test('close rejected by a later FAIL invalidates old eligibility immediately and
     const revised = eligibility(); revised.failures[0].reasons = ['LATER_NON_PASS']; ui.closureCalls[1].resolve(revised); await flush();
     assert.equal(button(ui, 'defect-actions', locale === 'en' ? 'Close' : '关闭').disabled, true);
     assert.match(ui.$('#defect-action-status').text(), locale === 'en' ? /later or unordered non-PASS/ : /后续或时序不明的非 PASS/);
-    assert.match(ui.$('#defect-closure').text(), locale === 'en' ? /Closure is currently blocked/ : /尚不满足关闭条件/);
+    assert.match(ui.$('#defect-closure').text(), locale === 'en' ? /Closure is currently blocked/ : /尚未完成的复测与关闭条件/);
     assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1);
   }
 });

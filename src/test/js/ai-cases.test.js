@@ -100,7 +100,8 @@ function browser() {
   vm.runInNewContext(source, { window, document, jQuery: $, CustomEvent: class {
     constructor(type, options) { this.type = type; this.detail = options.detail; }
   } });
-  const mount = (projectId = 7, id = 10) => window.VeriqraAiCases.mount({ projectId, requirement: { id, version: 2 }, writable: true });
+  const mount = (projectId = 7, id = 10, fields = {}) => window.VeriqraAiCases.mount({ projectId,
+    requirement: { id, version: 2, keyNo: 3, title: 'Empty hot-update cache server switch', description: 'Allow switching with an empty cache.', ...fields }, writable: true });
   async function fire(node, type = 'click', fields = {}) {
     const event = { button: 0, preventDefault() { this.defaultPrevented = true; }, ...fields };
     for (const handler of node.handlers.get(type) || []) if (!handler.selector) await handler.fn.call(node, event);
@@ -133,6 +134,7 @@ test('AI saving exposes saved-case review and plan navigation without opening an
   assert.deepEqual(Array.from(ui.requests[1].body.candidates, row => row.title), ['Edited empty cache', 'Missing cache']);
   assert.equal(ui.guards.get('ai-cases').dirty(), false);
   assert.equal(ui.$('.ai-saved').hasClass('d-none'), false); assert.equal(ui.$('.ai-candidates').children().length, 0);
+  assert.equal(ui.$('.ai-status').text(), '', 'The success panel owns the saved message and next step.');
   assert.match(ui.$('.ai-saved').text(), /TC-004 · Edited empty cache/);
   assert.match(ui.$('.ai-saved').text(), /mark it Ready/); assert.match(ui.$('.ai-saved').text(), /links still need review/);
   const links = ui.$('.ai-saved').find('a'); assert.equal(links.length, 3);
@@ -140,6 +142,37 @@ test('AI saving exposes saved-case review and plan navigation without opening an
   await ui.fire(links[0]); assert.deepEqual(ui.navigation[0], { view: 'test-cases', projectId: '7', testCaseId: '20', sourceRequirementId: '10' });
   await ui.fire(links[2]); assert.deepEqual(ui.navigation[1], { view: 'test-plans', projectId: '7' });
   assert.equal(ui.requests.length, 2, 'Navigation must not create plans or change Ready / trace review states.');
+});
+
+test('generation basis identifies the selected saved requirement and optional instructions remain optional', async () => {
+  const ui = browser();
+  assert.equal(ui.$('.ai-basis-requirement').text(), 'REQ-003 · Empty hot-update cache server switch');
+  assert.match(ui.$('.ai-basis').text(), /description, including acceptance criteria/);
+  assert.match(ui.$('.ai-basis').text(), /additional instructions below/);
+  ui.mount(7, 11, { keyNo: 4, title: 'Title only', description: '' });
+  assert.equal(ui.$('.ai-basis-requirement').text(), 'REQ-004 · Title only');
+  const work = ui.fire(ui.$('.ai-generate')[0]);
+  assert.equal(ui.requests[0].url, 'projects/7/requirements/11/ai-cases/preview');
+  assert.equal(ui.requests[0].body.instruction, '', 'An empty description or instruction must not add a frontend gate.');
+  ui.requests[0].reject({ code: 'AI_TIMEOUT', status: 504 }); await work;
+});
+
+test('candidate details collapse without dropping fields, selection or edited steps from the accepted batch', async () => {
+  const ui = browser(); ui.$('.ai-instruction').val('Include boundary scenarios.'); await generate(ui);
+  assert.equal(ui.requests[0].body.instruction, 'Include boundary scenarios.');
+  const details = ui.$('.ai-candidate-details');
+  assert.deepEqual(details.items.map(node => node.open), [true, false, false]);
+  ui.$('.ai-select')[1].checked = false;
+  ui.$('.ai-description')[2].value = 'Edited while details were closed';
+  ui.$('.ai-action')[2].value = 'Switch with missing cache directory';
+  ui.locale('zh-CN');
+  assert.deepEqual(details.items.map(node => node.open), [true, false, false]);
+  const work = ui.fire(ui.$('.ai-save')[0]);
+  assert.equal(ui.requests[1].body.candidates.length, 2);
+  assert.equal(ui.requests[1].body.candidates[1].description, 'Edited while details were closed');
+  assert.equal(ui.requests[1].body.candidates[1].steps[0].action, 'Switch with missing cache directory');
+  ui.requests[1].reject({ status: 400 }); await work;
+  assert.equal(ui.guards.get('ai-cases').dirty(), true);
 });
 
 test('saved-case and plan links preserve browser modifier navigation', async () => {
