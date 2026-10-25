@@ -125,12 +125,12 @@ WAR 检查和文件哈希见[验证结果](verification/phase2-r2/results.json)�
 
 优先 Review：
 
-1. [JdbcProjectCounterDao.java](../src/main/java/io/github/lz007001cn/qatrack/dao/jdbc/JdbcProjectCounterDao.java)：锁、递增、溢出与连接所有权。
-2. [ProjectCounterDaoIntegrationTest.java](../src/test/java/io/github/lz007001cn/qatrack/integration/ProjectCounterDaoIntegrationTest.java)：真实并发及编号/实体原子回滚证据。
-3. [JdbcTestCaseRequirementDao.java](../src/main/java/io/github/lz007001cn/qatrack/dao/jdbc/JdbcTestCaseRequirementDao.java)：复核字段形状、逻辑移除与首次关联信息保留。
-4. [JdbcTestStepDao.java](../src/main/java/io/github/lz007001cn/qatrack/dao/jdbc/JdbcTestStepDao.java)：复合主键、批量删除底层能力与外层重排约定。
-5. [MysqlFixture.java](../src/test/java/io/github/lz007001cn/qatrack/integration/MysqlFixture.java)：专用 schema 防护和新增 FK 清理顺序。
+1. [JdbcProjectCounterDao.java](../src/main/java/io/github/lz007001cn/veriqra/dao/jdbc/JdbcProjectCounterDao.java)：锁、递增、溢出与连接所有权。
+2. [ProjectCounterDaoIntegrationTest.java](../src/test/java/io/github/lz007001cn/veriqra/integration/ProjectCounterDaoIntegrationTest.java)：真实并发及编号/实体原子回滚证据。
+3. [JdbcTestCaseRequirementDao.java](../src/main/java/io/github/lz007001cn/veriqra/dao/jdbc/JdbcTestCaseRequirementDao.java)：复核字段形状、逻辑移除与首次关联信息保留。
+4. [JdbcTestStepDao.java](../src/main/java/io/github/lz007001cn/veriqra/dao/jdbc/JdbcTestStepDao.java)：复合主键、批量删除底层能力与外层重排约定。
+5. [MysqlFixture.java](../src/test/java/io/github/lz007001cn/veriqra/integration/MysqlFixture.java)：专用 schema 防护和新增 FK 清理顺序。
 
 `git diff --stat` 与 `git status --short` 原样保存在 [git-worktree.txt](verification/phase2-r2/git-worktree.txt)。开始前 README/pom 已修改，Round 1 大量 Java/config/docs 已未跟踪，docs/submission 亦为已有材料。`git diff --stat` 不含未跟踪文件，不能将其视为本轮全部变化；本轮精确新增/修改列表见 [round-changes.json](verification/phase2-r2/round-changes.json)。
 
-本轮最终针对性 Review 已将成员/追溯关系的 exists 更名为 existsRecord，行为不变，详见 [最终审查](PHASE2-R2-FINAL-REVIEW.md)。
+本轮最终针对性 Review 已将成员/追溯关系的 exists 更名为 existsRecord，行为不变，当前测试覆盖保留在源码中。

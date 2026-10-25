@@ -176,17 +176,9 @@ input[type="checkbox"] { accent-color: var(--vq-accent); }
 .defect-prewrap, .defect-retest { white-space: pre-wrap; overflow-wrap: anywhere; }
 .defect-retest { padding: var(--vq-space-2) 0; border-top: 1px solid var(--vq-border); }
 #import-preview, #import-result { min-width: 0; overflow-wrap: anywhere; }
-.collab-sections { display: flex; flex-wrap: wrap; gap: var(--vq-space-2); padding-bottom: var(--vq-space-3); margin-bottom: var(--vq-space-4); border-bottom: 1px solid var(--vq-border); }
-.collab-sections button[aria-pressed="true"] { color: var(--vq-accent-hover); background: var(--vq-accent-soft); border-color: var(--vq-accent); }
-.collab-setup-steps { padding-left: var(--vq-space-5); margin-bottom: 0; }
-.collab-setup-steps li { padding: var(--vq-space-1) 0; }
-.collab-setup-steps button { text-align: left; white-space: normal; min-height: 28px; padding: 0 .25rem; }
-#collab-task-page-info { font-size: var(--vq-font-xs); color: var(--vq-text-secondary); font-variant-numeric: tabular-nums; }
 [aria-busy="true"] { cursor: progress; }
 /* User-authored names and identifiers must not widen the content column. */
-.content h1, .content h2, .content h3, .content p,
-#collab-people, #collab-teams, #collab-tasks, #collab-task-detail,
-#collab-contribution-list, #collab-credit-history, #collab-team-detail { min-width: 0; overflow-wrap: anywhere; }
+.content h1, .content h2, .content h3, .content p { min-width: 0; overflow-wrap: anywhere; }
 #execution-list .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 
 /* LOGIN — authentication only, no promotional hero. */
@@ -227,6 +219,6 @@ input[type="checkbox"] { accent-color: var(--vq-accent); }
 @media (max-width: 480px) {
   .app-topbar .current-user, .app-topbar .topbar-brand > span:not(.brand-square) { display: none; }
   .app-topbar { gap: var(--vq-space-2); } .app-topbar .locale-control .form-select { width: 100px; }
-  .workflow-grid { grid-template-columns: 1fr; } .collab-sections button { flex: 1 1 auto; }
+  .workflow-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .btn, .form-control, .form-select { transition: none; } }

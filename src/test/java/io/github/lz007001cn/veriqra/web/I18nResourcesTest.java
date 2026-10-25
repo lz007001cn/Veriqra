@@ -48,6 +48,11 @@ class I18nResourcesTest {
                 Files.list(WEB.resolve("admin")).filter(p -> p.toString().endsWith(".html")))) {
             for (Path page : pages.toList()) {
                 String html = Files.readString(page);
+                if (page.equals(WEB.resolve("admin/index.html"))) {
+                    assertTrue(html.contains("content=\"0;url=users.html\""));
+                    assertTrue(html.contains("href=\"users.html\""));
+                    continue;
+                }
                 assertTrue(html.contains("assets/js/i18n.js"), page.toString());
                 assertTrue(html.contains("data-locale-switch"), page.toString());
                 assertTrue(html.indexOf("assets/js/i18n.js") < html.indexOf("assets/js/api.js"), page.toString());
@@ -68,7 +73,12 @@ class I18nResourcesTest {
         try (Stream<Path> scripts = Stream.concat(Files.list(WEB.resolve("assets/js")), Stream.of(WEB.resolve("admin/admin.js")))) {
             for (Path script : scripts.filter(p -> p.toString().endsWith(".js")).toList()) {
                 Matcher keys = SCRIPT_KEY.matcher(Files.readString(script));
-                while (keys.find()) assertTrue(english.containsKey(keys.group(1)), script + ": " + keys.group(1));
+                while (keys.find()) {
+                    String key = keys.group(1);
+                    if (script.getFileName().toString().equals("project-settings.js") && !key.contains("."))
+                        key = "projectSettings." + key;
+                    assertTrue(english.containsKey(key), script + ": " + key);
+                }
             }
         }
         String html = Files.readString(WEB.resolve("index.html"));
@@ -78,15 +88,9 @@ class I18nResourcesTest {
     }
 
     @Test
-    void systemFieldsReturnedByAdminEndpointHaveDisplayLabels() throws IOException {
+    void authenticationFeedbackHasDisplayLabels() throws IOException {
         Map<String, String> english = catalog("en"), chinese = catalog("zh-CN");
-        for (String field : new String[] {"veriqraVersion", "applicationStatus", "javaVersion", "tomcatVersion",
-                "databaseStatus", "databaseVersion", "uptimeSeconds", "serverTime", "sessionSecureMode", "publicOrigin"}) {
-            assertTrue(english.containsKey("system." + field), field);
-            assertTrue(chinese.containsKey("system." + field), field);
-        }
-        for (String key : new String[] {"system.applicationTimeZone", "system.displayTimeZone",
-                "auth.loginRateLimited", "auth.loginRateLimitedGeneric", "auth.retryMinutesSeconds"}) {
+        for (String key : new String[] {"auth.loginRateLimited", "auth.loginRateLimitedGeneric", "auth.retryMinutesSeconds"}) {
             assertTrue(english.containsKey(key), key);
             assertTrue(chinese.containsKey(key), key);
         }

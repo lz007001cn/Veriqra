@@ -17,7 +17,7 @@ public final class JdbcServiceDaoFactory implements ServiceDaoFactory {
                 new JdbcTestRunCaseStepDao(connection), new JdbcTestAttemptDao(connection),
                 new JdbcDefectDao(connection), new JdbcTestAttemptDefectDao(connection),
                 new JdbcTestAutomationIdentityDao(connection), new JdbcTestAutomationMappingDao(connection),
-                new JdbcTestImportDao(connection), new JdbcCollaborationDao(connection),
+                new JdbcTestImportDao(connection), new JdbcProjectSettingsDao(connection),
                 new JdbcDefectRetestLinkDao(connection), new JdbcDefectClosureReceiptDao(connection),
                 new JdbcDefectClosureItemDao(connection));
     }

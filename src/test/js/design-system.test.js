@@ -1,15 +1,18 @@
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
 const root = path.resolve(__dirname, '../../..');
 const web = path.join(root, 'src/main/webapp');
-const baseline = '2427fdee76853d132df1ce48a85308bec6826a14';
-const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
-const pages = git(['ls-tree', '-r', '--name-only', baseline, '--', 'src/main/webapp'])
-  .trim().split(/\r?\n/).filter(file => file.endsWith('.html'));
+function htmlPages(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const file = path.join(directory, entry.name);
+    return entry.isDirectory() ? htmlPages(file) : file.endsWith('.html') ? [path.relative(root, file).replaceAll('\\', '/')] : [];
+  });
+}
+// The old administration landing page only redirects to user maintenance.
+const pages = htmlPages(web).filter(file => file !== 'src/main/webapp/admin/index.html');
 
 // This small parser reads start-tag attributes only. It deliberately ignores CSS,
 // text and layout, so visual changes remain free while behavior hooks stay intact.
@@ -26,57 +29,29 @@ function elements(html) {
   return result;
 }
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-const before = file => git(['show', baseline + ':' + file]);
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
-const controls = new Set(['form', 'input', 'select', 'textarea', 'button', 'option']);
-const validation = new Set(['id', 'name', 'type', 'required', 'pattern', 'maxlength',
-  'minlength', 'min', 'max', 'step', 'accept', 'multiple', 'autocomplete', 'value']);
-
-test('all eleven baseline pages retain IDs and form behavior contracts', () => {
-  assert.equal(pages.length, 11, 'The baseline UI inventory must contain eleven pages.');
+test('retained pages have unique IDs and labels target existing controls', () => {
   for (const file of pages) {
-    const previous = elements(before(file));
     const current = elements(read(file));
-    const ids = current.filter(element => has(element.attributes, 'id'))
-      .map(element => element.attributes.id);
+    const ids = current.filter(element => has(element.attributes, 'id')).map(element => element.attributes.id);
     assert.equal(new Set(ids).size, ids.length, file + ': duplicate static ID');
-    for (const element of previous.filter(element => has(element.attributes, 'id'))) {
-      assert.ok(ids.includes(element.attributes.id), file + ': missing #' + element.attributes.id);
-    }
-    const available = current.filter(element => controls.has(element.tag));
-    for (const element of previous.filter(element => controls.has(element.tag))) {
-      // R1 deliberately replaces the two numeric-assignee inputs with real project-member selectors.
-      if (file === 'src/main/webapp/index.html' && ['defect-action-assignee', 'defect-create-assignee'].includes(element.attributes.id)) {
-        const id = element.attributes.id;
-        const replacement = available.findIndex(candidate => candidate.tag === 'select' && candidate.attributes.id === id && candidate.attributes['aria-describedby'] === id + '-status');
-        assert.ok(replacement >= 0, file + ': project-member select must preserve #' + id + ' and describe its loading/failure state');
-        assert.ok(current.some(candidate => candidate.tag === 'input' && candidate.attributes.id === id + '-search' && candidate.attributes.type === 'search'), file + ': member selector must have keyboard-accessible search');
-        available.splice(replacement, 1);
-        continue;
-      }
-      const contract = Object.fromEntries(Object.entries(element.attributes)
-        .filter(([name]) => validation.has(name) || name.startsWith('data-')));
-      const index = available.findIndex(candidate => candidate.tag === element.tag &&
-        Object.entries(contract).every(([name, value]) => has(candidate.attributes, name) && candidate.attributes[name] === value));
-      assert.ok(index >= 0, file + ': lost control contract ' + JSON.stringify({ tag: element.tag, ...contract }));
-      available.splice(index, 1);
+    for (const label of current.filter(element => element.tag === 'label' && element.attributes.for)) {
+      assert.ok(ids.includes(label.attributes.for), file + ': missing label target #' + label.attributes.for);
     }
   }
 });
 
-test('workspace and Administration navigation preserve baseline destinations and data selectors', () => {
+test('retained pages load existing local resources and destinations', () => {
   for (const file of pages) {
-    const previous = elements(before(file));
     const current = elements(read(file));
-    for (const key of ['data-view', 'data-admin-nav', 'data-collab-area', 'data-admin-page']) {
-      const links = list => list.filter(element => has(element.attributes, key))
-        .map(element => ({ tag: element.tag, key: element.attributes[key],
-          href: element.attributes.href, controls: element.attributes['aria-controls'] }))
-        .sort((a, b) => a.key.localeCompare(b.key));
-      assert.deepEqual(links(current), links(previous), file + ': changed ' + key + ' navigation');
+    const directory = path.dirname(path.join(root, file));
+    const base = current.find(element => element.tag === 'base')?.attributes.href || './';
+    for (const element of current) {
+      const value = element.attributes.src || (['a', 'link'].includes(element.tag) && element.attributes.href);
+      if (!value || value.startsWith('#') || /^(?:https?:|data:|mailto:|\/\/)/.test(value)) continue;
+      const target = path.resolve(directory, base, value.split(/[?#]/)[0]);
+      assert.ok(fs.existsSync(target), file + ': missing local destination ' + value);
     }
-    const bases = list => list.filter(element => element.tag === 'base').map(element => element.attributes.href);
-    assert.deepEqual(bases(current), bases(previous), file + ': changed context base');
   }
 });
 

@@ -2,7 +2,6 @@ package io.github.lz007001cn.veriqra.integration;
 
 import io.github.lz007001cn.veriqra.dao.jdbc.*;
 import io.github.lz007001cn.veriqra.model.*;
-import io.github.lz007001cn.veriqra.admin.JdbcCreditDao;
 import io.github.lz007001cn.veriqra.web.json.JsonMapperProvider;
 import org.apache.catalina.Context;
 import org.apache.catalina.startup.Tomcat;
@@ -91,12 +90,8 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         disabled = insert("web_disabled", SystemRole.USER, UserStatus.DISABLED);
     }
     User insert(String username, SystemRole role, UserStatus status) {
-        return tx.inTransaction(c -> {
-            User user = new JdbcUserDao(c).insert(new User(null, username, username, hash,
-                    role, status, null, null, null));
-            new JdbcCreditDao(c).createAccount(user.id());
-            return user;
-        });
+        return tx.inTransaction(c -> new JdbcUserDao(c).insert(new User(null, username, username, hash,
+                role, status, null, null, null)));
     }
     HttpResponse<String> call(String method, String path, String body) throws Exception {
         var request = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(10))
@@ -194,9 +189,7 @@ class AuthHttpIntegrationTest extends MysqlFixture {
                 "/assets/js/defects.js", "/assets/js/automation-imports.js",
                 "/assets/vendor/jquery-3.7.1.min.js", "/assets/vendor/bootstrap-5.3.8.min.css",
                 "/assets/vendor/bootstrap-5.3.8.bundle.min.js",
-                "/admin/index.html", "/admin/users.html", "/admin/credits.html",
-                "/admin/login-history.html", "/admin/access-logs.html", "/admin/audit-log.html",
-                "/admin/sessions.html", "/admin/security.html", "/admin/system.html",
+                "/admin/index.html", "/admin/users.html",
                 "/admin/admin.css", "/admin/admin.js")) {
             var result = client.send(HttpRequest.newBuilder(URI.create(baseUrl + path)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
@@ -285,10 +278,13 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         var create = call("POST", "/admin/users", "{\"username\":\"web_created\",\"displayName\":\"Created User\",\"password\":\"new-user-password\",\"systemRole\":\"USER\",\"status\":\"ACTIVE\"}");
         assertEquals(201, create.statusCode(), create.body());
         assertFalse(create.body().contains("password"));
-        assertEquals(0, json(create).get("creditBalance").asLong());
+        assertFalse(json(create).has("creditBalance"));
         String requestId = create.headers().firstValue("X-Request-ID").orElseThrow();
-        assertEquals(requestId, json(call("GET", "/admin/audit-logs?action=USER_CREATED", null))
-                .get("items").get(0).get("requestId").asText());
+        assertEquals(requestId, tx.inTransaction(c -> {
+            try (var statement = c.prepareStatement("SELECT request_id FROM audit_logs WHERE action='USER_CREATED'" )) {
+                try (var rows = statement.executeQuery()) { assertTrue(rows.next()); return rows.getString(1); }
+            }
+        }));
         assertEquals(409, call("POST", "/admin/users", "{\"username\":\"web_created\",\"displayName\":\"Duplicate\",\"password\":\"new-user-password\",\"systemRole\":\"USER\",\"status\":\"ACTIVE\"}").statusCode());
         long userId = json(create).get("id").asLong();
         var update = call("PATCH", "/admin/users/" + userId,
@@ -297,47 +293,14 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         assertEquals("DISABLED", json(update).get("status").asText());
         assertEquals(409, call("PATCH", "/admin/users/" + admin.id(),
                 "{\"displayName\":\"Admin\",\"systemRole\":\"USER\",\"status\":\"ACTIVE\",\"lockVersion\":0}").statusCode());
-        assertTrue(call("GET", "/admin/audit-logs", null).body().contains("USER_DISABLED"));
     }
 
-    @Test void administrationCreditAndLoggingUseRealHttpBoundary() throws Exception {
+    @Test void administrationKeepsUserMaintenanceAndBuildMetadataOnly() throws Exception {
         login(admin);
-        var grant = call("POST", "/admin/users/" + tester.id() + "/credits/grant", "{\"amount\":100,\"reason\":\"Trial\"}");
-        assertEquals(200, grant.statusCode(), grant.body());
-        assertEquals(100, json(grant).get("balance").asLong());
-        assertEquals(409, call("POST", "/admin/users/" + tester.id() + "/credits/reclaim", "{\"amount\":101}").statusCode());
-        assertEquals(200, call("POST", "/admin/users/" + tester.id() + "/credits/reclaim", "{\"amount\":40}").statusCode());
-        assertEquals(60, json(call("GET", "/admin/users/" + tester.id() + "/credits", null)).get("account").get("balance").asLong());
-        assertEquals(201, call("POST", "/admin/credits/batch-grant",
-                "{\"scope\":\"SELECTED_USERS\",\"userIds\":[" + tester.id() + "," + disabled.id() + "],\"amount\":5}").statusCode());
-        assertEquals(65, json(call("GET", "/admin/users/" + tester.id() + "/credits", null)).get("account").get("balance").asLong());
-        var activePreview = call("GET", "/admin/credits/recipients", null);
-        assertEquals(200, activePreview.statusCode());
-        assertEquals(201, call("POST", "/admin/credits/batch-grant",
-                "{\"scope\":\"ALL_ACTIVE_USERS\",\"expectedActiveUserIds\":" + activePreview.body() + ",\"amount\":1}").statusCode());
-        assertEquals(66, json(call("GET", "/admin/users/" + tester.id() + "/credits", null)).get("account").get("balance").asLong());
-        assertTrue(call("GET", "/admin/credits/transactions?pageSize=2", null).body().contains("GRANT"));
-        assertTrue(call("GET", "/admin/audit-logs", null).body().contains("CREDIT_BATCH_GRANTED"));
-        assertTrue(call("GET", "/admin/login-history", null).body().contains("SUCCESS"));
-        var privateQuery = client.send(HttpRequest.newBuilder(URI.create(base + "/admin/users?token=must-not-log"))
-                .header("Cookie", cookie).header("X-Forwarded-For", "198.51.100.10")
-                .GET().build(), HttpResponse.BodyHandlers.ofString());
-        assertEquals(200, privateQuery.statusCode());
-        client.send(HttpRequest.newBuilder(URI.create(base + "/admin/users;jsessionid=must-not-log-path"))
-                .header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
-        var access = call("GET", "/admin/access-logs", null);
-        assertEquals(200, access.statusCode(), access.body());
-        assertTrue(access.body().contains("requestId"));
-        assertTrue(access.body().contains("web_admin"));
-        assertFalse(access.body().contains("fixture-login-password"));
-        assertFalse(access.body().contains("JSESSIONID"));
-        assertFalse(access.body().contains("must-not-log"));
-        assertFalse(access.body().contains("198.51.100.10"));
-        assertTrue(access.body().contains("127.0.0.1"));
-        var activity = call("GET", "/admin/sessions", null);
-        assertTrue(activity.body().contains("LOGIN_ACTIVITY_ONLY"));
-        assertFalse(json(activity).get("activity").get("items").get(0).get("userLastSeen").isNull());
-        assertEquals(200, call("GET", "/admin/security", null).statusCode());
+        for (String retired : List.of("dashboard", "credits", "login-history", "access-logs", "audit-logs", "sessions", "security")) {
+            assertEquals(404, call("GET", "/admin/" + retired, null).statusCode(), retired);
+        }
+        assertEquals(404, call("POST", "/admin/users/" + tester.id() + "/credits/grant", "{\"amount\":100}").statusCode());
         var system = call("GET", "/admin/system", null);
         assertEquals(200, system.statusCode());
         var runtime = json(system);
@@ -357,17 +320,22 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         var failed = client.send(HttpRequest.newBuilder(URI.create(base.substring(0,base.length()-4) + "/test-fault"))
                 .GET().build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(500, failed.statusCode());
-        login(admin);
-        var events = json(call("GET", "/admin/access-logs?status=500", null));
-        assertEquals(1, events.get("total").asInt());
-        assertEquals("/test-fault", events.get("items").get(0).get("requestPath").asText());
-        assertEquals(500, events.get("items").get(0).get("statusCode").asInt());
+        tx.inTransaction(c -> {
+            try (var statement = c.prepareStatement("SELECT request_path,status_code FROM access_logs WHERE status_code=500");
+                 var rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("/test-fault", rows.getString(1));
+                assertEquals(500, rows.getInt(2));
+                assertFalse(rows.next());
+            }
+            return null;
+        });
     }
 
     @Test void administrationWritesKeepOriginAndMarkerGate() throws Exception {
         login(admin);
-        String uri = base + "/admin/users/" + tester.id() + "/credits/grant";
-        String payload = "{\"amount\":1}";
+        String uri = base + "/admin/users/" + tester.id() + "/reset-password";
+        String payload = "{\"password\":\"replacement-user-password\"}";
         var noOrigin = client.send(HttpRequest.newBuilder(URI.create(uri))
                 .header("Cookie", cookie).header("X-Veriqra-Request", "1")
                 .header("Content-Type", "application/json")
@@ -383,20 +351,8 @@ class AuthHttpIntegrationTest extends MysqlFixture {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload)).build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(403, noMarker.statusCode());
-        assertEquals(200, call("POST", "/admin/users/" + tester.id() + "/credits/grant", payload).statusCode());
-        assertEquals(1, json(call("GET", "/admin/users/" + tester.id() + "/credits", null)).get("account").get("balance").asLong());
-    }
-
-    @Test void creditJsonKeepsBigintPrecisionForBrowserClients() throws Exception {
-        login(admin);
-        var grant = call("POST", "/admin/users/" + tester.id() + "/credits/grant",
-                "{\"amount\":9007199254740993}");
-        assertEquals(200, grant.statusCode(), grant.body());
-        assertTrue(json(grant).get("balance").isTextual());
-        assertEquals("9007199254740993", json(grant).get("balance").asText());
-        var account = json(call("GET", "/admin/users/" + tester.id() + "/credits", null)).get("account");
-        assertEquals("9007199254740993", account.get("balance").asText());
-        assertTrue(call("GET", "/admin/credits/transactions", null).body().contains("\"amount\":\"9007199254740993\""));
+        assertEquals(204, call("POST", "/admin/users/" + tester.id() + "/reset-password", payload).statusCode());
+        assertEquals(200, call("POST", "/auth/login", "{\"username\":\"web_tester\",\"password\":\"replacement-user-password\"}").statusCode());
     }
 
     @Test void loginTelemetryRecordsFailureAndRateLimitWithoutPassword() throws Exception {
@@ -406,13 +362,20 @@ class AuthHttpIntegrationTest extends MysqlFixture {
         }
         assertEquals(429, call("POST", "/auth/login",
                 "{\"username\":\"rate_probe\",\"password\":\"never-log-this-password\"}").statusCode());
-        login(admin);
-        var events = call("GET", "/admin/login-history?username=rate_probe", null);
-        assertEquals(200, events.statusCode(), events.body());
-        assertEquals(6, json(events).get("total").asInt());
-        assertTrue(events.body().contains("RATE_LIMITED"));
-        assertTrue(events.body().contains("FAILURE"));
-        assertFalse(events.body().contains("never-log-this-password"));
+        tx.inTransaction(c -> {
+            try (var statement = c.prepareStatement("SELECT result,failure_reason FROM login_events WHERE username_attempted='rate_probe'");
+                 var rows = statement.executeQuery()) {
+                List<String> results = new ArrayList<>();
+                while (rows.next()) {
+                    results.add(rows.getString(1));
+                    assertFalse(Objects.toString(rows.getString(2), "").contains("never-log-this-password"));
+                }
+                assertEquals(6, results.size());
+                assertTrue(results.contains("RATE_LIMITED"));
+                assertTrue(results.contains("FAILURE"));
+            }
+            return null;
+        });
     }
 
     @Test void realProjectRequirementValidationAndCurrentMembership() throws Exception {

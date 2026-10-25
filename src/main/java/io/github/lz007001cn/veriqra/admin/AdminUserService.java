@@ -35,7 +35,6 @@ public final class AdminUserService {
             return tx.execute(c->{
                 policy.requireWrite(c,ctx.actorId());
                 User created=new JdbcUserDao(c).insert(new User(null,username,displayName.strip(),hash,role,status,null,null,null));
-                new JdbcCreditDao(c).createAccount(created.id());
                 audit(c,ctx,"USER_CREATED",created.id(),"User created");
                 return new JdbcAdminUserDao(c).find(created.id()).orElseThrow();
             });

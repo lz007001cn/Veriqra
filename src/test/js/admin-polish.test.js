@@ -84,10 +84,10 @@ function browser(pageName = 'users', options = {}) {
     dispose() { modalInstances.delete(this.root); }
     static getInstance(root) { return modalInstances.get(root); }
   }
-  const window = { VeriqraApi: api, VeriqraAccessLogFormat: { operatingSystem: value => value }, confirm: () => true,
+  const window = { VeriqraApi: api,
     I18n: { init: options.init || (async () => {}), t: options.t || ((key, params, fallback) => (fallback || key).replace(/\{(\w+)\}/g, (_, name) => params?.[name] ?? '')),
-      error: error => error.message || 'Unavailable', formatDateTime: value => String(value), formatCredit: value => String(value),
-      enumLabel: value => value, formatNumber: value => String(value), toUtcFilter: value => value } };
+      error: error => error.message || 'Unavailable', formatDateTime: value => String(value),
+      enumLabel: value => value, formatNumber: value => String(value) } };
   vm.runInNewContext(source, { window, document, jQuery: $, bootstrap: { Modal }, URL, URLSearchParams, location: { search: '', replace() {} } });
   const textOf = node => node.content + node.children.map(child => child instanceof Element ? textOf(child) : String(child)).join('');
   const find = (scope, label) => [...$(scope).find('button')].find(node => node.content === label);
@@ -105,15 +105,26 @@ function browser(pageName = 'users', options = {}) {
 }
 
 const paged = (items = [], page = 1, total = items.length) => ({ items, page, pageSize: 25, total });
-const account = { userId: 7, username: 'tester', displayName: 'Tester', status: 'ACTIVE', balance: 10 };
-const summary = { totalBalance: 10, totalIssued: 10, totalReclaimed: 0, usersWithBalance: 1 };
-const ledger = reason => paged([{ userId: 7, type: 'GRANT', amount: 10, actorUserId: 1, reason }], 1, 60);
-async function creditsReady(ui, history = ledger('Earlier ledger row')) {
-  await ui.authorize();
-  await ui.respond(ui.calls.find(call => call.url.startsWith('admin/credits?')), paged([account], 1, 60));
-  await ui.respond(ui.calls.find(call => call.url === 'admin/credits/summary'), summary);
-  await ui.respond(ui.calls.at(-1), history);
-}
+test('user status edits and password resets use their account endpoints', async () => {
+  const ui = browser(); await ui.authorize();
+  const user = { id: 7, username: 'tester', displayName: 'Tester', systemRole: 'USER', status: 'ACTIVE', lockVersion: 2 };
+  await ui.respond(ui.calls.at(-1), paged([user]));
+  await ui.click(ui.find('#admin-content', 'Edit'));
+  ui.$('[name="status"]').val('DISABLED');
+  const editing = ui.submit(ui.$('.modal').find('form')[0]); await flush();
+  const update = ui.calls.at(-1);
+  assert.equal(update.method, 'PATCH'); assert.equal(update.url, 'admin/users/7');
+  assert.equal(update.body.status, 'DISABLED'); assert.equal(update.body.lockVersion, 2);
+  await ui.respond(update, { ...user, status: 'DISABLED', lockVersion: 3 });
+  await ui.respond(ui.calls.at(-1), paged([{ ...user, status: 'DISABLED', lockVersion: 3 }])); await editing;
+  await ui.click(ui.find('#admin-content', 'Reset password'));
+  ui.$('[name="password"]').val('new-user-password');
+  const resetting = ui.submit(ui.$('.modal').find('form')[0]); await flush();
+  const reset = ui.calls.at(-1);
+  assert.equal(reset.method, 'POST'); assert.equal(reset.url, 'admin/users/7/reset-password');
+  assert.equal(reset.body.password, 'new-user-password');
+  await ui.respond(reset, undefined); await ui.respond(ui.calls.at(-1), paged([user])); await resetting;
+});
 
 test('authorization waits for the locale catalog before displaying its loading message', async () => {
   let ready = false, resolveInit;
@@ -153,51 +164,6 @@ test('page failure offers a GET Retry and ends loading', async () => {
   assert.match(ui.textOf(ui.$('#admin-content')[0]), /No matching records/);
   assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
 });
-
-test('credit-history failure clears stale rows and its Retry reloads only the ledger', async () => {
-  const ui = browser('credits'); await creditsReady(ui);
-  ui.$('#credit-history').find('[name="username"]').val('tester');
-  await ui.click(ui.find('#credit-history', 'Apply filters'));
-  assert.doesNotMatch(ui.textOf(ui.$('#credit-history')[0]), /Earlier ledger row/);
-  assert.equal(ui.$('#credit-history').attr('aria-busy'), 'true');
-  await ui.reject(ui.calls.at(-1), 'Ledger unavailable');
-  assert.match(ui.textOf(ui.$('#credit-history')[0]), /Ledger unavailable/);
-  assert.doesNotMatch(ui.textOf(ui.$('#credit-history')[0]), /Loading/);
-  assert.equal(ui.$('#credit-history').attr('aria-busy'), 'false');
-  const before = ui.calls.length;
-  await ui.click(ui.find('#credit-history', 'Retry'));
-  assert.equal(ui.calls.length, before + 1); assert.match(ui.calls.at(-1).url, /credits\/transactions\?.*username=tester/);
-  await ui.respond(ui.calls.at(-1), ledger('Refreshed ledger row'));
-  assert.match(ui.textOf(ui.$('#credit-history')[0]), /Refreshed ledger row/);
-  assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
-});
-
-test('older ledger successes and failures cannot replace a newer filtered ledger', async () => {
-  for (const obsoleteFails of [false, true]) {
-    const ui = browser('credits'); await creditsReady(ui);
-    ui.$('#credit-history').find('[name="username"]').val('old'); await ui.click(ui.find('#credit-history', 'Apply filters')); const obsolete = ui.calls.at(-1);
-    ui.$('#credit-history').find('[name="username"]').val('current'); await ui.click(ui.find('#credit-history', 'Apply filters'));
-    await ui.respond(ui.calls.at(-1), ledger('Current owner row'));
-    if (obsoleteFails) await ui.reject(obsolete, 'Old error'); else await ui.respond(obsolete, ledger('Old row'));
-    assert.match(ui.textOf(ui.$('#credit-history')[0]), /Current owner row/);
-    assert.doesNotMatch(ui.textOf(ui.$('#credit-history')[0]), /Old row|Old error/);
-    assert.equal(ui.$('#credit-history').attr('aria-busy'), 'false');
-  }
-});
-
-test('ledger completion from a superseded page cannot affect the refreshed page', async () => {
-  const ui = browser('credits'); await creditsReady(ui);
-  await ui.click(ui.find('#credit-history', 'Next')); const obsolete = ui.calls.at(-1);
-  await ui.locale(); const reads = ui.calls.slice(-2);
-  await ui.respond(reads[0], paged([account], 1, 60)); await ui.respond(reads[1], summary);
-  const current = ui.calls.at(-1); await ui.respond(current, ledger('Current page ledger'));
-  const restoredNext = ui.$('#credit-history').find('[data-admin-focus="page-next"]')[0];
-  assert.equal(ui.document.activeElement, restoredNext, 'Ledger pagination focus stays in its own section');
-  await ui.reject(obsolete, 'Superseded ledger error');
-  assert.match(ui.textOf(ui.$('#credit-history')[0]), /Current page ledger/);
-  assert.doesNotMatch(ui.textOf(ui.$('#admin-content')[0]), /Superseded/);
-});
-
 test('accepted user mutation plus failed refresh is explicit and Retry never repeats the write', async () => {
   const ui = browser(); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged());
   await ui.click(ui.find('#admin-content', 'Create user'));
@@ -214,30 +180,16 @@ test('accepted user mutation plus failed refresh is explicit and Retry never rep
   assert.equal(ui.$('#admin-feedback').text(), 'Change saved.'); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1);
 });
 
-test('accepted credit grant reports partial success when only the ledger refresh fails', async () => {
-  const ui = browser('credits'); await creditsReady(ui); await ui.click(ui.find('#admin-content', 'Grant'));
-  const form = ui.$('.modal').find('form')[0]; ui.$(form).find('[name="amount"]').val('5');
-  const saving = ui.submit(form); await flush(); const write = ui.calls.at(-1);
-  await ui.respond(write, {}); const reads = ui.calls.slice(-2);
-  await ui.respond(reads[0], paged([account], 1, 60)); await ui.respond(reads[1], summary);
-  await ui.reject(ui.calls.at(-1), 'Ledger refresh unavailable'); await saving;
-  assert.match(ui.textOf(ui.$('#admin-feedback')[0]), /Change saved, but the page could not be refreshed/);
-  assert.match(ui.textOf(ui.$('#credit-history')[0]), /Ledger refresh unavailable/);
-  const before = ui.calls.length; await ui.click(ui.find('#credit-history', 'Retry'));
-  assert.equal(ui.calls.length, before + 1); assert.match(ui.calls.at(-1).url, /credits\/transactions/);
-  await ui.respond(ui.calls.at(-1), ledger('Confirmed grant'));
-  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1);
-});
-
 test('rejected mutation keeps editable modal values and re-enables submission without a refresh', async () => {
-  const ui = browser('credits'); await creditsReady(ui); await ui.click(ui.find('#admin-content', 'Grant'));
-  const form = ui.$('.modal').find('form')[0]; ui.$(form).find('[name="amount"]').val('5'); ui.$(form).find('[name="reason"]').val('Typed reason');
+  const ui = browser(); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged()); await ui.click(ui.find('#admin-content', 'Create user'));
+  const form = ui.$('.modal').find('form')[0];
+  ui.$(form).find('[name="username"]').val('new-user'); ui.$(form).find('[name="displayName"]').val('Typed display name'); ui.$(form).find('[name="password"]').val('TemporaryPassword123!');
   const saving = ui.submit(form); await flush(); const before = ui.calls.length;
-  await ui.reject(ui.calls.at(-1), 'Grant rejected'); await saving;
+  await ui.reject(ui.calls.at(-1), 'User creation rejected'); await saving;
   assert.equal(ui.calls.length, before); assert.equal(ui.$('.modal').length, 1);
-  assert.equal(ui.$(form).find('[name="reason"]').val(), 'Typed reason');
-  assert.match(ui.textOf(ui.$('.modal')[0]), /Grant rejected/);
-  assert.equal(ui.find('.modal', 'Grant').disabled, false);
+  assert.equal(ui.$(form).find('[name="displayName"]').val(), 'Typed display name');
+  assert.match(ui.textOf(ui.$('.modal')[0]), /User creation rejected/);
+  assert.equal(ui.find('.modal', 'Create user').disabled, false);
   assert.doesNotMatch(ui.textOf(ui.$('#admin-feedback')[0]), /Change saved/);
 });
 
@@ -256,36 +208,4 @@ test('modal has a visible programmatic title, direct flex sections, autofocus an
   await ui.click(opener); ui.$(opener).remove(); await ui.click(ui.find('.modal', 'Cancel'));
   assert.equal(ui.document.activeElement, ui.$('#admin-content')[0], 'A detached opener uses the connected page fallback');
   assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
-});
-
-test('filter text selection and paging focus survive page replacement with an enabled last-page fallback', async () => {
-  const ui = browser('login-history'); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged([], 1, 60));
-  let input = ui.$('#admin-content').find('[name="username"]')[0]; input.value = 'tester'; input.focus(); input.setSelectionRange(2, 4);
-  ui.submit(ui.$('#admin-content').find('form')[0]); await flush(); await ui.respond(ui.calls.at(-1), paged([], 1, 60));
-  input = ui.$('#admin-content').find('[name="username"]')[0];
-  assert.equal(ui.document.activeElement, input); assert.equal(input.value, 'tester'); assert.equal(input.selectionStart, 2); assert.equal(input.selectionEnd, 4);
-  await ui.click(ui.find('#admin-content', 'Next')); await ui.respond(ui.calls.at(-1), paged([], 2, 60));
-  assert.equal(ui.document.activeElement, ui.find('#admin-content', 'Next'));
-  await ui.click(ui.find('#admin-content', 'Next')); await ui.respond(ui.calls.at(-1), paged([], 3, 60));
-  assert.equal(ui.find('#admin-content', 'Next').disabled, true); assert.equal(ui.document.activeElement, ui.find('#admin-content', 'Previous'));
-});
-
-test('pending ledger read retains newer filter edits and focus chosen while loading', async () => {
-  const ui = browser('credits'); await creditsReady(ui);
-  await ui.click(ui.find('#credit-history', 'Apply filters')); const pending = ui.calls.at(-1);
-  const input = ui.$('#credit-history').find('[name="username"]')[0]; input.value = 'Newly typed'; input.focus(); input.setSelectionRange(3, 5);
-  await ui.respond(pending, ledger('Latest row'));
-  assert.equal(ui.document.activeElement, input); assert.equal(input.value, 'Newly typed'); assert.equal(input.selectionStart, 3);
-  await ui.click(ui.find('#credit-history', 'Apply filters'));
-  assert.match(ui.calls.at(-1).url, /username=Newly\+typed/);
-  await ui.respond(ui.calls.at(-1), ledger('Applied newer edit'));
-});
-
-test('failed whole-page refresh from ledger pagination focuses the visible page Retry', async () => {
-  const ui = browser('credits'); await creditsReady(ui);
-  const next = ui.$('#credit-history').find('[data-admin-focus="page-next"]')[0]; next.focus();
-  await ui.locale(); await ui.reject(ui.calls.at(-2), 'Credits unavailable');
-  assert.equal(ui.document.activeElement, ui.find('#admin-content', 'Retry'));
-  await ui.reject(ui.calls.at(-1), 'Summary unavailable');
-  assert.match(ui.textOf(ui.$('#admin-content')[0]), /Credits unavailable/);
 });

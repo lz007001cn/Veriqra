@@ -160,37 +160,19 @@ test('switch persists preference, interpolates safely and falls back to English'
   assert.equal(await context.i18n.setLocale('zh-CN'), true);
   assert.equal(context.saved.get('veriqra.locale'), 'zh-CN');
   assert.equal(context.doc.documentElement.lang, 'zh-CN');
-  assert.equal(context.i18n.t('admin.reclaimConfirm', { amount: '500', username: '<alice>' }),
-    '确定从 <alice> 收回 500 点额度吗？');
+  assert.equal(context.i18n.t('assets.viewItem', { key: '<REQ-001>' }), '查看 <REQ-001>');
   assert.equal(context.i18n.t('missing.key', null, 'Readable fallback'), 'Readable fallback');
   assert.equal(await context.i18n.setLocale('invalid'), false);
   assert.equal(context.i18n.getLocale(), 'zh-CN');
 });
 
-test('status, error and BigInt credit formatting keep machine values intact', async () => {
+test('status and account errors keep machine values intact', async () => {
   const context = page({ saved: 'zh-CN' });
   await context.i18n.init();
   assert.equal(context.i18n.enumLabel('NEEDS_REVIEW'), '待复核');
   assert.equal(context.i18n.enumLabel('PASS'), '通过');
   assert.equal(context.i18n.error({ code: 'LAST_ADMIN_REQUIRED' }), '系统必须至少保留一名启用状态的管理员。');
-  assert.equal(context.i18n.formatCredit('9007199254740993').replace(/[^0-9]/g, ''), '9007199254740993');
   assert.equal(context.i18n.formatDateTime('2026-09-24T01:20:56.124168').includes('09:20:56'), true);
-});
-
-test('credit and handoff conflict codes render readable text in both languages', async () => {
-  const context = page({ saved: 'zh-CN' });
-  await context.i18n.init();
-  for (const code of ['INSUFFICIENT_CREDIT', 'TRANSFER_SELF_NOT_ALLOWED', 'HANDOFF_NOT_ALLOWED',
-    'HANDOFF_ALREADY_RESOLVED', 'HANDOFF_PENDING_EXISTS', 'TASK_REWARD_LOCKED']) {
-    const chinese = context.i18n.error({ code, message: 'Request conflicts with current state' });
-    assert.notEqual(chinese, code);
-    assert.notEqual(chinese, 'Request conflicts with current state');
-    await context.i18n.setLocale('en');
-    const english = context.i18n.error({ code, message: 'Request conflicts with current state' });
-    assert.notEqual(english, code);
-    assert.notEqual(english, 'Request conflicts with current state');
-    await context.i18n.setLocale('zh-CN');
-  }
 });
 
 test('UTC timestamps render in Asia/Shanghai in both locales, including the next calendar day', async () => {
@@ -205,7 +187,6 @@ test('UTC timestamps render in Asia/Shanghai in both locales, including the next
   assert.match(context.i18n.formatDateTime('2026-09-25T11:53:00Z'), /19:53:00/);
   assert.match(context.i18n.formatDateTime('2026-09-25T17:00:00'), /26.*01:00:00/);
   assert.equal(context.i18n.toUtcFilter('2026-09-26T01:00'), '2026-09-25T17:00:00');
-  assert.equal(context.i18n.t('system.displayTimeZone'), 'Asia/Shanghai（UTC+8）');
 });
 
 test('login Retry-After renders a locale-specific duration without treating seconds as a timestamp', async () => {

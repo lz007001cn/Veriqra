@@ -51,11 +51,10 @@ public final class ApplicationListener implements ServletContextListener {
             var adminPolicy = new AdminAccessPolicy();
             context.setAttribute(AdminServices.ATTRIBUTE, new AdminServices(
                     new AdminUserService(transactions, adminPolicy, passwords),
-                    new CreditService(transactions, adminPolicy),
                     new AdminLogService(transactions, adminPolicy),
                     new TelemetryService(transactions), System.currentTimeMillis()));
-            context.setAttribute(CollaborationService.class.getName(),
-                    new DefaultCollaborationService(transactions, daos, access, java.time.Clock.systemUTC()));
+            context.setAttribute(ProjectSettingsService.class.getName(),
+                    new DefaultProjectSettingsService(transactions, daos, access));
             context.setAttribute(WebServices.ATTRIBUTE, new WebServices(
                     new DefaultAuthService(transactions, daos, passwords),
                     new DefaultProjectService(transactions, daos, access),
@@ -82,7 +81,7 @@ public final class ApplicationListener implements ServletContextListener {
         event.getServletContext().removeAttribute(WebServices.ATTRIBUTE);
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName());
         event.getServletContext().removeAttribute(AdminServices.ATTRIBUTE);
-        event.getServletContext().removeAttribute(CollaborationService.class.getName());
+        event.getServletContext().removeAttribute(ProjectSettingsService.class.getName());
         closePool(event.getServletContext());
     }
     private void closePool(ServletContext context) {

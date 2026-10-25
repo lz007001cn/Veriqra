@@ -8,5 +8,4 @@ public interface AdminUserDao {
     Page<AdminUserView> list(int page, int pageSize);
     Optional<AdminUserView> find(long id);
     List<Long> lockActiveAdminIds();
-    List<Long> activeUserIds(int maximum);
 }

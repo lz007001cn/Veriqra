@@ -63,8 +63,9 @@
     try {
       const input = new URL(candidate || '', document.baseURI);
       if (input.origin !== fallback.origin || input.pathname !== fallback.pathname || input.username || input.password) return fallback.href;
-      const views = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'collaboration'];
-      const view = input.hash.slice(1) || 'dashboard';
+      const views = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings'];
+      const requestedView = input.hash.slice(1) || 'dashboard';
+      const view = requestedView === 'collaboration' ? 'project-settings' : requestedView;
       if (!views.includes(view)) return fallback.href;
       const keys = ['projectId','requirementId','testCaseId','planId','runId','runCaseId','attemptId','defectId',
         'sourceRequirementId','sourceTestCaseId','sourcePlanId','failureAttemptId'];

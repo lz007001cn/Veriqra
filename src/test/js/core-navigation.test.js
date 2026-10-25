@@ -22,7 +22,7 @@ function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#da
     reportValidity() { return true; }
   }
   const windowNode = new Node(), documentNode = new Node();
-  const sidebar = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'collaboration']
+  const sidebar = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings']
     .map(view => new Node('a', { href: '#' + view, 'data-view': view }));
   class Collection {
     constructor(items) { this.items = items; this.length = items.length; items.forEach((item, index) => { this[index] = item; }); }
@@ -96,7 +96,7 @@ function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#da
   }
   const api = {};
   for (const method of ['get', 'post']) api[method] = (url, body) => { const call = deferred(); requests.push({ method, url, body, ...call }); return call; };
-  const window = { history, VeriqraApi: api, I18n: { init: async () => {}, t: (key, _, fallback) => fallback || key, enumLabel: String } };
+  const window = { history, VeriqraApi: api, I18n: { init: async () => {}, t: (key, values, fallback) => (fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''), enumLabel: String, formatNumber: String } };
   const contextCalls = [];
   if (options.workflow) window.VeriqraQaContext = { load(projectId) { const call = deferred(); contextCalls.push({ projectId, ...call }); return call; } };
   if (options.draftGuard) window.VeriqraDraftGuard = options.draftGuard;
@@ -245,7 +245,7 @@ test('generated dashboard links use the verified project in native href and pres
   for (const base of ['http://127.0.0.1:9000/', 'http://127.0.0.1:9000/veriqra/']) {
     const ui = browser(base + 'index.html?projectId=7#dashboard'); await ui.boot();
     const links = ui.$('#workflow')[0].children;
-    assert.equal(links.length, 7);
+    assert.equal(links.length, 6);
     for (const link of links) {
       const target = new URL(link.attrs.href);
       assert.equal(target.pathname, new URL('index.html', base).pathname); assert.equal(target.searchParams.get('projectId'), '7');
@@ -358,7 +358,7 @@ test('dashboard waits for verified role and current scoped business reads before
   const ui = browser(undefined, '8', { workflow: true }); await ui.boot();
   assert.equal(ui.contextCalls.length, 1); assert.equal(ui.contextCalls[0].projectId, '7');
   assert.equal(currentRecommendation(ui), undefined);
-  assert.equal(ui.$('#access-summary').text(), 'r2.loadingRole');
+  assert.equal(ui.$('#dashboard-requirements-count').text(), '—');
   ui.contextCalls[0].resolve(qaContext(7));
   const lists = ui.requests.slice(3);
   assert.deepEqual(lists.map(call => call.url), ['requirements', 'test-cases', 'test-plans', 'runs', 'defects'].map(area => 'projects/7/' + area));
@@ -368,7 +368,7 @@ test('dashboard waits for verified role and current scoped business reads before
   const link = currentRecommendation(ui), target = new URL(link.attrs.href);
   assert.equal(link.content, 'r2.createRequirement'); assert.equal(target.hash, '#requirements');
   assert.equal(target.searchParams.get('projectId'), '7'); assert.equal(target.searchParams.get('action'), 'create');
-  assert.equal(ui.$('#access-summary').text(), 'r2.role.TESTER');
+  assert.equal(ui.$('#dashboard-requirements-count').text(), '0');
   assert.equal(ui.requests.every(call => call.method === 'get'), true);
 });
 
@@ -380,7 +380,7 @@ test('failed role or business reads publish an unavailable state without creatio
     await flushSummary();
     assert.equal(currentRecommendation(ui), undefined);
     assert.equal(ui.$('#qa-next-step')[0].children[0].content, 'r2.nextUnavailable');
-    assert.equal(ui.$('#access-summary').text(), 'r2.loadingRole');
+    assert.equal(ui.$('#dashboard-requirements-count').text(), '—');
     assert.equal(ui.requests.every(call => call.method === 'get'), true);
   }
 });
@@ -394,7 +394,7 @@ test('read-only developer and archived-project recommendations cannot offer asse
     ui.requests.slice(3).forEach(call => call.resolve([])); await flushSummary();
     const link = currentRecommendation(ui); assert.equal(link.content, expected);
     assert.equal(new URL(link.attrs.href).searchParams.has('action'), false);
-    assert.equal(ui.$('#access-help').text(), 'r2.readerHelp');
+    assert.equal(ui.$('#dashboard-progress-detail').text(), 'No run in progress.');
   }
 });
 
@@ -433,7 +433,7 @@ test('language refresh invalidates late dashboard context and never replays a bu
   const count = ui.requests.length, href = currentRecommendation(ui).attrs.href;
   old.resolve(qaContext(7, { canWriteAssets: false, projectRole: 'DEVELOPER' })); await flushSummary();
   assert.equal(ui.requests.length, count); assert.equal(currentRecommendation(ui).attrs.href, href);
-  assert.equal(ui.$('#access-summary').text(), 'r2.role.TESTER');
+  assert.equal(ui.$('#dashboard-requirements-count').text(), '0');
   assert.equal(ui.requests.every(call => call.method === 'get'), true);
 });
 
@@ -473,4 +473,59 @@ test('dashboard recommendations exclude archived source objects while retaining 
     if (key) assert.equal(new URL(link.attrs.href).searchParams.get(key), value);
     else assert.equal(new URL(link.attrs.href).searchParams.has('sourceRequirementId'), false);
   }
+});
+
+test('dashboard counts saved assets, current run results and only unclosed defects', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot();
+  ui.contextCalls[0].resolve(qaContext(7));
+  const rows = [[{ id: 10, status: 'ACTIVE' }, { id: 11, status: 'ARCHIVED' }],
+    [{ id: 20, status: 'READY' }, { id: 21, status: 'DRAFT' }], [{ id: 30, status: 'READY' }],
+    [{ id: 40, name: 'Current regression', status: 'IN_PROGRESS' }], [{ id: 31, status: 'OPEN' }, { id: 32, status: 'RESOLVED' }, { id: 33, status: 'CLOSED' }]];
+  ui.requests.slice(3).forEach((call, index) => call.resolve(rows[index])); await flushSummary();
+  assert.equal(ui.requests.at(-1).url, 'projects/7/runs/40');
+  assert.equal(ui.$('#dashboard-progress-count').text(), '—');
+  ui.requests.at(-1).resolve({ run: { id: 40 }, cases: ['PASS', 'FAIL', 'SKIPPED', 'NOT_RUN'].map(currentOutcome => ({ currentOutcome })) }); await flushSummary();
+  assert.equal(ui.$('#dashboard-requirements-count').text(), '2');
+  assert.equal(ui.$('#dashboard-cases-count').text(), '2');
+  assert.equal(ui.$('#dashboard-progress-count').text(), '3/4');
+  assert.equal(ui.$('#dashboard-progress-detail').text(), 'Current regression · PASS 1 · FAIL 1');
+  assert.equal(ui.$('#dashboard-defects-count').text(), '2');
+  assert.equal(new URL(currentRecommendation(ui).attrs.href).searchParams.get('defectId'), '32');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
+test('failed run progress keeps known project counts and an actual run link without inventing zero results', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(qaContext(7));
+  ui.requests.slice(3).forEach((call, index) => call.resolve(index === 3 ? [{ id: 40, name: 'Current regression', status: 'IN_PROGRESS' }] : [])); await flushSummary();
+  ui.requests.at(-1).reject({ status: 503 }); await flushSummary();
+  assert.equal(ui.$('#dashboard-requirements-count').text(), '0');
+  assert.equal(ui.$('#dashboard-progress-count').text(), '—');
+  assert.match(ui.$('#dashboard-progress-detail').text(), /could not be loaded/);
+  assert.equal(currentRecommendation(ui).content, 'r2.continueRun');
+  assert.equal(new URL(currentRecommendation(ui).attrs.href).searchParams.get('runId'), '40');
+});
+
+test('late run details cannot overwrite the next project summary', async () => {
+  const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(qaContext(7));
+  ui.requests.slice(3).forEach((call, index) => call.resolve(index === 3 ? [{ id: 40, name: 'Old run', status: 'IN_PROGRESS' }] : [])); await flushSummary();
+  const oldProgress = ui.requests.at(-1);
+  ui.changeProject('8'); ui.requests.at(-1).resolve(ui.project(8)); ui.contextCalls.at(-1).resolve(qaContext(8));
+  ui.requests.slice(-5).forEach(call => call.resolve([])); await flushSummary();
+  oldProgress.resolve({ run: { id: 40 }, cases: [{ currentOutcome: 'FAIL' }] }); await flushSummary();
+  assert.equal(ui.$('#dashboard-progress-count').text(), '—');
+  assert.equal(ui.$('#dashboard-progress-detail').text(), 'No run in progress.');
+  assert.equal(new URL(currentRecommendation(ui).attrs.href).searchParams.get('projectId'), '8');
+});
+
+test('old collaboration bookmarks and project setup lead to basic project settings', async () => {
+  const ui = browser('http://127.0.0.1:9000/veriqra/index.html?projectId=7&runId=40#collaboration'); await ui.boot();
+  assert.deepEqual(plain(ui.nav.read()), { view: 'project-settings', projectId: '7' });
+  assert.equal(ui.location.hash, '#project-settings');
+  assert.equal(ui.$('#project-settings-workspace').hasClass('d-none'), false);
+  assert.equal(ui.$('#project-dashboard').hasClass('d-none'), true);
+  const setup = new URL(ui.$('#project-setup-link').attr('href'));
+  assert.equal(setup.hash, '#project-settings'); assert.equal(setup.searchParams.get('projectId'), '7');
+  ui.click(ui.$('#project-setup-link')[0]);
+  assert.equal(ui.lastView().detail.view, 'project-settings');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
 });

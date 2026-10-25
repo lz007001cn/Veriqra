@@ -19,7 +19,7 @@
   <script defer src="assets/js/defects.js"></script>
   <script defer src="assets/js/automation-imports.js"></script>
   <script defer src="assets/js/import-history.js"></script>
-  <script defer src="assets/js/collaboration.js"></script>
+  <script defer src="assets/js/project-settings.js"></script>
   <script defer src="assets/js/shell.js"></script>
 </head>
 <body class="app-page">
@@ -48,8 +48,8 @@
         <a class="nav-item" href="#runs" data-view="runs"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l9 6-9 6z"/></svg><span data-i18n="common.runs">Runs</span></a>
         <a class="nav-item" href="#defects" data-view="defects"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2 2M11 11l2 2"/></svg><span data-i18n="common.defects">Defects</span></a>
         <a class="nav-item" href="#automation" data-view="automation"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3"/></svg><span data-i18n="common.automationImports">Automation &amp; imports</span></a>
-        <a class="nav-item" href="#collaboration" data-view="collaboration"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2"/><path d="M2 14v-2a4 4 0 018 0v2M11 3a2 2 0 010 4M13 14v-2a4 4 0 00-2-3"/></svg><span data-i18n="collab.navigation">Teams &amp; tasks</span></a>
-        <a class="nav-item d-none" id="admin-entry" href="admin/index.html"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l6 3v4c0 4-6 7-6 7S2 12 2 8V4z"/></svg><span data-i18n="common.administration">Administration</span></a>
+        <a class="nav-item" href="#project-settings" data-view="project-settings"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2"/><path d="M2 14v-2a4 4 0 018 0v2M11 3a2 2 0 010 4M13 14v-2a4 4 0 00-2-3"/></svg><span data-i18n="projectSettings.navigation">Project settings</span></a>
+        <a class="nav-item d-none" id="admin-entry" href="admin/users.html"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l6 3v4c0 4-6 7-6 7S2 12 2 8V4z"/></svg><span data-i18n="common.administration">Administration</span></a>
         <div class="sidebar-footer" data-i18n="shell.softwareTestQualityManagement">Software Test &amp; Quality Management</div>
       </nav>
       <main id="main-content" class="content" tabindex="-1">
@@ -66,11 +66,16 @@
           <div class="mb-3"><label for="project-create-description" class="form-label" data-i18n="common.description">Description</label><textarea id="project-create-description" class="form-control" rows="2"></textarea></div>
           <button id="project-create-submit" class="btn btn-primary" type="submit" data-i18n="project.create">Create project</button>
         </form>
-        <div id="project-created" class="alert alert-success d-none" role="status"><button id="project-created-dismiss" type="button" class="btn-close float-end" aria-label="Close" data-i18n-aria-label="common.close"></button><span data-i18n="project.created">Project created. Next, add project members and appoint a manager.</span> <a href="#collaboration" id="project-setup-link" data-i18n="project.setup">Set up members and managers</a></div>
+        <div id="project-created" class="alert alert-success d-none" role="status"><button id="project-created-dismiss" type="button" class="btn-close float-end" aria-label="Close" data-i18n-aria-label="common.close"></button><span data-i18n="project.created">Project created. Next, add project members and appoint a manager.</span> <a href="#project-settings" id="project-setup-link" data-i18n="project.setup">Set up members and managers</a></div>
         <section id="empty-projects" class="empty-state d-none" aria-labelledby="empty-title"><div class="empty-icon" aria-hidden="true">◫</div><h2 id="empty-title" data-i18n="shell.noProjectsAvailable">No projects available</h2><p data-i18n="shell.youDoNotHaveAccessToAProjectYetContactYourPlatformAdministrator">You do not have access to a project yet. Contact your platform administrator.</p></section>
         <section id="project-dashboard" class="d-none" aria-labelledby="project-title">
           <div id="project-hero" class="project-hero"><div class="project-monogram" aria-hidden="true">V</div><div class="project-hero-text"><span id="project-key" class="eyebrow"></span><h2 id="project-title"></h2><p id="project-description" class="mb-0"></p></div><span id="project-status" class="status-pill"></span></div>
-          <div class="row g-3 mt-1"><div class="col-md-6"><div class="info-card"><p class="eyebrow" data-i18n="shell.yourACCESS">YOUR ACCESS</p><p id="access-summary" class="info-value" data-i18n="shell.verifiedProjectAccess">Verified project access</p><p id="access-help" class="text-secondary mb-0"></p></div></div><div class="col-md-6"><div class="info-card"><p class="eyebrow" data-i18n="shell.currentACCOUNT">CURRENT ACCOUNT</p><p id="account-name" class="info-value"></p><p class="text-secondary mb-0" data-i18n="shell.activeSessionConfirmedByVeriqra">Active session confirmed by Veriqra.</p></div></div></div>
+          <div id="dashboard-summary" class="row g-3 mt-1" aria-live="polite">
+            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="common.requirements">Requirements</h3><p id="dashboard-requirements-count" class="info-value mb-0">—</p></div></div>
+            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="common.testCases">Test cases</h3><p id="dashboard-cases-count" class="info-value mb-0">—</p></div></div>
+            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="dashboard.currentRunProgress">Current run progress</h3><p id="dashboard-progress-count" class="info-value">—</p><p id="dashboard-progress-detail" class="small text-secondary mb-0"></p></div></div>
+            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="dashboard.openDefects">Open defects</h3><p id="dashboard-defects-count" class="info-value mb-0">—</p></div></div>
+          </div>
           <div class="section-heading"><h2 data-i18n="shell.qualityWorkflow">Quality workflow</h2><p data-i18n="shell.openAWorkspaceAreaFromTheSidebar">Open a workspace area from the sidebar.</p></div>
           <section id="qa-next-step" class="asset-panel mt-3" aria-live="polite"></section>
           <div id="workflow" class="workflow-grid" aria-label="Quality workflow pages" data-i18n-aria-label="shell.upcomingWorkflowPages"></div>
@@ -203,121 +208,7 @@
             <button id="defect-create-submit" class="btn btn-primary" type="submit" data-i18n="shell.createDefect">Create defect</button>
           </form>
         </section>
-        <section id="collaboration-workspace" class="d-none" aria-label="Teams and tasks" data-i18n-aria-label="collab.navigation">
-          <div id="collab-feedback" class="alert d-none" role="status" aria-live="polite"></div>
-          <div class="asset-panel">
-            <div class="asset-panel-heading"><h2 data-i18n="collab.yourIdentity">Your identity in this project</h2><button id="collab-refresh" class="btn btn-outline-secondary btn-sm" type="button" data-i18n="common.refresh">Refresh</button></div>
-            <p id="collab-identity" role="status"></p><p class="text-secondary small mb-0" data-i18n="collab.identityHelp">Platform administration and project duties are separate. Creating a team requires an active project manager appointment.</p>
-          </div>
-          <section id="collab-setup" class="asset-panel d-none" aria-labelledby="collab-setup-heading">
-            <h2 id="collab-setup-heading" data-i18n="collab.setupHeading">Set up this project</h2><p class="text-secondary small" data-i18n="collab.setupHelp">Follow the prerequisites below. Each action opens the matching area; it does not change permissions.</p><ol id="collab-setup-steps" class="collab-setup-steps"></ol>
-          </section>
-          <nav class="collab-sections" aria-label="Collaboration areas" data-i18n-aria-label="collab.areas">
-            <button id="collab-area-tasks" class="btn btn-outline-primary" type="button" data-collab-area="tasks" aria-controls="collab-pane-tasks" aria-pressed="false" data-i18n="collab.tasks">Tasks</button>
-            <button id="collab-area-teams" class="btn btn-outline-primary" type="button" data-collab-area="teams" aria-controls="collab-pane-teams" aria-pressed="false" data-i18n="collab.teams">Teams</button>
-            <button id="collab-area-people" class="btn btn-outline-primary" type="button" data-collab-area="people" aria-controls="collab-pane-people" aria-pressed="false" data-i18n="collab.people">Members & managers</button>
-            <button id="collab-area-credits" class="btn btn-outline-primary" type="button" data-collab-area="credits" aria-controls="collab-pane-credits" aria-pressed="false" data-i18n="collab.creditsArea">Credits & contribution</button>
-          </nav>
-          <div id="collab-pane-tasks" class="d-none" role="region" aria-labelledby="collab-area-tasks">
-          <div id="collab-tasks-feedback" class="alert d-none" role="status" aria-live="polite"></div>
-          <section class="asset-panel" aria-labelledby="collab-tasks-heading">
-            <h2 id="collab-tasks-heading" data-i18n="collab.tasks">Tasks</h2><p class="text-secondary small" data-i18n="collab.taskHelp">Assignees submit work; a different project manager or team lead accepts it. Acceptance grants the configured reward and one contribution point.</p>
-            <p id="collab-task-help" class="text-secondary small" role="status"></p><div class="row g-2 mb-3">
-              <div class="col-md-4"><label class="form-label" for="collab-filter-status" data-i18n="collab.filterStatus">Status filter</label><select id="collab-filter-status" class="form-select"><option value="" data-i18n="collab.allStatuses">All statuses</option><option value="OPEN" data-i18n="collab.status.open">Open</option><option value="IN_PROGRESS" data-i18n="collab.status.in_progress">In progress</option><option value="SUBMITTED" data-i18n="collab.status.submitted">Submitted</option><option value="ACCEPTED" data-i18n="collab.status.accepted">Accepted</option><option value="CANCELLED" data-i18n="collab.status.cancelled">Cancelled</option></select></div>
-              <div class="col-md-4"><label class="form-label" for="collab-filter-team" data-i18n="collab.filterTeam">Team filter</label><select id="collab-filter-team" class="form-select"><option value="" data-i18n="collab.allTeams">All teams</option></select></div>
-              <div class="col-md-4"><label class="form-label" for="collab-filter-assignee" data-i18n="collab.filterAssignee">Assignee filter</label><select id="collab-filter-assignee" class="form-select"><option value="" data-i18n="collab.allAssignees">All assignees</option></select></div>
-            </div>
-            <div id="collab-tasks"></div>
-            <div class="d-flex flex-wrap align-items-center gap-2 mt-2" aria-label="Task pages" data-i18n-aria-label="collab.taskPages">
-              <button id="collab-task-prev" class="btn btn-outline-secondary btn-sm" type="button" data-i18n="collab.previous">Previous</button>
-              <span id="collab-task-page-info" class="small text-secondary" role="status" aria-live="polite"></span>
-              <button id="collab-task-next" class="btn btn-outline-secondary btn-sm" type="button" data-i18n="collab.next">Next</button>
-            </div>
-            <form id="collab-task-form" class="d-none mt-3" novalidate>
-              <h3 class="fs-5" data-i18n="collab.createTask">Create task</h3>
-              <div class="row g-2 mb-2"><div class="col-md-6"><label class="form-label" for="collab-task-team" data-i18n="collab.team">Team</label><select id="collab-task-team" class="form-select" required></select></div><div class="col-md-6"><label class="form-label" for="collab-task-assignee" data-i18n="collab.assignee">Assignee</label><select id="collab-task-assignee" class="form-select" required></select></div></div>
-              <div class="mb-2"><label class="form-label" for="collab-task-title" data-i18n="common.title">Title</label><input id="collab-task-title" class="form-control" maxlength="240" required></div>
-              <div class="mb-2"><label class="form-label" for="collab-task-description" data-i18n="common.description">Description</label><textarea id="collab-task-description" class="form-control" rows="2"></textarea></div>
-              <div class="mb-2"><label class="form-label" for="collab-task-reward" data-i18n="collab.rewardCredit">Reward Credit</label><input id="collab-task-reward" class="form-control" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" maxlength="19" value="0" required></div>
-              <button class="btn btn-primary" type="submit" data-i18n="collab.createTask">Create task</button>
-            </form>
-            <div id="collab-task-detail" class="d-none mt-4"><h3 id="collab-task-detail-title" class="fs-5"></h3><div id="collab-task-summary"></div><div class="mt-2"><label class="form-label" for="collab-task-note" data-i18n="collab.reviewNote">Review note (required when returning work)</label><input id="collab-task-note" class="form-control" maxlength="500"></div><div id="collab-task-actions" class="d-flex flex-wrap gap-2 mt-2"></div>
-              <form id="collab-reward-form" class="row g-2 align-items-end d-none mt-2" novalidate><div class="col-md-8"><label class="form-label" for="collab-reward-value" data-i18n="collab.rewardCredit">Reward Credit</label><input id="collab-reward-value" class="form-control" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" maxlength="19" required></div><div class="col-md-4"><button class="btn btn-outline-primary" type="submit" data-i18n="collab.updateReward">Update reward</button></div></form>
-              <form id="collab-handoff-form" class="row g-2 align-items-end d-none mt-2" novalidate><div class="col-md-4"><label class="form-label" for="collab-handoff-user" data-i18n="collab.recipient">Recipient</label><select id="collab-handoff-user" class="form-select" required></select></div><div class="col-md-3"><label class="form-label" for="collab-handoff-amount" data-i18n="collab.amount">Amount</label><input id="collab-handoff-amount" class="form-control" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required></div><div class="col-md-3"><label class="form-label" for="collab-handoff-note" data-i18n="collab.note">Note (optional)</label><input id="collab-handoff-note" class="form-control" maxlength="500"></div><div class="col-md-2"><button class="btn btn-outline-primary" type="submit" data-i18n="collab.offerHandoff">Offer handoff</button></div></form>
-              <form id="collab-reassign-form" class="row g-2 align-items-end d-none mt-2" novalidate><div class="col-md-8"><label class="form-label" for="collab-reassign-user" data-i18n="collab.newAssignee">New assignee</label><select id="collab-reassign-user" class="form-select" required></select></div><div class="col-md-4"><button class="btn btn-outline-primary" type="submit" data-i18n="collab.reassign">Reassign</button></div></form>
-              <div class="mt-3"><h4 class="fs-6" data-i18n="collab.history">Task history</h4><div id="collab-task-events"></div></div>
-            </div>
-          </section>
-          </div>
-          <div id="collab-pane-teams" class="d-none" role="region" aria-labelledby="collab-area-teams">
-          <div id="collab-teams-feedback" class="alert d-none" role="status" aria-live="polite"></div>
-          <section class="asset-panel" aria-labelledby="collab-teams-heading">
-            <h2 id="collab-teams-heading" data-i18n="collab.teams">Teams</h2><p id="collab-team-help" class="text-secondary small" role="status"></p><div id="collab-teams"></div>
-            <form id="collab-team-form" class="row g-2 align-items-end d-none" novalidate>
-              <div class="col-md-5"><label class="form-label" for="collab-team-name" data-i18n="collab.teamName">Team name</label><input id="collab-team-name" class="form-control" maxlength="120" required></div>
-              <div class="col-md-4"><label class="form-label" for="collab-team-lead" data-i18n="collab.teamLead">Team lead</label><select id="collab-team-lead" class="form-select" required></select></div>
-              <div class="col-md-3"><button class="btn btn-primary" type="submit" data-i18n="collab.createTeam">Create team</button></div>
-            </form>
-            <p class="text-secondary small" data-i18n="collab.selectTeamHelp">Select a team above to view members, add members, or change its lead. The chosen lead joins the team automatically.</p><div id="collab-team-detail" class="mt-3 d-none"><h3 id="collab-team-title" class="fs-5"></h3><div id="collab-team-members"></div>
-              <form id="collab-team-member-form" class="row g-2 align-items-end d-none" novalidate>
-                <div class="col-md-8"><label class="form-label" for="collab-team-member" data-i18n="collab.member">Project member</label><select id="collab-team-member" class="form-select" required></select></div>
-                <div class="col-md-4"><button class="btn btn-outline-primary" type="submit" data-i18n="collab.addToTeam">Add to team</button></div>
-              </form>
-              <form id="collab-change-lead-form" class="row g-2 align-items-end d-none mt-1" novalidate>
-                <div class="col-md-8"><label class="form-label" for="collab-new-lead" data-i18n="collab.newLead">New team lead</label><select id="collab-new-lead" class="form-select" required></select></div>
-                <div class="col-md-4"><button class="btn btn-outline-secondary" type="submit" data-i18n="collab.changeLead">Change lead</button></div>
-              </form>
-            </div>
-          </section>
-          </div>
-          <div id="collab-pane-people" class="d-none" role="region" aria-labelledby="collab-area-people">
-          <div id="collab-people-feedback" class="alert d-none" role="status" aria-live="polite"></div>
-          <section class="asset-panel" aria-labelledby="collab-members-heading">
-            <h2 id="collab-members-heading" data-i18n="collab.projectMembers">Project members</h2><p data-i18n="collab.membersHelp" class="text-secondary small">Add existing platform users before appointing a manager or choosing a team lead.</p><p id="collab-member-help" class="text-secondary small" role="status"></p><div id="collab-members"></div>
-            <form id="collab-invite-form" class="row g-2 align-items-end d-none" novalidate>
-              <div class="col-md-5"><label class="form-label" for="collab-invite-username" data-i18n="collab.existingUsername">Existing username</label><input id="collab-invite-username" class="form-control" maxlength="64" required></div>
-              <div class="col-md-4"><label class="form-label" for="collab-invite-role" data-i18n="collab.projectRole">Project role</label><select id="collab-invite-role" class="form-select"><option value="TESTER" data-i18n="collab.tester">Tester</option><option value="DEVELOPER" data-i18n="collab.developer">Developer</option></select></div>
-              <div class="col-md-3"><button class="btn btn-primary" type="submit" data-i18n="collab.addMember">Add member</button></div>
-            </form>
-          </section>
-          <section class="asset-panel" aria-labelledby="collab-managers-heading">
-            <div class="asset-panel-heading"><h2 id="collab-managers-heading" data-i18n="collab.managers">Project managers</h2></div>
-            <p class="text-secondary small" data-i18n="collab.managerHelp">Platform administrators appoint managers from active project members. Managers cannot administer platform accounts.</p>
-            <p id="collab-manager-help" class="text-secondary small" role="status"></p><div id="collab-managers"></div>
-            <form id="collab-appoint-form" class="row g-2 align-items-end d-none" novalidate>
-              <div class="col-md-8"><label class="form-label" for="collab-appoint-user" data-i18n="collab.member">Project member</label><select id="collab-appoint-user" class="form-select" required></select></div>
-              <div class="col-md-4"><button class="btn btn-primary" type="submit" data-i18n="collab.appoint">Appoint manager</button></div>
-            </form>
-          </section>
-          </div>
-          <div id="collab-pane-credits" class="d-none" role="region" aria-labelledby="collab-area-credits">
-          <div id="collab-credits-feedback" class="alert d-none" role="status" aria-live="polite"></div>
-          <section class="asset-panel" aria-labelledby="collab-credits-heading">
-            <h2 id="collab-credits-heading" data-i18n="collab.myCredits">My Credits</h2>
-            <p class="text-secondary small" data-i18n="collab.creditDisclaimer">Experimental, non-monetary Credits. Transfers do not increase contribution score.</p>
-            <p id="collab-credit-notice" class="text-secondary small" role="status"></p><p id="collab-credit-balance" role="status"></p>
-            <form id="collab-transfer-form" class="row g-2 align-items-end" novalidate>
-              <div class="col-md-4"><label class="form-label" for="collab-transfer-user" data-i18n="collab.recipient">Recipient</label><select id="collab-transfer-user" class="form-select" required></select></div>
-              <div class="col-md-3"><label class="form-label" for="collab-transfer-amount" data-i18n="collab.amount">Amount</label><input id="collab-transfer-amount" class="form-control" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required></div>
-              <div class="col-md-3"><label class="form-label" for="collab-transfer-note" data-i18n="collab.note">Note (optional)</label><input id="collab-transfer-note" class="form-control" maxlength="500"></div>
-              <div class="col-md-2"><button class="btn btn-primary" type="submit" data-i18n="collab.transfer">Transfer</button></div>
-            </form>
-            <h3 class="fs-6 mt-3" data-i18n="collab.recentTransactions">Recent transactions</h3><div id="collab-credit-history"></div>
-          </section>
-          <section class="asset-panel" aria-labelledby="collab-contribution-heading">
-            <h2 id="collab-contribution-heading" data-i18n="collab.monthlyContribution">Monthly contribution</h2>
-            <p class="text-secondary small" data-i18n="collab.contributionHelp">One point per accepted task. Credits and transfers do not affect this score.</p>
-            <label for="collab-contribution-month" class="form-label" data-i18n="collab.month">Month (Asia/Shanghai)</label>
-            <input id="collab-contribution-month" class="form-control w-auto mb-2" type="month">
-            <p id="collab-contribution-notice" class="text-secondary small" role="status"></p><div id="collab-contribution-list"></div>
-          </section>
-          <section class="asset-panel" aria-labelledby="collab-handoffs-heading">
-            <h2 id="collab-handoffs-heading" data-i18n="collab.handoffs">Task handoffs</h2>
-            <p class="text-secondary small" data-i18n="collab.handoffHelp">A pending offer does not move Credits or change the task. Payment occurs only when the recipient accepts.</p>
-            <p id="collab-handoff-notice" class="text-secondary small" role="status"></p><div id="collab-handoffs"></div>
-          </section>
-          </div>
-        </section>
+        <section id="project-settings-workspace" class="d-none" aria-label="Project settings" data-i18n-aria-label="projectSettings.navigation"></section>
         <section id="automation-workspace" class="d-none" aria-label="Automation and JUnit imports" data-i18n-aria-label="shell.automationAndJUnitImports">
           <p class="alert alert-info" data-i18n="imports.workflow">Select XML → preview → register unknown identities → map each to a READY case → preview again → import. Each report supports one classname.</p>
           <p><a href="samples/junit-demo.xml" download data-i18n="imports.sample">Download PASS / FAIL / SKIPPED sample</a> · <code>demo.LoginTest</code></p>

@@ -12,61 +12,61 @@ final class ServiceDaoDelegates {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), replacement,
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos steps(ServiceDaos d, TestStepDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), replacement, d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos traceability(ServiceDaos d, TestCaseRequirementDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), replacement, d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos planCases(ServiceDaos d, TestPlanCaseDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), replacement,
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos testRuns(ServiceDaos d, TestRunDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 replacement, d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos runCaseSteps(ServiceDaos d, TestRunCaseStepDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), replacement, d.attempts(), d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos attempts(ServiceDaos d, TestAttemptDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), replacement, d.defects(), d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos defects(ServiceDaos d, DefectDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), replacement, d.attemptDefects(),
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos attemptDefects(ServiceDaos d, TestAttemptDefectDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), replacement,
-                d.automationIdentities(), d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                d.automationIdentities(), d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
     static ServiceDaos automationIdentities(ServiceDaos d, TestAutomationIdentityDao replacement) {
         return new ServiceDaos(d.users(), d.projects(), d.members(), d.counters(), d.requirements(),
                 d.testCases(), d.steps(), d.traceability(), d.testPlans(), d.testPlanCases(),
                 d.testRuns(), d.runCases(), d.runCaseSteps(), d.attempts(), d.defects(), d.attemptDefects(),
-                replacement, d.automationMappings(), d.imports(), d.collaboration(), d.retestLinks(), d.closureReceipts(), d.closureItems());
+                replacement, d.automationMappings(), d.imports(), d.projectSettings(), d.retestLinks(), d.closureReceipts(), d.closureItems());
     }
 
     abstract static class RequirementDelegate implements RequirementDao {

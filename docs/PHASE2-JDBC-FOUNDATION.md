@@ -132,7 +132,7 @@ git diff --check
 
 测试覆盖配置优先级；池并发容量/超时/重复 close/初始化失败/失效连接/归还重置/关闭竞态；事务提交/回滚/异常保留/嵌套拒绝；真实 User/Project 的增查改、唯一键/FK/CHECK 错误转换、乐观锁、微秒时间和整数范围。当前测试不是业务 Service 覆盖率或生产压力指标。
 
-初次 52 项测试结果见 [Round 1 验证记录](PHASE2-JDBC-VALIDATION.md)；后续针对性审查、修复和新增边界验证见 [代码审查报告](PHASE2-R1-CODE-REVIEW.md)。
+初次 52 项测试结果见 [Round 1 验证记录](PHASE2-JDBC-VALIDATION.md)。当前验证以仓库内测试为准。
 
 ## 7. 官方资料
 

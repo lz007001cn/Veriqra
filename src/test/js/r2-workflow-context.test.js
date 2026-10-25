@@ -274,6 +274,16 @@ test('safe return target admits only same-origin deployment index, approved view
   }
 });
 
+test('login return destinations preserve project settings and translate the retired collaboration bookmark', () => {
+  for (const base of ['https://example.test/', 'https://example.test/veriqra/']) {
+    const ui = browser({ base });
+    for (const view of ['project-settings', 'collaboration']) {
+      const url = new URL(ui.recovery.safeReturnTarget(base + 'index.html?projectId=7#' + view));
+      assert.equal(url.hash, '#project-settings'); assert.equal(url.searchParams.get('projectId'), '7');
+    }
+  }
+});
+
 test('unsafe return destinations cannot become an external redirect or arbitrary same-origin page', () => {
   const ui = browser();
   for (const candidate of [

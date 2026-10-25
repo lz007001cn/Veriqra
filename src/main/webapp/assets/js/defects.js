@@ -722,7 +722,7 @@
     return Number.isSafeInteger(id) && id > 0 && state && !state.loading && !state.failed &&
       (state.rows.some(function (row) { return sameId(row.userId, id); }) || state.allowRetained && sameId(state.retained, id)) ? id : null;
   }
-  function memberName(row) { return (row.displayName || row.username) + (row.displayName && row.username ? ' (@' + row.username + ')' : '') + ' · ' + t('collab.' + row.projectRole.toLowerCase(), null, label(row.projectRole)); }
+  function memberName(row) { return (row.displayName || row.username) + (row.displayName && row.username ? ' (@' + row.username + ')' : '') + ' · ' + t('projectSettings.role.' + row.projectRole.toLowerCase(), null, label(row.projectRole)); }
   function projectUserName(id) {
     const row = projectMembers.find(function (member) { return sameId(member.userId, id); });
     if (!row && actor && sameId(actor.id, id) && (actor.displayName || actor.username)) return actor.displayName || actor.username;

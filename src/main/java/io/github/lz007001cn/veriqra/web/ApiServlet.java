@@ -45,12 +45,6 @@ public final class ApiServlet extends HttpServlet {
                 method(response, method, "GET");
                 JsonHttp.write(response, 200, UserResponse.from(services.auth().current(SessionIdentity.require(request))));
             }
-            case "/credits/me" -> {
-                method(response, method, "GET");
-                var collaboration = (io.github.lz007001cn.veriqra.service.CollaborationService)
-                        getServletContext().getAttribute(io.github.lz007001cn.veriqra.service.CollaborationService.class.getName());
-                JsonHttp.write(response, 200, java.util.Objects.requireNonNull(collaboration).myCredits(SessionIdentity.require(request)));
-            }
             case "/projects" -> {
                 Long actor = SessionIdentity.require(request);
                 if (method.equals("GET")) {
@@ -97,11 +91,11 @@ public final class ApiServlet extends HttpServlet {
                 case "test-plans" -> TestPlanHandler.handle(request, response, services, actor, projectId, parts);
                 case "automation" -> AutomationHandler.handleProject(request, response, services, actor, projectId, parts);
                 case "imports" -> TestImportHandler.handle(request, response, services, actor, projectId, parts);
-                case "managers", "members", "teams", "tasks", "credit-transfers", "contributions", "handoffs" -> CollaborationHandler.handle(
+                case "managers", "members" -> ProjectSettingsHandler.handle(
                         request, response,
-                        java.util.Objects.requireNonNull((io.github.lz007001cn.veriqra.service.CollaborationService)
-                                getServletContext().getAttribute(io.github.lz007001cn.veriqra.service.CollaborationService.class.getName()),
-                                "Collaboration service not initialized"), actor, projectId, parts);
+                        java.util.Objects.requireNonNull((io.github.lz007001cn.veriqra.service.ProjectSettingsService)
+                                getServletContext().getAttribute(io.github.lz007001cn.veriqra.service.ProjectSettingsService.class.getName()),
+                                "Project settings service not initialized"), actor, projectId, parts);
                 default -> throw new HttpFailure(404, "NOT_FOUND", "Resource not found");
             }
             return;
