@@ -47,8 +47,10 @@ public final class AdminHandler {
         if (parts.length == 3) {
             JsonHttp.method(response, method, "GET", "POST");
             if (method.equals("GET")) {
-                JsonHttp.write(response, 200, admin.users().list(actor,
-                        page(request, "page", 1, 1_000_000), page(request, "pageSize", 25, 100)));
+                JsonHttp.write(response, 200, admin.users().list(actor, new AdminUserQuery(
+                        page(request, "page", 1, 1_000_000), page(request, "pageSize", 25, 100),
+                        request.getParameter("search"), filter(request, "systemRole", SystemRole.class),
+                        filter(request, "status", UserStatus.class), request.getParameter("sort"), request.getParameter("order"))));
                 return;
             }
             CreateUser body = JsonHttp.read(request, CreateUser.class);
@@ -88,5 +90,11 @@ public final class AdminHandler {
             if (value < 1 || value > maximum) throw new NumberFormatException();
             return value;
         } catch (NumberFormatException e) { throw new HttpFailure(400, "INVALID_PAGE", "Invalid pagination value"); }
+    }
+    private static <E extends Enum<E>> E filter(HttpServletRequest request, String name, Class<E> type) {
+        String value = request.getParameter(name);
+        if (value == null || value.isEmpty()) return null;
+        try { return Enum.valueOf(type, value); }
+        catch (IllegalArgumentException e) { throw new HttpFailure(400, "VALIDATION", "Invalid user filter"); }
     }
 }

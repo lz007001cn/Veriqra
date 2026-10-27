@@ -17,7 +17,11 @@ public final class AdminUserService {
         this.tx=Objects.requireNonNull(tx);this.policy=Objects.requireNonNull(policy);this.passwords=Objects.requireNonNull(passwords);
     }
     public Page<AdminUserView> list(long actor,int page,int size) {
-        return tx.execute(c->{policy.requireRead(c,actor);return new JdbcAdminUserDao(c).list(page,size);});
+        return list(actor,AdminUserQuery.page(page,size));
+    }
+    public Page<AdminUserView> list(long actor,AdminUserQuery query) {
+        Objects.requireNonNull(query);
+        return tx.execute(c->{policy.requireRead(c,actor);return new JdbcAdminUserDao(c).list(query);});
     }
     public AdminUserView get(long actor,long id) {
         return tx.execute(c->{policy.requireRead(c,actor);return new JdbcAdminUserDao(c).find(id)

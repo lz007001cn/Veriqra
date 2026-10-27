@@ -5,6 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../../main/webapp/assets/js/app.js'), 'utf8');
+const dashboardSource = fs.readFileSync(path.resolve(__dirname, '../../main/webapp/assets/js/dashboard.js'), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
 const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 
@@ -101,7 +102,9 @@ function browser(href = 'http://127.0.0.1:9000/veriqra/index.html?projectId=7#da
   if (options.workflow) window.VeriqraQaContext = { load(projectId) { const call = deferred(); contextCalls.push({ projectId, ...call }); return call; } };
   if (options.draftGuard) window.VeriqraDraftGuard = options.draftGuard;
   const sessionStorage = { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) };
-  vm.runInNewContext(source, { window, document, jQuery: $, location, sessionStorage, URL, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } } });
+  const environment = { window, document, jQuery: $, location, sessionStorage, URL, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } } };
+  vm.runInNewContext(dashboardSource, environment);
+  vm.runInNewContext(source, environment);
   const project = id => ({ id: Number(id), projectKey: 'QA' + id, name: 'Project ' + id, status: 'ACTIVE' });
   async function boot(ids = [7, 8]) {
     fire(windowNode, 'pageshow'); await flush();
@@ -394,7 +397,7 @@ test('read-only developer and archived-project recommendations cannot offer asse
     ui.requests.slice(3).forEach(call => call.resolve([])); await flushSummary();
     const link = currentRecommendation(ui); assert.equal(link.content, expected);
     assert.equal(new URL(link.attrs.href).searchParams.has('action'), false);
-    assert.equal(ui.$('#dashboard-progress-detail').text(), 'No run in progress.');
+    assert.equal(ui.$('#dashboard-progress-detail').text(), 'No test runs yet.');
   }
 });
 
@@ -488,7 +491,7 @@ test('dashboard counts saved assets, current run results and only unclosed defec
   assert.equal(ui.$('#dashboard-requirements-count').text(), '2');
   assert.equal(ui.$('#dashboard-cases-count').text(), '2');
   assert.equal(ui.$('#dashboard-progress-count').text(), '3/4');
-  assert.equal(ui.$('#dashboard-progress-detail').text(), 'Current regression · PASS 1 · FAIL 1');
+  assert.equal(ui.$('#dashboard-progress-detail').text(), '1 cases not run');
   assert.equal(ui.$('#dashboard-defects-count').text(), '2');
   assert.equal(new URL(currentRecommendation(ui).attrs.href).searchParams.get('defectId'), '32');
   assert.equal(ui.requests.every(call => call.method === 'get'), true);
@@ -513,7 +516,7 @@ test('late run details cannot overwrite the next project summary', async () => {
   ui.requests.slice(-5).forEach(call => call.resolve([])); await flushSummary();
   oldProgress.resolve({ run: { id: 40 }, cases: [{ currentOutcome: 'FAIL' }] }); await flushSummary();
   assert.equal(ui.$('#dashboard-progress-count').text(), '—');
-  assert.equal(ui.$('#dashboard-progress-detail').text(), 'No run in progress.');
+  assert.equal(ui.$('#dashboard-progress-detail').text(), 'No test runs yet.');
   assert.equal(new URL(currentRecommendation(ui).attrs.href).searchParams.get('projectId'), '8');
 });
 

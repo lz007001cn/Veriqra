@@ -1,7 +1,13 @@
-/* User maintenance table and paging. */
-.admin-table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; }
+/* Account filters and the Bootstrap Table user list. */
+.admin-user-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-bottom: 1rem; }
+.admin-user-filters > div { min-width: 9rem; }
+.admin-user-filters .admin-user-search { flex: 1 1 17rem; }
+.admin-user-filters .form-label { margin-bottom: .35rem; }
+.admin-user-create { margin-left: auto; }
+#admin-content, #admin-content .bootstrap-table { min-width: 0; max-width: 100%; }
 .admin-table { min-width: 48rem; }
-.admin-table [data-vq-type="timestamp"] { min-width: 10.5rem; white-space: nowrap; }
+.admin-table .admin-user-timestamp { min-width: 10.5rem; white-space: nowrap; }
 .admin-table .actions { display: inline-flex; align-items: center; gap: var(--vq-space-1); white-space: nowrap; }
 .admin-table td { max-width: 24rem; overflow-wrap: anywhere; }
-.admin-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--vq-space-3); margin-top: var(--vq-space-4); color: var(--vq-text-secondary); font-size: var(--vq-font-sm); }
+#admin-table-error .empty-state { padding: 1rem; margin-bottom: .75rem; }
+@media (max-width: 575px) { .admin-user-create { margin-left: 0; } .admin-user-filters > div { flex-grow: 1; } }

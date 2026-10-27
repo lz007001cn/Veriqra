@@ -3,6 +3,7 @@ package io.github.lz007001cn.veriqra.service;
 import io.github.lz007001cn.veriqra.model.TestCaseRequirement;
 
 public interface TraceabilityService {
+    java.util.List<io.github.lz007001cn.veriqra.model.RequirementCoverage> listCoverageByProject(Long actorUserId, Long projectId);
     java.util.List<CaseRequirementDetails> listByTestCase(Long actorUserId, Long projectId, Long testCaseId);
     java.util.List<TraceabilityDetails> listByRequirement(Long actorUserId, Long projectId, Long requirementId);
     TestCaseRequirement attach(Long actorUserId, Long projectId, Long requirementId, Long testCaseId);

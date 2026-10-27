@@ -19,7 +19,7 @@ v0.9 已裁撤小组任务、任务转交、积分奖励和排行；管理后台
 
 ## 技术与目录
 
-Java 21、Jakarta Servlet 6、原生 JDBC、Jackson、MySQL 8、Tomcat 10.1；前端使用 jQuery 和 Bootstrap，支持中文与 English，无前端构建工具。
+Java 21、Jakarta Servlet 6、原生 JDBC、Jackson、MySQL 8、Tomcat 10.1；前端使用 jQuery 和 Bootstrap，支持中文与 English，无前端构建工具。仪表盘使用 ECharts 6.0.0 展示当前运行结果；用户维护使用 Bootstrap Table 1.24.2，支持服务端搜索、筛选、排序和分页。两项组件均随 WAR 本地打包。
 
 后端调用方向为 Servlet → Service → DAO → MySQL。主要代码位于 `src/main/java/io/github/lz007001cn/veriqra/`，页面与脚本位于 `src/main/webapp/`，数据库安装文件位于 `database/`。
 

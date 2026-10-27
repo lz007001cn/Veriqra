@@ -108,6 +108,8 @@
       dismissProjectCreated();
     }
     currentView = nextView;
+    $('body').attr('data-current-view', currentView);
+    if (currentView !== 'dashboard' && window.VeriqraDashboard) window.VeriqraDashboard.deactivate();
     $('#project-create-open').toggleClass('d-none', !currentUser || currentUser.systemRole !== 'ADMIN' || currentView !== 'dashboard');
     $('[data-view]').removeClass('active').removeAttr('aria-current');
     $('[data-view="' + currentView + '"]').addClass('active').attr('aria-current', 'page');
@@ -389,86 +391,13 @@
     });
     if (currentView === 'dashboard' && activeProject && window.VeriqraQaContext) loadWorkflowSummary();
   }
-  function clearDashboardSummary() {
-    $('#dashboard-requirements-count, #dashboard-cases-count, #dashboard-progress-count, #dashboard-defects-count').text('—');
-    $('#dashboard-progress-detail').text(t('common.loading', null, 'Loading…'));
-  }
-  function renderDashboardSummary(requirements, cases, defects, activeRun, progress, progressUnavailable) {
-    const number = window.I18n.formatNumber;
-    $('#dashboard-requirements-count').text(number(requirements.length));
-    $('#dashboard-cases-count').text(number(cases.length));
-    $('#dashboard-defects-count').text(number(defects.filter(function (row) { return row.status !== 'CLOSED'; }).length));
-    if (!activeRun) {
-      $('#dashboard-progress-count').text('—');
-      $('#dashboard-progress-detail').text(t('dashboard.noActiveRun', null, 'No run in progress.'));
-    } else if (progressUnavailable) {
-      $('#dashboard-progress-count').text('—');
-      $('#dashboard-progress-detail').text(t('dashboard.progressUnavailable', null, 'Run progress could not be loaded. Open the run to retry.'));
-    } else {
-      const counts = { PASS: 0, FAIL: 0, BLOCKED: 0, SKIPPED: 0, NOT_RUN: 0 };
-      progress.cases.forEach(function (row) { counts[Object.prototype.hasOwnProperty.call(counts, row.currentOutcome) ? row.currentOutcome : 'NOT_RUN']++; });
-      $('#dashboard-progress-count').text(t('dashboard.runProgress', { recorded: number(progress.cases.length - counts.NOT_RUN), total: number(progress.cases.length) }, '{recorded}/{total}'));
-      $('#dashboard-progress-detail').text(t('dashboard.runResults', { name: activeRun.name, pass: number(counts.PASS), fail: number(counts.FAIL) }, '{name} · PASS {pass} · FAIL {fail}'));
-    }
-  }
   function loadWorkflowSummary() {
     const token = ++workflowRequest;
     const projectId = selectedId;
-    if (!projectId) return;
-    clearDashboardSummary();
-    const panel = $('#qa-next-step').empty().append($('<p>').text(t('r2.loadingNext')));
-    function current() { return token === workflowRequest && currentView === 'dashboard' && String(selectedId) === String(projectId); }
-    function failed() {
-      if (!current()) return;
-      clearDashboardSummary();
-      $('#dashboard-progress-detail').text(t('dashboard.summaryUnavailable', null, 'Project summary could not be loaded.'));
-      panel.empty().append($('<p role="status">').text(t('r2.nextUnavailable')))
-        .append($('<button type="button" class="btn btn-outline-secondary">').text(t('common.retry')).on('click', loadWorkflowSummary));
-    }
-    window.VeriqraQaContext.load(projectId).done(async function (context) {
-      if (!current()) return;
-      try {
-        const paths = ['requirements', 'test-cases', 'test-plans', 'runs', 'defects'];
-        const data = await Promise.all(paths.map(function (path) { return api.get('projects/' + projectId + '/' + path); }));
-        if (!current()) return;
-        if (!data.every(Array.isArray)) { failed(); return; }
-        const requirements = data[0], cases = data[1], plans = data[2], runs = data[3], defects = data[4];
-        const usableRequirements = requirements.filter(function (row) { return row.status !== 'ARCHIVED'; });
-        const usableCases = cases.filter(function (row) { return row.status !== 'ARCHIVED'; });
-        const usablePlans = plans.filter(function (row) { return row.status !== 'ARCHIVED'; });
-        let next;
-        const draftCase = cases.find(function (row) { return row.status === 'DRAFT'; });
-        const draftPlan = plans.find(function (row) { return row.status === 'DRAFT'; });
-        const activeRun = runs.find(function (row) { return row.status === 'IN_PROGRESS'; });
-        let progress = null, progressUnavailable = false;
-        if (activeRun) {
-          try {
-            progress = await api.get('projects/' + projectId + '/runs/' + encodeURIComponent(activeRun.id));
-            if (!progress || !progress.run || String(progress.run.id) !== String(activeRun.id) || !Array.isArray(progress.cases)) progressUnavailable = true;
-          } catch (_) { progressUnavailable = true; }
-          if (!current()) return;
-        }
-        renderDashboardSummary(requirements, cases, defects, activeRun, progress, progressUnavailable);
-        const resolved = defects.find(function (row) { return row.status === 'RESOLVED'; });
-        const assigned = defects.find(function (row) { return String(row.assigneeId) === String(context.actorId) && ['OPEN','IN_PROGRESS'].includes(row.status); });
-        if (context.projectStatus !== 'ACTIVE') next = ['r2.projectReadOnly', 'requirements', {}];
-        else if (!context.canWriteAssets) next = assigned ? ['r2.handleAssigned', 'defects', { defectId: assigned.id }] : ['r2.inspectResults', 'runs', {}];
-        else if (resolved) next = ['r2.reviewRetest', 'defects', { defectId: resolved.id }];
-        else if (activeRun) next = ['r2.continueRun', 'runs', { runId: activeRun.id }];
-        else if (!usableRequirements.length) next = ['r2.createRequirement', 'requirements', { action: 'create' }];
-        else if (!usableCases.length) next = ['r2.createCoveredCase', 'test-cases', { action: 'create', sourceRequirementId: usableRequirements[0].id }];
-        else if (draftCase) next = ['r2.reviewCase', 'test-cases', { testCaseId: draftCase.id }];
-        else if (!usablePlans.length) next = ['r2.createPlan', 'test-plans', { action: 'create', sourceTestCaseId: (usableCases.find(function (row) { return row.status === 'READY'; }) || usableCases[0]).id }];
-        else if (draftPlan) next = ['r2.reviewPlan', 'test-plans', { planId: draftPlan.id }];
-        else next = ['r2.checkPlan', 'test-plans', { planId: usablePlans[0].id }];
-        panel.empty().append($('<h3 class="fs-5">').text(t('r2.nextStep')))
-          .append($('<a class="btn btn-primary">').attr('href', window.VeriqraQaNavigation.href(next[1], next[2])).text(t(next[0])).on('click', function (event) {
-            if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0) return;
-            event.preventDefault(); window.VeriqraQaNavigation.open(next[1], next[2]);
-          }))
-          .append($('<p class="text-secondary small mt-2 mb-0">').text(t('r2.workflowHelp')));
-      } catch (_) { failed(); }
-    }).fail(failed);
+    if (!projectId || !window.VeriqraDashboard) return;
+    window.VeriqraDashboard.load({ projectId: projectId, isCurrent: function () {
+      return token === workflowRequest && currentView === 'dashboard' && String(selectedId) === String(projectId);
+    } });
   }
   document.addEventListener('veriqra:reauthenticated', function () {
     if (currentView === 'dashboard' && activeProject && window.VeriqraQaContext) loadWorkflowSummary();
@@ -491,6 +420,7 @@
     }
   });
   $(window).on('pagehide', function () {
+    if (window.VeriqraDashboard) window.VeriqraDashboard.deactivate();
     // Prevent a back/forward cache snapshot from displaying old project data before revalidation.
     shell.addClass('d-none');
     splash.removeClass('d-none');

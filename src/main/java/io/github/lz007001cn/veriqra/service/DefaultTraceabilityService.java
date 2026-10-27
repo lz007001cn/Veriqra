@@ -20,6 +20,16 @@ public final class DefaultTraceabilityService implements TraceabilityService {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    @Override public java.util.List<RequirementCoverage> listCoverageByProject(Long actorUserId, Long projectId) {
+        ServiceValidation.required(projectId, "projectId");
+        return transactions.execute(connection -> {
+            ServiceDaos daos = daoFactory.create(connection);
+            daos.projects().findById(projectId).orElseThrow(() -> new NotFoundException("Project does not exist"));
+            access.requireProjectRead(daos.users(), daos.members(), actorUserId, projectId);
+            return daos.traceability().listCoverageByProject(projectId);
+        });
+    }
+
     @Override public TestCaseRequirement attach(Long actorUserId, Long requirementId, Long testCaseId) {
         return attach(actorUserId, null, requirementId, testCaseId);
     }

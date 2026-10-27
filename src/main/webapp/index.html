@@ -9,9 +9,11 @@
   <link rel="stylesheet" href="assets/css/app.css">
   <script defer src="assets/vendor/jquery-3.7.1.min.js"></script>
   <script defer src="assets/vendor/bootstrap-5.3.8.bundle.min.js"></script>
+  <script defer src="assets/vendor/echarts-6.0.0.min.js"></script>
   <script defer src="assets/js/i18n.js"></script>
   <script defer src="assets/js/api.js"></script>
   <script defer src="assets/js/workflow-context.js"></script>
+  <script defer src="assets/js/dashboard.js"></script>
   <script defer src="assets/js/app.js"></script>
   <script defer src="assets/js/test-assets.js"></script>
   <script defer src="assets/js/ai-cases.js"></script>
@@ -69,16 +71,26 @@
         <div id="project-created" class="alert alert-success d-none" role="status"><button id="project-created-dismiss" type="button" class="btn-close float-end" aria-label="Close" data-i18n-aria-label="common.close"></button><span data-i18n="project.created">Project created. Next, add project members and appoint a manager.</span> <a href="#project-settings" id="project-setup-link" data-i18n="project.setup">Set up members and managers</a></div>
         <section id="empty-projects" class="empty-state d-none" aria-labelledby="empty-title"><div class="empty-icon" aria-hidden="true">◫</div><h2 id="empty-title" data-i18n="shell.noProjectsAvailable">No projects available</h2><p data-i18n="shell.youDoNotHaveAccessToAProjectYetContactYourPlatformAdministrator">You do not have access to a project yet. Contact your platform administrator.</p></section>
         <section id="project-dashboard" class="d-none" aria-labelledby="project-title">
-          <div id="project-hero" class="project-hero"><div class="project-monogram" aria-hidden="true">V</div><div class="project-hero-text"><span id="project-key" class="eyebrow"></span><h2 id="project-title"></h2><p id="project-description" class="mb-0"></p></div><span id="project-status" class="status-pill"></span></div>
-          <div id="dashboard-summary" class="row g-3 mt-1" aria-live="polite">
-            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="common.requirements">Requirements</h3><p id="dashboard-requirements-count" class="info-value mb-0">—</p></div></div>
-            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="common.testCases">Test cases</h3><p id="dashboard-cases-count" class="info-value mb-0">—</p></div></div>
-            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="dashboard.currentRunProgress">Current run progress</h3><p id="dashboard-progress-count" class="info-value">—</p><p id="dashboard-progress-detail" class="small text-secondary mb-0"></p></div></div>
-            <div class="col-sm-6 col-xl-3"><div class="info-card"><h3 class="fs-6 text-secondary" data-i18n="dashboard.openDefects">Open defects</h3><p id="dashboard-defects-count" class="info-value mb-0">—</p></div></div>
+          <div id="project-hero" class="project-hero dashboard-project">
+            <div class="project-monogram" aria-hidden="true">V</div>
+            <div class="project-hero-text"><span id="project-key" class="eyebrow"></span><h2 id="project-title"></h2><p class="dashboard-project-counts"><span data-i18n="common.requirements">Requirements</span> <strong id="dashboard-requirements-count">—</strong><span aria-hidden="true"> · </span><span data-i18n="common.testCases">Test cases</span> <strong id="dashboard-cases-count">—</strong></p></div>
+            <span id="project-status" class="status-pill"></span>
           </div>
-          <div class="section-heading"><h2 data-i18n="shell.qualityWorkflow">Quality workflow</h2><p data-i18n="shell.openAWorkspaceAreaFromTheSidebar">Open a workspace area from the sidebar.</p></div>
-          <section id="qa-next-step" class="asset-panel mt-3" aria-live="polite"></section>
-          <div id="workflow" class="workflow-grid" aria-label="Quality workflow pages" data-i18n-aria-label="shell.upcomingWorkflowPages"></div>
+          <details class="dashboard-project-description"><summary data-i18n="dashboard.projectDescription">Project description</summary><p id="project-description" class="small text-secondary mt-2 mb-0"></p></details>
+          <div class="dashboard-run-toolbar"><label for="dashboard-run-select" class="form-label mb-0" data-i18n="dashboard.currentRun">Current test run</label><select id="dashboard-run-select" class="form-select" disabled><option value="" data-i18n="common.loading">Loading…</option></select></div>
+          <div class="dashboard-feedback"><p id="dashboard-summary-status" class="small text-secondary mb-0 d-none" role="status" aria-live="polite"></p><button id="dashboard-summary-retry" type="button" class="btn btn-outline-secondary btn-sm d-none" data-i18n="common.retry">Retry</button></div>
+          <div id="dashboard-summary" class="row g-3 mb-3">
+            <div class="col-6 col-xl-3"><section class="info-card"><h3 class="text-secondary" data-i18n="dashboard.currentRunProgress">Current run progress</h3><p id="dashboard-progress-count" class="info-value">—</p><p id="dashboard-progress-detail" class="dashboard-stat-detail"></p></section></div>
+            <div class="col-6 col-xl-3"><section class="info-card"><h3 class="text-secondary" data-i18n="dashboard.attentionCases">Cases needing attention</h3><p id="dashboard-attention-count" class="info-value">—</p><p id="dashboard-attention-detail" class="dashboard-stat-detail"></p></section></div>
+            <div class="col-6 col-xl-3"><section class="info-card"><h3 class="text-secondary" data-i18n="dashboard.openDefects">Project open defects</h3><p id="dashboard-defects-count" class="info-value">—</p><p id="dashboard-defects-detail" class="dashboard-stat-detail"></p></section></div>
+            <div class="col-6 col-xl-3"><section class="info-card"><h3 class="text-secondary" data-i18n="dashboard.requirementCoverage">Requirement coverage</h3><p id="dashboard-coverage-count" class="info-value">—</p><p id="dashboard-coverage-detail" class="dashboard-stat-detail"></p></section></div>
+          </div>
+          <section class="asset-panel dashboard-results-panel" aria-labelledby="dashboard-results-title">
+            <div class="dashboard-results-heading"><h2 id="dashboard-results-title" data-i18n="dashboard.currentRunResults">Current run results</h2><p id="dashboard-run-label" class="small text-secondary mb-0"></p></div>
+            <div class="dashboard-results-layout"><div id="dashboard-results-chart" class="dashboard-results-chart" role="img" aria-label="Current run results" data-i18n-aria-label="dashboard.currentRunResults"></div><section class="dashboard-attention" aria-labelledby="dashboard-attention-title"><h3 id="dashboard-attention-title" data-i18n="dashboard.runAttentionTitle">Cases needing attention</h3><div id="dashboard-attention-list" aria-live="polite"></div></section></div>
+            <section id="qa-next-step" class="dashboard-next-step" aria-live="polite"></section>
+          </section>
+          <details class="dashboard-workflow"><summary data-i18n="dashboard.workflowLinks">Quality workflow shortcuts</summary><div id="workflow" class="workflow-grid mt-3" aria-label="Quality workflow pages" data-i18n-aria-label="shell.upcomingWorkflowPages"></div></details>
         </section>
         <section id="asset-workspace" class="d-none" aria-label="Test assets" data-i18n-aria-label="shell.testAssets">
           <div id="asset-notice" class="alert d-none" role="status" aria-live="polite"></div>

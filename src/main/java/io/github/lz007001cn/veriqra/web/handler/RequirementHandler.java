@@ -10,6 +10,13 @@ public final class RequirementHandler {
     public static void handle(HttpServletRequest req, HttpServletResponse res, WebServices s,
                               Long actor, Long project, String[] path) throws IOException {
         String method = req.getMethod();
+        if (path.length == 5 && path[4].equals("coverage")) {
+            JsonHttp.method(res, method, "GET");
+            if (!req.getParameterMap().isEmpty())
+                throw new HttpFailure(400, "INVALID_QUERY", "Invalid query parameters");
+            JsonHttp.write(res, 200, s.traceability().listCoverageByProject(actor, project));
+            return;
+        }
         if (path.length >= 6 && path[5].equals("ai-cases")) {
             AiCaseHandler.handle(req, res, actor, project, path);
             return;

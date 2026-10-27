@@ -98,6 +98,7 @@ final class ServiceDaoDelegates {
         public boolean existsRecord(Long r, Long c) { return target.existsRecord(r, c); }
         public List<TestCaseRequirement> listByRequirement(Long r) { return target.listByRequirement(r); }
         public List<TestCaseRequirement> listByTestCase(Long c) { return target.listByTestCase(c); }
+        public List<RequirementCoverage> listCoverageByProject(Long p) { return target.listCoverageByProject(p); }
         public boolean updateReviewState(Long r, Long c, TraceabilityStatus s, Long by, LocalDateTime at) {
             return target.updateReviewState(r, c, s, by, at);
         }

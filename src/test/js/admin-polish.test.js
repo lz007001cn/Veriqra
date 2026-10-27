@@ -21,11 +21,17 @@ function browser(pageName = 'users', options = {}) {
     closest(selector) { let node = this; while (node) { if (matches(node, selector)) return node; node = node.parent; } return null; }
     focus() { if (this.isConnected && !this.disabled) document.activeElement = this; }
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
-    checkValidity() { return descendants(this).every(node => !node.required || !!node.value); }
+    checkValidity() { return descendants(this).every(valid); }
+  }
+  function valid(node) {
+    const value = node.value || '';
+    return (!node.required || !!value) && (!value || (!node.attributes.minlength || value.length >= Number(node.attributes.minlength))
+      && (!node.attributes.maxlength || value.length <= Number(node.attributes.maxlength))
+      && (!node.attributes.pattern || new RegExp('^(?:' + node.attributes.pattern + ')$').test(value)));
   }
   const descendants = node => node.children.flatMap(child => child instanceof Element ? [child, ...descendants(child)] : []);
   function matches(node, selector) {
-    if (selector === ':invalid') return node.required && !node.value;
+    if (selector === ':invalid') return !valid(node);
     if (selector.startsWith('#')) return node.id === selector.slice(1);
     if (selector.startsWith('.')) return selector.slice(1).split('.').every(name => node.classes.has(name));
     const attribute = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(selector);
@@ -33,7 +39,7 @@ function browser(pageName = 'users', options = {}) {
     return node.tag === selector;
   }
   function emit(node, name, event = {}) {
-    const data = { preventDefault() {}, ...event };
+    const data = { preventDefault() {}, currentTarget: node, ...event };
     return (node.handlers[name] || []).slice().map(fn => fn.call(node, data));
   }
   class Collection extends Array {
@@ -56,6 +62,42 @@ function browser(pageName = 'users', options = {}) {
     trigger(name) { return this.each(function () { emit(this, name); }); }
     remove() { return this.each(function () { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = null; if (!document.activeElement.isConnected) document.activeElement = document.body; }); }
     data(name) { return this[0]?.attributes['data-' + name]; }
+    bootstrapTable(options) {
+      if (options === 'destroy') { this.forEach(node => { node.tableOptions = null; }); return this; }
+      this.forEach(node => {
+        node.tableOptions = options;
+        node.requestTable = (changes = {}) => {
+          Object.assign(options, changes);
+          const data = options.queryParams({ limit: options.pageSize, offset: (options.pageNumber - 1) * options.pageSize,
+            sort: options.sortName, order: options.sortOrder });
+          options.ajax({ data, success(result) {
+            $(node).empty();
+            if (!result.rows.length) $(node).append($('<p>').text(options.formatNoMatches()));
+            result.rows.forEach(row => {
+              const tr = $('<tr>');
+              options.columns.forEach(column => {
+                const td = $('<td>');
+                if (column.events) {
+                  const html = column.formatter();
+                  for (const match of html.matchAll(/<button[^>]*class="([^"]*)"[^>]*>([^<]*)<\/button>/g)) {
+                    const button = $('<button type="button">').addClass(match[1]).text(match[2]);
+                    for (const [name, handler] of Object.entries(column.events)) {
+                      const [event, selector] = name.split(' ');
+                      if (matches(button[0], selector)) button.on(event, e => handler(e, row[column.field], row));
+                    }
+                    td.append(button);
+                  }
+                } else td.text(column.formatter ? column.formatter(row[column.field], row) : row[column.field] || '');
+                tr.append(td);
+              });
+              $(node).append(tr);
+            });
+          }, error() { $(node).empty(); } });
+        };
+        node.requestTable();
+      });
+      return this;
+    }
   }
   const collection = items => Collection.from(items);
   const body = new Element('body');
@@ -86,7 +128,7 @@ function browser(pageName = 'users', options = {}) {
   }
   const window = { VeriqraApi: api,
     I18n: { init: options.init || (async () => {}), t: options.t || ((key, params, fallback) => (fallback || key).replace(/\{(\w+)\}/g, (_, name) => params?.[name] ?? '')),
-      error: error => error.message || 'Unavailable', formatDateTime: value => String(value),
+      getLocale: () => options.locale || 'en', error: error => error.message || 'Unavailable', formatDateTime: value => String(value),
       enumLabel: value => value, formatNumber: value => String(value) } };
   vm.runInNewContext(source, { window, document, jQuery: $, bootstrap: { Modal }, URL, URLSearchParams, location: { search: '', replace() {} } });
   const textOf = node => node.content + node.children.map(child => child instanceof Element ? textOf(child) : String(child)).join('');
@@ -101,10 +143,68 @@ function browser(pageName = 'users', options = {}) {
   async function reject(call, message = 'Unavailable') { call.reject({ status: 503, message }); await flush(); }
   async function authorize(role = 'ADMIN') { await flush(); await respond(calls.at(-1), { username: 'admin', systemRole: role }); }
   async function locale() { listeners.get('veriqra:localechange')(); await flush(); }
-  return { $, calls, document, textOf, find, click, submit, respond, reject, authorize, locale, Modal };
+  function tableRequest(changes) { $('#admin-user-table')[0].requestTable(changes); }
+  async function reauthenticate() { listeners.get('veriqra:reauthenticated')(); await flush(); }
+  return { $, calls, document, textOf, find, click, submit, respond, reject, authorize, locale, Modal, tableRequest, reauthenticate };
 }
 
 const paged = (items = [], page = 1, total = items.length) => ({ items, page, pageSize: 25, total });
+test('search, role and status filters stay on the server across sorting, paging and locale refresh', async () => {
+  const ui = browser('users', { locale: 'zh-CN' }); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged([], 1, 64));
+  let options = ui.$('#admin-user-table')[0].tableOptions;
+  assert.equal(options.sidePagination, 'server'); assert.equal(options.locale, 'zh-CN');
+  ui.$('#admin-user-search').val('outside page 1'); ui.$('#admin-user-role').val('USER'); ui.$('#admin-user-status').val('DISABLED');
+  const searching = ui.submit(ui.$('.admin-user-filters')[0]); await flush();
+  let query = new URL(ui.calls.at(-1).url, 'http://localhost/').searchParams;
+  assert.equal(query.get('search'), 'outside page 1'); assert.equal(query.get('systemRole'), 'USER'); assert.equal(query.get('status'), 'DISABLED');
+  assert.equal(query.get('page'), '1');
+  await ui.respond(ui.calls.at(-1), paged([], 1, 64)); await searching;
+  ui.tableRequest({ pageNumber: 2, pageSize: 10, sortName: 'username', sortOrder: 'asc' });
+  query = new URL(ui.calls.at(-1).url, 'http://localhost/').searchParams;
+  assert.equal(query.get('page'), '2'); assert.equal(query.get('pageSize'), '10');
+  assert.equal(query.get('sort'), 'username'); assert.equal(query.get('order'), 'asc'); assert.equal(query.get('search'), 'outside page 1');
+  await ui.respond(ui.calls.at(-1), { items: [], total: 64, page: 2, pageSize: 10 });
+  await ui.locale();
+  query = new URL(ui.calls.at(-1).url, 'http://localhost/').searchParams;
+  assert.equal(query.get('page'), '2'); assert.equal(query.get('sort'), 'username'); assert.equal(query.get('status'), 'DISABLED');
+  assert.equal(ui.$('#admin-user-search').val(), 'outside page 1');
+  await ui.respond(ui.calls.at(-1), paged());
+});
+
+test('a stale table response cannot replace a more recent sort request', async () => {
+  const ui = browser(); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged());
+  ui.tableRequest({ sortName: 'username', sortOrder: 'asc' }); const older = ui.calls.at(-1);
+  ui.tableRequest({ sortName: 'username', sortOrder: 'desc' }); const newer = ui.calls.at(-1);
+  await ui.respond(newer, paged([{ id: 2, username: 'latest-row', displayName: 'Latest', systemRole: 'USER', status: 'ACTIVE' }]));
+  await ui.respond(older, paged([{ id: 1, username: 'obsolete-row', displayName: 'Old', systemRole: 'USER', status: 'ACTIVE' }]));
+  assert.match(ui.textOf(ui.$('#admin-user-table')[0]), /latest-row/);
+  assert.doesNotMatch(ui.textOf(ui.$('#admin-user-table')[0]), /obsolete-row/);
+});
+
+test('reauthentication reloads authorization and leaves an unsaved user form intact', async () => {
+  const ui = browser(); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged());
+  await ui.click(ui.find('#admin-content', 'Create user'));
+  ui.$('[name="displayName"]').val('Unsaved user'); const form = ui.$('.modal').find('form')[0];
+  await ui.reauthenticate(); assert.equal(ui.calls.at(-1).url, 'auth/me');
+  await ui.respond(ui.calls.at(-1), { id: 1, username: 'admin', systemRole: 'ADMIN' });
+  await ui.respond(ui.calls.at(-1), paged());
+  assert.equal(ui.$('.modal').find('form')[0], form); assert.equal(ui.$('[name="displayName"]').val(), 'Unsaved user');
+  assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
+});
+
+test('create and reset password fields share backend format limits before submission', async () => {
+  const ui = browser(); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged());
+  await ui.click(ui.find('#admin-content', 'Create user'));
+  const form = ui.$('.modal').find('form')[0];
+  assert.equal(ui.$('[name="username"]').attr('pattern'), '[A-Za-z0-9._-]{3,64}');
+  assert.equal(ui.$('[name="username"]').attr('maxlength'), '64');
+  assert.equal(ui.$('[name="displayName"]').attr('maxlength'), '80');
+  assert.equal(ui.$('[name="password"]').attr('minlength'), '12'); assert.equal(ui.$('[name="password"]').attr('maxlength'), '1024');
+  ui.$('[name="username"]').val('invalid user'); ui.$('[name="displayName"]').val('Tester'); ui.$('[name="password"]').val('short');
+  await ui.submit(form); assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
+  assert.match(ui.textOf(ui.$('.modal')[0]), /Complete the required fields/);
+});
+
 test('user status edits and password resets use their account endpoints', async () => {
   const ui = browser(); await ui.authorize();
   const user = { id: 7, username: 'tester', displayName: 'Tester', systemRole: 'USER', status: 'ACTIVE', lockVersion: 2 };

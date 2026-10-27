@@ -4,20 +4,21 @@
   const pageName = $('body').data('admin-page');
   const content = $('#admin-content');
   const feedbackBox = $('#admin-feedback');
-  const state = { page: 1, pageSize: 25, generation: 0 };
+  const state = { page: 1, pageSize: 25, search: '', systemRole: '', status: '', sort: 'id', order: 'desc', generation: 0 };
   let renderFocus = null;
   let authorizationGeneration = 0;
   let modalSequence = 0;
+  let userTable = null;
+  let userRequest = 0;
   const pages = ['users'];
   let authorized = false;
   let forbidden = false;
   const fmt = value => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(value || ''))
     ? window.I18n.formatDateTime(value) : (value == null || value === '' ? '—' : String(value));
   const display = value => window.I18n.enumLabel(value);
-  const status = value => $('<span class="status-badge">').attr({ 'data-status': value, 'data-vq-tone': value === 'ACTIVE' ? 'success' : 'neutral' }).text(display(value));
   const action = (label, callback, style) => $('<button type="button" class="btn btn-sm">')
     .addClass(style || 'btn-outline-primary').text(label).on('click', callback);
-  const cell = value => $('<td>').text(fmt(value));
+  const escape = value => String(value == null ? '' : value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
   function feedback(message, error, retry) {
     feedbackBox.text(message || '').toggleClass('d-none', !message)
       .toggleClass('alert-danger', !!error).toggleClass('alert-success', !!message && !error)
@@ -55,39 +56,11 @@
     content.empty().append($('<p class="alert alert-danger">').text(t('admin.forbiddenPlatformAdministratorAccessIsRequired', null,
       'Forbidden: platform administrator access is required.')));
   }
-  async function load(path) {
-    const token = state.generation;
-    const result = await api.get('admin/' + path);
-    if (token !== state.generation) throw { message: 'Superseded request' };
-    return result;
-  }
   async function post(path, body) { return api.post('admin/' + path, body); }
-  function table(headers, rows, cells, columnTypes = []) {
-    if (!rows.length) return $('<p class="empty-state">').text(t("admin.noMatchingRecords", null, 'No matching records.'));
-    const table = $('<table class="admin-table">');
-    const head = $('<tr>'); headers.forEach((h, index) => head.append($('<th scope="col">').attr('data-vq-type', columnTypes[index] || null).text(h)));
-    table.append($('<thead>').append(head));
-    const body = $('<tbody>');
-    rows.forEach(row => {
-      const tr = $('<tr>');
-      cells(row).forEach((value, index) => tr.append((value && value.jquery ? $('<td>').append(value) : cell(value))
-        .attr('data-vq-type', columnTypes[index] || null)));
-      body.append(tr);
-    });
-    return $('<div class="admin-table-wrap">').append(table.append(body));
-  }
-  function paging(result, rerender, pageState = state) {
-    const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
-    return $('<div class="admin-pagination">').append(
-      $('<span>').text(t('admin.pageCount', { page: window.I18n.formatNumber(result.page),
-        totalPages: window.I18n.formatNumber(totalPages), total: window.I18n.formatNumber(result.total) },
-      'Page {page} of {totalPages} · {total} record(s)')),
-      $('<div class="d-flex gap-2">').append(
-        action(t("common.previous", null, 'Previous'), () => { pageState.page--; rerender(); }).attr('data-admin-focus', 'page-previous').prop('disabled', pageState.page <= 1),
-        action(t("common.next", null, 'Next'), () => { pageState.page++; rerender(); }).attr('data-admin-focus', 'page-next').prop('disabled', pageState.page >= totalPages)));
-  }
-  function query() {
-    return '?' + new URLSearchParams({ page: String(state.page), pageSize: String(state.pageSize) });
+  function destroyTable() {
+    userRequest++;
+    if (userTable) userTable.bootstrapTable('destroy');
+    userTable = null;
   }
   function modal(title, fields, submitLabel, submit, opener = document.activeElement) {
     const titleId = 'admin-modal-title-' + ++modalSequence;
@@ -112,6 +85,7 @@
       if (field.required) input.prop('required', true);
       if (field.readonly) input.prop('readOnly', true);
       if (field.min != null) input.attr('min', field.min);
+      ['minlength', 'maxlength', 'pattern'].forEach(name => { if (field[name] != null) input.attr(name, field[name]); });
       wrap.append(input); body.append(wrap);
     });
     const error = $('<div class="alert alert-danger d-none" role="alert" aria-live="assertive">');
@@ -151,39 +125,114 @@
     });
     instance.show();
   }
-  async function renderUsers() {
-    const result = await load('users' + query());
-    const top = $('<div class="d-flex justify-content-end mb-3">')
-      .append(action(t("admin.createUser", null, 'Create user'), () => modal(t("admin.createUser", null, 'Create user'), [
-          { name: 'username', label: t("common.username", null, 'Username'), required: true },
-          { name: 'displayName', label: t("admin.displayName", null, 'Display name'), required: true },
-          { name: 'password', label: t("admin.temporaryPassword12Characters", null, 'Temporary password (12+ characters)'), type: 'password', required: true },
-          { name: 'systemRole', label: t("admin.systemRole", null, 'System role'), options: ['USER', 'ADMIN'] },
-          { name: 'status', label: t("common.status", null, 'Status'), options: ['ACTIVE', 'DISABLED'] }
-        ], t("admin.createUser", null, 'Create user'), values => post('users', values)), 'btn-primary'));
-    content.empty().append(top, table([
-      t('common.username', null, 'Username'), t('admin.displayName', null, 'Display name'),
-      t('admin.role', null, 'Role'), t('common.status', null, 'Status'),
-      t('common.created', null, 'Created'), t('common.actions', null, 'Actions')
-    ], result.items, user => [user.username, user.displayName, display(user.systemRole), status(user.status), fmt(user.createdAt),
-      $('<div class="actions">').append(
-        action(t("common.edit", null, 'Edit'), () => modal(t('admin.editUser', { username: user.username }, 'Edit {username}'), [
-          { name: 'displayName', label: t("admin.displayName", null, 'Display name'), value: user.displayName, required: true },
-          { name: 'systemRole', label: t("admin.systemRole", null, 'System role'), options: ['USER', 'ADMIN'], value: user.systemRole },
-          { name: 'status', label: t("common.status", null, 'Status'), options: ['ACTIVE', 'DISABLED'], value: user.status }
-        ], t("common.save", null, 'Save'), values => api.action('PATCH', 'admin/users/' + user.id, { ...values, lockVersion: user.lockVersion }))),
-        action(t("admin.resetPassword", null, 'Reset password'), () => modal(t('admin.resetPasswordFor', { username: user.username }, 'Reset password for {username}'),
-          [{ name: 'password', label: t("admin.newPassword12Characters", null, 'New password (12+ characters)'), type: 'password', required: true }],
-          t("admin.resetPassword", null, 'Reset password'), values => post('users/' + user.id + '/reset-password', values)), 'btn-outline-danger'))
-    ], [null, null, null, 'status', 'timestamp', 'actions']), paging(result, render));
+  function createUser() {
+    modal(t('admin.createUser', null, 'Create user'), [
+      { name: 'username', label: t('common.username', null, 'Username'), required: true, minlength: 3, maxlength: 64, pattern: '[A-Za-z0-9._-]{3,64}' },
+      { name: 'displayName', label: t('admin.displayName', null, 'Display name'), required: true, maxlength: 80 },
+      { name: 'password', label: t('admin.temporaryPassword12Characters', null, 'Temporary password (12+ characters)'), type: 'password', required: true, minlength: 12, maxlength: 1024 },
+      { name: 'systemRole', label: t('admin.systemRole', null, 'System role'), options: ['USER', 'ADMIN'] },
+      { name: 'status', label: t('common.status', null, 'Status'), options: ['ACTIVE', 'DISABLED'] }
+    ], t('admin.createUser', null, 'Create user'), values => post('users', values));
+  }
+  function editUser(user, opener) {
+    modal(t('admin.editUser', { username: user.username }, 'Edit {username}'), [
+      { name: 'displayName', label: t('admin.displayName', null, 'Display name'), value: user.displayName, required: true, maxlength: 80 },
+      { name: 'systemRole', label: t('admin.systemRole', null, 'System role'), options: ['USER', 'ADMIN'], value: user.systemRole },
+      { name: 'status', label: t('common.status', null, 'Status'), options: ['ACTIVE', 'DISABLED'], value: user.status }
+    ], t('common.save', null, 'Save'), values => api.action('PATCH', 'admin/users/' + user.id, { ...values, lockVersion: user.lockVersion }), opener);
+  }
+  function resetPassword(user, opener) {
+    modal(t('admin.resetPasswordFor', { username: user.username }, 'Reset password for {username}'), [
+      { name: 'password', label: t('admin.newPassword12Characters', null, 'New password (12+ characters)'), type: 'password', required: true, minlength: 12, maxlength: 1024 }
+    ], t('admin.resetPassword', null, 'Reset password'), values => post('users/' + user.id + '/reset-password', values), opener);
+  }
+  function renderUsers() {
+    const filters = $('<form class="admin-user-filters">');
+    const search = $('<input id="admin-user-search" type="search" class="form-control" maxlength="160">')
+      .attr('data-admin-focus', 'user-search').val(state.search);
+    const role = $('<select id="admin-user-role" class="form-select">').attr('data-admin-focus', 'user-role')
+      .append($('<option>').val('').text(t('admin.allRoles', null, 'All roles')));
+    ['USER', 'ADMIN'].forEach(value => role.append($('<option>').val(value).text(display(value)))); role.val(state.systemRole);
+    const status = $('<select id="admin-user-status" class="form-select">').attr('data-admin-focus', 'user-status')
+      .append($('<option>').val('').text(t('admin.allStatuses', null, 'All statuses')));
+    ['ACTIVE', 'DISABLED'].forEach(value => status.append($('<option>').val(value).text(display(value)))); status.val(state.status);
+    function field(id, label, input, style) {
+      return $('<div>').addClass(style || '').append($('<label class="form-label">').attr('for', id).text(label), input);
+    }
+    const apply = () => {
+      state.search = search.val().trim(); state.systemRole = role.val(); state.status = status.val(); state.page = 1; render();
+    };
+    filters.on('submit', event => { event.preventDefault(); apply(); });
+    role.on('change', apply); status.on('change', apply);
+    filters.append(field('admin-user-search', t('admin.searchUsers', null, 'Search username or display name'), search, 'admin-user-search'),
+      field('admin-user-role', t('admin.role', null, 'Role'), role), field('admin-user-status', t('common.status', null, 'Status'), status),
+      $('<button type="submit" class="btn btn-outline-primary">').text(t('admin.search', null, 'Search')),
+      action(t('admin.createUser', null, 'Create user'), createUser, 'btn-primary').addClass('admin-user-create'));
+    const errors = $('<div id="admin-table-error" class="d-none" role="alert">');
+    const table = $('<table id="admin-user-table" class="admin-table">').attr('aria-label', t('common.users', null, 'Users'));
+    content.empty().append(filters, errors, table);
+    userTable = table;
+    let settle;
+    const loaded = new Promise(resolve => { settle = resolve; });
+    const generation = state.generation;
+    table.bootstrapTable({
+      locale: window.I18n.getLocale() === 'zh-CN' ? 'zh-CN' : 'en-US',
+      classes: 'table table-hover admin-table', escape: true, uniqueId: 'id',
+      sidePagination: 'server', pagination: true, pageNumber: state.page, pageSize: state.pageSize,
+      pageList: [10, 25, 50, 100], sortName: state.sort, sortOrder: state.order,
+      search: false, showButtonIcons: false,
+      formatNoMatches: () => t('admin.noMatchingRecords', null, 'No matching records.'),
+      formatLoadingMessage: () => t('common.loading', null, 'Loading…'),
+      formatShowingRows: (from, to, total) => t('admin.usersResultCount', { from: window.I18n.formatNumber(from), to: window.I18n.formatNumber(to), total: window.I18n.formatNumber(total) }, 'Showing {from}–{to} of {total} users'),
+      formatRecordsPerPage: count => t('admin.recordsPerPage', { count: count }, '{count} per page'),
+      queryParams: params => {
+        state.pageSize = Number(params.limit) || state.pageSize;
+        state.page = Math.floor((Number(params.offset) || 0) / state.pageSize) + 1;
+        state.sort = params.sort || 'id'; state.order = params.order || 'desc';
+        return { page: state.page, pageSize: state.pageSize, search: state.search, systemRole: state.systemRole,
+          status: state.status, sort: state.sort, order: state.order };
+      },
+      ajax: async request => {
+        const token = ++userRequest;
+        content.attr('aria-busy', 'true'); errors.empty().addClass('d-none');
+        try {
+          const result = await api.get('admin/users?' + new URLSearchParams(request.data));
+          if (generation !== state.generation || token !== userRequest) { settle(null); return; }
+          request.success({ total: result.total, rows: result.items });
+          settle(true);
+        } catch (error) {
+          if (generation !== state.generation || token !== userRequest) { settle(null); return; }
+          request.error(error);
+          errors.removeClass('d-none').append(loadFailure(error, render));
+          settle(false);
+        } finally {
+          if (generation === state.generation && token === userRequest) content.attr('aria-busy', 'false');
+        }
+      },
+      columns: [
+        { field: 'username', title: t('common.username', null, 'Username'), sortable: true },
+        { field: 'displayName', title: t('admin.displayName', null, 'Display name'), sortable: true },
+        { field: 'systemRole', title: t('admin.role', null, 'Role'), sortable: true, formatter: value => escape(display(value)) },
+        { field: 'status', title: t('common.status', null, 'Status'), sortable: true, formatter: value => escape(display(value)) },
+        { field: 'createdAt', title: t('common.created', null, 'Created'), sortable: true, class: 'admin-user-timestamp', formatter: value => escape(fmt(value)) },
+        { field: 'actions', title: t('common.actions', null, 'Actions'), escape: false,
+          formatter: () => '<div class="actions"><button type="button" class="btn btn-sm btn-outline-primary admin-user-edit">' + escape(t('common.edit', null, 'Edit')) + '</button><button type="button" class="btn btn-sm btn-outline-danger admin-user-reset">' + escape(t('admin.resetPassword', null, 'Reset password')) + '</button></div>',
+          events: {
+            'click .admin-user-edit': (event, value, row) => editUser(row, event.currentTarget),
+            'click .admin-user-reset': (event, value, row) => resetPassword(row, event.currentTarget)
+          } }
+      ]
+    });
+    return loaded;
   }
   async function render() {
     const token = ++state.generation;
     renderFocus = captureFocus(content) || renderFocus;
+    destroyTable();
     content.attr('aria-busy', 'true').empty().append($('<p role="status">').text(t('common.loading', null, 'Loading…'))); feedback('');
     try {
-      await renderUsers();
-      return token === state.generation ? true : null;
+      const loaded = await renderUsers();
+      return token === state.generation ? loaded : null;
     } catch (error) {
       if (token !== state.generation) return null;
       content.empty().append(loadFailure(error, render));
@@ -205,6 +254,8 @@
   async function checkAuthorization() {
     const token = ++authorizationGeneration;
     const savedFocus = captureFocus(content);
+    authorized = false; forbidden = false;
+    state.generation++; destroyTable();
     content.attr('aria-busy', 'true').empty();
     feedback('');
     try {
@@ -217,6 +268,7 @@
       $('#admin-user').text(user.username);
       if (user.systemRole !== 'ADMIN') { forbidden = true; showForbidden(); return; }
       authorized = true;
+      if (typeof CustomEvent === 'function') document.dispatchEvent(new CustomEvent('veriqra:identity', { detail: { user: user } }));
       renderFocus = savedFocus || renderFocus;
       await render();
     } catch (error) {
@@ -237,6 +289,7 @@
   if (!pages.includes(pageName)) { content.text(t("admin.unknownAdministrationPage", null, 'Unknown administration page.')); return; }
   $('[data-admin-nav="' + pageName + '"]').addClass('active').attr('aria-current', 'page');
   checkAuthorization();
+  document.addEventListener('veriqra:reauthenticated', function () { checkAuthorization(); });
   document.addEventListener('veriqra:localechange', function () {
     document.querySelectorAll('.modal.show').forEach(function (element) { bootstrap.Modal.getInstance(element)?.hide(); });
     if (authorized) render(); else if (forbidden) showForbidden();
