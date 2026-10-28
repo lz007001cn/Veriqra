@@ -106,8 +106,8 @@
   function colors() {
     const styles = global.getComputedStyle && global.getComputedStyle(document.documentElement);
     const read = function (key, fallback) { return styles && styles.getPropertyValue(key).trim() || fallback; };
-    return { results: [read('--vq-success', '#24633f'), read('--vq-danger', '#a03238'), read('--vq-warning', '#805508'), read('--vq-info', '#285b8b'), read('--vq-border-strong', '#b7c2cb')],
-      text: read('--vq-text', '#202b36'), muted: read('--vq-text-secondary', '#536170') };
+    return { results: [read('--vq-chart-pass', '#34d399'), read('--vq-chart-fail', '#ff4d4f'), read('--vq-chart-blocked', '#fbbf24'), read('--vq-chart-skipped', '#38bdf8'), read('--vq-chart-not-run', '#dce4ef')],
+      text: read('--vq-text', '#243247'), muted: read('--vq-text-secondary', '#536174') };
   }
   function drawChart() {
     if (!chartData || !state || !current(state)) return;
