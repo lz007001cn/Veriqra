@@ -944,5 +944,8 @@
   "projectSettings.navigation": "项目设置",
   "projectSettings.eyebrow": "项目",
   "projectSettings.title": "项目设置",
-  "projectSettings.description": "管理项目成员与负责人。"
+  "projectSettings.description": "管理项目成员与负责人。",
+  "admin.tableScrollHint": "左右滑动表格，查看完整信息和操作。",
+  "projectPicker.search": "搜索项目名称或编号",
+  "projectPicker.noMatches": "没有匹配的项目。"
 }

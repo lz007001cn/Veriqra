@@ -70,8 +70,8 @@
   function announceLinked(defectId, context, sourceProjectId) {
     document.dispatchEvent(new CustomEvent('veriqra:defect-linked', { detail: Object.assign({ projectId: sourceProjectId, defectId: String(defectId) }, context) }));
   }
-  const field = function (name, value) {
-    return $('<div class="asset-field">').append($('<dt>').text(name),
+  const field = function (name, value, wide) {
+    return $('<div class="asset-field">').toggleClass('asset-field-wide', !!wide).append($('<dt>').text(name),
       $('<dd>').text(value == null || value === '' ? '—' : String(value)));
   };
   const badge = function (value) {
@@ -193,8 +193,8 @@
         field(t('defects.run', null, 'Run'), value.run ? value.run.name : t('common.unavailable', null, 'Unavailable')),
         field(t("defects.runCaseSnapshot", null, 'Run Case snapshot'), value.runCase ? value.runCase.snapshotTitle : t('common.unavailable', null, 'Unavailable')),
         field(t("defects.executed", null, 'Executed'), source ? date(source.executedAt) : null), field(t('defects.actor', null, 'Executed by'), source ? projectUserName(source.executedBy) : null),
-        field(t("defects.actualResultComment", null, 'Actual result / comment'), source ? source.comment : null),
-        field(t("defects.failureMessage", null, 'Failure message'), source ? source.failureMessage : link.failureMessage),
+        field(t("defects.actualResultComment", null, 'Actual result / comment'), source ? source.comment : null, true),
+        field(t("defects.failureMessage", null, 'Failure message'), source ? source.failureMessage : link.failureMessage, true),
         field(t('defects.linked', null, 'Linked'), date(link.linkedAt))));
     const later = (value.history || []).filter(function (attempt) { return attempt.attemptNo > link.attemptNo; });
     card.append($('<p class="small fw-semibold mb-1">').text(t("defects.laterRetestsOnThisRunCase", null, 'Later retests on this Run Case')));
@@ -247,8 +247,8 @@
     $('#defect-detail').empty().append($('<dl class="asset-fields">').append(
         field(t("common.status", null, 'Status'), label(defect.status)), field(t("common.severity", null, 'Severity'), label(defect.severity)),
         field(t("common.priority", null, 'Priority'), label(defect.priority)), field(t("common.version", null, 'Version'), defect.version),
-        field(t("common.description", null, 'Description'), defect.description), field(t('defects.reporter', null, 'Reported by'), projectUserName(defect.reporterId)),
-        field(t('defects.assignee', null, 'Assignee'), assigneeName(defect.assigneeId)), field(t("defects.resolutionNote", null, 'Resolution note'), defect.resolutionNote),
+        field(t("common.description", null, 'Description'), defect.description, true), field(t('defects.reporter', null, 'Reported by'), projectUserName(defect.reporterId)),
+        field(t('defects.assignee', null, 'Assignee'), assigneeName(defect.assigneeId)), field(t("defects.resolutionNote", null, 'Resolution note'), defect.resolutionNote, true),
         field(t("common.created", null, 'Created'), date(defect.createdAt)), field(t("common.updated", null, 'Updated'), date(defect.updatedAt))));
   }
   function renderActions(defect) {

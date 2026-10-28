@@ -73,11 +73,11 @@
   }
   function ensureExtras() {
     root.prepend($('<p id="asset-permission-note" class="text-secondary small" role="status">'));
-    const filters = $('<div id="asset-list-filters" class="d-flex flex-wrap gap-2 mb-2">');
+    const filters = $('<div id="asset-list-filters" class="asset-list-filters">');
     filters.append($('<label for="asset-search" id="asset-search-label" class="form-label">'),
-      $('<input id="asset-search" type="search" class="form-control" style="max-width:26rem">'),
+      $('<input id="asset-search" type="search" class="form-control">'),
       $('<label for="asset-status-filter" id="asset-status-filter-label" class="form-label">'),
-      $('<select id="asset-status-filter" class="form-select" style="max-width:13rem">'));
+      $('<select id="asset-status-filter" class="form-select">'));
     $('#asset-list').before(filters, $('<p id="asset-filter-count" class="text-secondary small" role="status">'));
     $('#asset-description').after($('<div id="asset-description-tools" class="mb-3">').append(
       $('<p id="asset-description-help" class="text-secondary small">'),
@@ -326,8 +326,8 @@
     const colors = { DRAFT: 'secondary', ACTIVE: 'success', READY: 'success', ARCHIVED: 'secondary', CONFIRMED: 'success', NEEDS_REVIEW: 'warning', REMOVED: 'secondary' };
     return $('<span class="badge text-bg-' + (colors[status] || 'secondary') + '">').attr('data-vq-state', status).text(label(status));
   }
-  function field(term, value) {
-    return $('<div class="asset-field">').append($('<dt>').text(term), $('<dd>').text(value == null || value === '' ? '—' : String(value)));
+  function field(term, value, wide) {
+    return $('<div class="asset-field">').toggleClass('asset-field-wide', !!wide).append($('<dt>').text(term), $('<dd>').text(value == null || value === '' ? '—' : String(value)));
   }
   function statusField(status) {
     return $('<div class="asset-field">').append($('<dt>').text(t("common.status", null, 'Status')), $('<dd>').append(badge(status)));
@@ -418,10 +418,10 @@
       $('#asset-detail-title').text(key(row) + ' · ' + row.title);
       $('#asset-detail').append($('<dl class="asset-fields">').append(
         statusField(row.status), field(t("common.priority", null, 'Priority'), label(row.priority)),
-        field(t("common.description", null, 'Description'), row.description), field(t("common.version", null, 'Version'), row.version), field(t("common.updated", null, 'Updated'), window.I18n.formatDateTime(row.updatedAt))));
+        field(t("common.description", null, 'Description'), row.description, true), field(t("common.version", null, 'Version'), row.version), field(t("common.updated", null, 'Updated'), window.I18n.formatDateTime(row.updatedAt))));
       $('#asset-steps-section').toggleClass('d-none', view !== 'test-cases');
       if (view === 'test-cases') {
-        $('#asset-detail dl').append(field(t("assets.preconditions", null, 'Preconditions'), row.preconditions));
+        $('#asset-detail dl').append(field(t("assets.preconditions", null, 'Preconditions'), row.preconditions, true));
         renderSteps(current.steps);
       }
       $('#asset-readonly-note').text(t(projectArchived ? 'assets.projectReadOnly' : 'assets.readOnly'))

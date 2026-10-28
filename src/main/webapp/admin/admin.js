@@ -170,7 +170,9 @@
       action(t('admin.createUser', null, 'Create user'), createUser, 'btn-primary').addClass('admin-user-create'));
     const errors = $('<div id="admin-table-error" class="d-none" role="alert">');
     const table = $('<table id="admin-user-table" class="admin-table">').attr('aria-label', t('common.users', null, 'Users'));
-    content.empty().append(filters, errors, table);
+    const scrollHint = $('<p class="small text-secondary d-lg-none mb-2">')
+      .text(t('admin.tableScrollHint', null, 'Swipe the table horizontally to see all columns and actions.'));
+    content.empty().append(filters, errors, scrollHint, table);
     userTable = table;
     let settle;
     const loaded = new Promise(resolve => { settle = resolve; });

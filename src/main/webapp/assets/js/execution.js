@@ -261,8 +261,8 @@
     const colors = { DRAFT: 'secondary', READY: 'success', ARCHIVED: 'secondary', IN_PROGRESS: 'primary', COMPLETED: 'success', CANCELLED: 'secondary', NOT_RUN: 'secondary', PASS: 'success', FAIL: 'danger', BLOCKED: 'warning', SKIPPED: 'info' };
     return $('<span>').addClass('badge text-bg-' + (colors[status] || 'secondary')).attr('data-vq-state', status).text(label(status));
   }
-  function field(name, value) {
-    return $('<div class="asset-field">').append($('<dt>').text(name), $('<dd>').text(value == null || value === '' ? '—' : String(value)));
+  function field(name, value, wide) {
+    return $('<div class="asset-field">').toggleClass('asset-field-wide', !!wide).append($('<dt>').text(name), $('<dd>').text(value == null || value === '' ? '—' : String(value)));
   }
   function lockAttemptForm() {
     $('#execution-attempt-form').addClass('d-none').find('input,select,textarea').prop('disabled', true);
@@ -342,7 +342,8 @@
         $('#execution-list').append($('<div class="asset-list-row">').append(
           $('<div class="asset-list-summary">').append($('<strong>').text(title),
             $('<p class="mb-1 text-secondary">').text(view === 'test-plans' ? (row.description || t("common.noDescription", null, 'No description')) : (row.environment || t("execution.noEnvironment", null, 'No environment')))),
-          meta, $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('execution.viewItem', { title: title }, 'View {title}'))
+          meta, $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('common.view', null, 'View'))
+            .attr('aria-label', t('execution.viewItem', { title: title }, 'View {title}'))
             .on('click', function () { openDetail(row.id); })));
       });
     } catch (failure) { if (valid(token)) { $('#execution-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(failure.message, true); retry('#execution-list', list); } }
@@ -382,7 +383,7 @@
     if (sourceCase) $('#execution-context').append(routeLink(t('execution.backToSourceCase', null, 'Back to source test case'), 'test-cases', { testCaseId: sourceCase }));
     $('#execution-detail-title').text(planKey(plan) + ' · ' + plan.name);
     $('#execution-detail').append($('<dl class="asset-fields">').append(
-      field(t("common.description", null, 'Description'), plan.description), field(t("common.status", null, 'Status'), label(plan.status)),
+      field(t("common.description", null, 'Description'), plan.description, true), field(t("common.status", null, 'Status'), label(plan.status)),
       field(t("common.version", null, 'Version'), plan.version), field(t("common.created", null, 'Created'), date(plan.createdAt)), field(t("common.updated", null, 'Updated'), date(plan.updatedAt))));
     $('#execution-items-title').text(t('execution.includedCases', { count: window.I18n.formatNumber(current.testCaseIds.length) }, 'Included test cases ({count})'));
     $('#execution-items-status').text(t('execution.loadingCaseLabels', null, 'Loading current case labels…'));
@@ -655,7 +656,7 @@
     const target = $('#execution-snapshot').empty();
     target.append($('<dl class="asset-fields">').append(
       field(t("execution.titleAtCapture", null, 'Title at capture'), item.snapshotTitle), field(t("execution.priorityAtCapture", null, 'Priority at capture'), label(item.snapshotPriority)),
-      field(t("execution.descriptionAtCapture", null, 'Description at capture'), item.snapshotDescription), field(t("execution.preconditionsAtCapture", null, 'Preconditions at capture'), item.snapshotPreconditions),
+      field(t("execution.descriptionAtCapture", null, 'Description at capture'), item.snapshotDescription, true), field(t("execution.preconditionsAtCapture", null, 'Preconditions at capture'), item.snapshotPreconditions, true),
       field(t("execution.captured", null, 'Captured'), date(item.capturedAt)), field(t("execution.currentOutcome", null, 'Current outcome'), label(item.currentOutcome))));
     target.append($('<h3 class="fs-5 mt-3">').text(t("execution.snapshotSteps", null, 'Snapshot steps')));
     item.steps.forEach(function (step) {
@@ -756,7 +757,7 @@
           $('<div class="asset-panel-heading mb-1">').append($('<strong>').text(t(index === history.length - 1 ? 'execution.latestAttempt' : 'execution.attemptNumber',
             { number: attempt.attemptNo }, index === history.length - 1 ? 'Attempt #{number} · latest' : 'Attempt #{number}')), badge(attempt.outcome)),
           $('<dl class="asset-fields mb-0">').append(field(t("execution.executed", null, 'Executed'), date(attempt.executedAt)), field(t("execution.actorID", null, 'Actor ID'), attempt.executedBy),
-            field(t("execution.durationMs", null, 'Duration (ms)'), attempt.durationMs), field(t("execution.actualResultComment", null, 'Actual result / comment'), attempt.comment), field(t("execution.failureMessage", null, 'Failure message'), attempt.failureMessage)));
+            field(t("execution.durationMs", null, 'Duration (ms)'), attempt.durationMs), field(t("execution.actualResultComment", null, 'Actual result / comment'), attempt.comment, true), field(t("execution.failureMessage", null, 'Failure message'), attempt.failureMessage, true)));
         target.append(card);
         if (referenced) card.attr('aria-current', 'true').append($('<p class="text-primary">').text(t('execution.referencedAttempt', { number: attempt.attemptNo }, 'Referenced attempt #{number}')));
         if (attempt.outcome === 'FAIL' && canWrite()) card.append(routeLink(t("execution.createDefectFromThisFAIL", null, 'Create defect from this FAIL'), 'defects',

@@ -944,5 +944,8 @@
   "projectSettings.navigation": "Project settings",
   "projectSettings.eyebrow": "PROJECT",
   "projectSettings.title": "Project settings",
-  "projectSettings.description": "Manage project members and managers."
+  "projectSettings.description": "Manage project members and managers.",
+  "admin.tableScrollHint": "Swipe the table horizontally to see all columns and actions.",
+  "projectPicker.search": "Search projects by name or key",
+  "projectPicker.noMatches": "No matching projects."
 }
