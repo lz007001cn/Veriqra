@@ -116,6 +116,48 @@ test('run progress counts every recorded outcome and completion requires all cas
   assert.match(ui.textOf(ui.$('#execution-progress')[0]), /Every case has an attempt/);
 });
 
+test('ad-hoc runs show import provenance only after a matching import record is confirmed', async () => {
+  for (const imported of [false, true]) {
+    const ui = browser(); await ui.open('runs', { runId: '40' });
+    const current = run(); current.run.testPlanId = null;
+    await ui.respond(ui.calls.at(-1), current);
+    const query = ui.calls.at(-1);
+    assert.equal(query.url, 'projects/12/imports?runId=40');
+    assert.equal(ui.find('#execution-context', 'View import source'), undefined);
+    await ui.respond(query, imported ? [{ id: 70, testRunId: 40 }] : []);
+    const link = ui.find('#execution-context', 'View import source');
+    if (imported) {
+      assert.ok(link); const destination = new URL(link.attributes.href);
+      assert.equal(destination.hash, '#automation'); assert.equal(destination.searchParams.get('runId'), '40');
+    } else assert.equal(link, undefined);
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  }
+});
+
+test('unrelated or unavailable import records never identify an ad-hoc run as imported', async () => {
+  for (const unavailable of [false, true]) {
+    const ui = browser(); await ui.open('runs', { runId: '40' });
+    const current = run(); current.run.testPlanId = null;
+    await ui.respond(ui.calls.at(-1), current);
+    const query = ui.calls.at(-1);
+    if (unavailable) { query.reject({ status: 503 }); await flush(); }
+    else await ui.respond(query, [{ id: 70, testRunId: 999 }]);
+    assert.equal(ui.find('#execution-context', 'View import source'), undefined);
+  }
+});
+
+test('a stale import query cannot add its source link to another run', async () => {
+  const ui = browser(); await ui.open('runs', { runId: '40' });
+  const current = run(); current.run.testPlanId = null;
+  await ui.respond(ui.calls.at(-1), current); const obsolete = ui.calls.at(-1);
+  await ui.open('runs', { runId: '41' });
+  const other = run(); other.run.id = 41;
+  await ui.respond(ui.calls.at(-1), other);
+  await ui.respond(obsolete, [{ id: 70, testRunId: 40 }]);
+  assert.equal(ui.find('#execution-context', 'View import source'), undefined);
+  assert.equal(ui.nav.read().runId, '41');
+});
+
 test('failed cancel restores Complete eligibility instead of enabling incomplete run completion', async () => {
   for (const outcomes of [['NOT_RUN', 'PASS'], ['FAIL', 'PASS']]) {
     const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(outcomes));
@@ -627,6 +669,32 @@ test('R2 result recording starts unselected and rejects every value outside the 
   assert.equal(ui.$('#execution-outcome').val(), ''); await ui.submit(); assert.match(ui.$('#execution-attempt-error').text(), /Choose the actual outcome/);
   ui.$('#execution-outcome').val('NOT_RUN'); await ui.submit(); assert.equal(ui.calls.some(call => call.method === 'POST'), false);
   ui.$('#execution-outcome').val('BLOCKED'); await ui.submit(); assert.equal(ui.calls.at(-1).body.outcome, 'BLOCKED');
+});
+
+test('attempt controls stay disabled until snapshot and history finish loading, including after reauthentication', async () => {
+  const ui = browser();
+  for (const id of ['execution-outcome', 'execution-comment', 'execution-duration', 'execution-failure', 'execution-submit'])
+    assert.equal(ui.$('#' + id).prop('disabled'), true, id + ' starts disabled');
+  await ui.open('runs', { runId: '40', runCaseId: '50' });
+  await ui.respond(ui.calls.at(-1), run(['NOT_RUN']));
+  const history = ui.calls.at(-1);
+  assert.match(history.url, /\/cases\/50\/attempts$/);
+  assert.equal(ui.$('#execution-attempt-form').hasClass('d-none'), true);
+  ui.emit('veriqra:reauthenticated', { user: { id: 5 } }); await flush();
+  assert.equal(ui.$('#execution-outcome').prop('disabled'), true);
+  assert.equal(ui.$('#execution-comment').prop('disabled'), true);
+  assert.equal(ui.$('#execution-submit').prop('disabled'), true);
+  ui.$('#execution-outcome').val('BLOCKED'); ui.$('#execution-comment').val('Too early'); await ui.submit();
+  assert.equal(ui.calls.some(call => call.method === 'POST'), false);
+  await ui.respond(history, []);
+  assert.equal(ui.$('#execution-attempt-form').hasClass('d-none'), false);
+  assert.equal(ui.$('#execution-outcome').prop('disabled'), false);
+  assert.equal(ui.$('#execution-comment').prop('disabled'), false);
+  assert.equal(ui.$('#execution-outcome').val(), '');
+  ui.$('#execution-outcome').val('BLOCKED'); ui.$('#execution-comment').val('Selected after load'); await flush(); await ui.submit();
+  assert.equal(ui.calls.at(-1).method, 'POST');
+  assert.equal(ui.calls.at(-1).body.outcome, 'BLOCKED');
+  assert.equal(ui.calls.at(-1).body.comment, 'Selected after load');
 });
 test('R2 run list filters current NOT_RUN cases without rewriting snapshots or attempting requests', async () => {
   const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN', 'FAIL', 'PASS']));

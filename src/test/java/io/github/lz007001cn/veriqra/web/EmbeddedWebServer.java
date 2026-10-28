@@ -21,7 +21,7 @@ public final class EmbeddedWebServer implements AutoCloseable {
         this(directory, services, null, secureCookie, contextPath);
     }
     public EmbeddedWebServer(Path directory, WebServices services,
-                             io.github.lz007001cn.veriqra.service.CollaborationService collaboration,
+                             io.github.lz007001cn.veriqra.service.ProjectSettingsService projectSettings,
                              boolean secureCookie, String contextPath) throws Exception {
         this.contextPath = contextPath;
         tomcat = new Tomcat();
@@ -32,8 +32,8 @@ public final class EmbeddedWebServer implements AutoCloseable {
         context.setParentClassLoader(EmbeddedWebServer.class.getClassLoader());
         context.addServletContainerInitializer((classes, servletContext) -> {
             servletContext.setAttribute(WebServices.ATTRIBUTE, services);
-            if (collaboration != null) servletContext.setAttribute(
-                    io.github.lz007001cn.veriqra.service.CollaborationService.class.getName(), collaboration);
+            if (projectSettings != null) servletContext.setAttribute(
+                    io.github.lz007001cn.veriqra.service.ProjectSettingsService.class.getName(), projectSettings);
             servletContext.setSessionTrackingModes(Set.of(SessionTrackingMode.COOKIE));
             io.github.lz007001cn.veriqra.web.security.SessionCookiePolicy.configure(
                     servletContext, Boolean.toString(secureCookie), null);

@@ -89,7 +89,7 @@ test('ADMIN can create the first project, select its returned identity and open 
   assert.equal(ui.$('#project-create-form').wasReset, true);
   assert.equal(ui.$('#project-created').hidden, false);
   ui.$('#project-setup-link').handlers.click();
-  assert.equal(ui.events.at(-1).detail.area, 'people');
+  assert.equal(ui.events.at(-1).detail.view, 'project-settings');
 });
 
 test('ordinary USER has no create entry and a synthetic submit cannot call the API', async () => {

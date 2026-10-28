@@ -1,86 +1,13 @@
-/* Administration adopts the shared component system; only data-dense layouts live here. */
-.admin-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: 0;
-  overflow: hidden;
-  background: var(--vq-surface);
-  border: 1px solid var(--vq-border);
-  border-radius: var(--vq-radius-md);
-}
-.admin-card {
-  min-width: 0;
-  padding: var(--vq-space-4);
-  background: var(--vq-surface);
-  border-inline-end: 1px solid var(--vq-border);
-  border-bottom: 1px solid var(--vq-border);
-}
-.admin-card strong {
-  display: block;
-  margin-top: var(--vq-space-1);
-  color: var(--vq-text);
-  font-size: var(--vq-font-xl);
-  font-weight: 650;
-  line-height: 1.3;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-.admin-card small { color: var(--vq-text-secondary); font-size: var(--vq-font-sm); }
-.admin-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--vq-space-3);
-  margin-bottom: var(--vq-space-4);
-}
-.admin-toolbar label { flex: 0 1 12rem; min-width: min(100%, 10rem); margin: 0; }
-.admin-toolbar .form-control, .admin-toolbar .form-select { margin-top: var(--vq-space-1); }
-.admin-toolbar label:has(input[type="datetime-local"]) { flex-basis: 14rem; }
-.admin-table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+/* Account filters and the Bootstrap Table user list. */
+.admin-user-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-bottom: 1rem; }
+.admin-user-filters > div { min-width: 9rem; }
+.admin-user-filters .admin-user-search { flex: 1 1 17rem; }
+.admin-user-filters .form-label { margin-bottom: .35rem; }
+.admin-user-create { margin-left: auto; }
+#admin-content, #admin-content .bootstrap-table { min-width: 0; max-width: 100%; }
 .admin-table { min-width: 48rem; }
-body[data-admin-page="users"] .admin-table { min-width: 76rem; }
-body[data-admin-page="access-logs"] .admin-table { min-width: 78rem; }
-body[data-admin-page="credits"] .admin-table { min-width: 64rem; }
-.admin-table [data-vq-type="timestamp"] { min-width: 10.5rem; white-space: nowrap; }
-.admin-table [data-vq-type="code"] { max-width: 22rem; white-space: normal; overflow-wrap: anywhere; }
-.admin-table [data-vq-type="numeric"] { min-width: 4rem; }
+.admin-table .admin-user-timestamp { min-width: 10.5rem; white-space: nowrap; }
 .admin-table .actions { display: inline-flex; align-items: center; gap: var(--vq-space-1); white-space: nowrap; }
 .admin-table td { max-width: 24rem; overflow-wrap: anywhere; }
-.admin-pagination {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--vq-space-3);
-  margin-top: var(--vq-space-4);
-  color: var(--vq-text-secondary);
-  font-size: var(--vq-font-sm);
-}
-.admin-prewrap { white-space: pre-wrap; overflow-wrap: anywhere; }
-.admin-detail {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-  column-gap: var(--vq-space-5);
-  margin: 0;
-}
-.admin-detail > div {
-  display: grid;
-  grid-template-columns: minmax(8rem, 2fr) minmax(0, 3fr);
-  align-items: baseline;
-  gap: var(--vq-space-3);
-  min-width: 0;
-  padding: var(--vq-space-3) 0;
-  border-bottom: 1px solid var(--vq-border);
-}
-.admin-detail dt { color: var(--vq-text-secondary); font-size: var(--vq-font-sm); font-weight: 500; }
-.admin-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.admin-detail dd.status-badge { justify-self: start; }
-.admin-detail [data-vq-type="numeric"] { text-align: start; }
-@media (max-width: 767px) {
-  .admin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .admin-card { padding: var(--vq-space-3); }
-  .admin-toolbar label { flex: 1 1 10rem; }
-  .admin-pagination { align-items: start; }
-  .admin-detail { grid-template-columns: minmax(0, 1fr); }
-  .admin-detail > div { grid-template-columns: minmax(7rem, 2fr) minmax(0, 3fr); gap: var(--vq-space-2); }
-}
+#admin-table-error .empty-state { padding: 1rem; margin-bottom: .75rem; }
+@media (max-width: 575px) { .admin-user-create { margin-left: 0; } .admin-user-filters > div { flex-grow: 1; } }

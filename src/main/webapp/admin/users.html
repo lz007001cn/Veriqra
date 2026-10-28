@@ -7,12 +7,16 @@
   <script src="assets/js/locale-bootstrap.js"></script>
   <title data-i18n="admin.usersVeriqraAdministration">Users · Veriqra Administration</title>
   <link rel="stylesheet" href="assets/vendor/bootstrap-5.3.8.min.css">
+  <link rel="stylesheet" href="assets/vendor/bootstrap-table-1.24.2.min.css">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="admin/admin.css">
   <script defer src="assets/vendor/jquery-3.7.1.min.js"></script>
   <script defer src="assets/vendor/bootstrap-5.3.8.bundle.min.js"></script>
+  <script defer src="assets/vendor/bootstrap-table-1.24.2.min.js"></script>
+  <script defer src="assets/vendor/bootstrap-table-1.24.2-zh-CN.min.js"></script>
   <script defer src="assets/js/i18n.js"></script>
   <script defer src="assets/js/api.js"></script>
+  <script defer src="assets/js/workflow-context.js"></script>
   <script defer src="assets/js/shell.js"></script>
   <script defer src="admin/admin.js"></script>
 </head>
@@ -30,17 +34,9 @@
     <div class="app-body">
       <nav id="admin-sidebar" class="sidebar" aria-label="Administration" data-i18n-aria-label="common.administration">
         <span class="sidebar-heading" data-i18n="admin.administration">ADMINISTRATION</span>
-        <a class="nav-item" href="admin/index.html" data-admin-nav="index" data-i18n="common.dashboard">Dashboard</a>
         <a class="nav-item" href="admin/users.html" data-admin-nav="users" data-i18n="common.users">Users</a>
-        <a class="nav-item" href="admin/credits.html" data-admin-nav="credits" data-i18n="common.experimentalCredits">Experimental Credits</a>
-        <a class="nav-item" href="admin/login-history.html" data-admin-nav="login-history" data-i18n="common.loginHistory">Login History</a>
-        <a class="nav-item" href="admin/access-logs.html" data-admin-nav="access-logs" data-i18n="common.accessLogs">Access Logs</a>
-        <a class="nav-item" href="admin/audit-log.html" data-admin-nav="audit-log" data-i18n="common.auditLog">Audit Log</a>
-        <a class="nav-item" href="admin/sessions.html" data-admin-nav="sessions" data-i18n="common.sessions">Sessions</a>
-        <a class="nav-item" href="admin/security.html" data-admin-nav="security" data-i18n="common.security">Security</a>
-        <a class="nav-item" href="admin/system.html" data-admin-nav="system" data-i18n="common.system">System</a>
         <a class="nav-item" href="index.html" data-i18n="admin.mainWorkspace">← Main workspace</a>
-        <div class="sidebar-footer" data-i18n="admin.veriqraExperimentalCreditsHaveNoMonetaryValue">Veriqra · Experimental Credits have no monetary value</div>
+        <div class="sidebar-footer">Veriqra</div>
       </nav>
       <main id="main-content" class="content" tabindex="-1">
         <div class="page-heading"><div><h1 data-i18n="common.users">Users</h1><p class="text-secondary" data-i18n="admin.usersSubtitle">Manage platform user accounts and account status.</p></div></div>

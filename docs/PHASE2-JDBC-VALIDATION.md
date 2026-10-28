@@ -2,7 +2,7 @@
 
 > Historical report: the original identifiers, paths, configuration names and checksums below are preserved as recorded. For current Veriqra configuration and deployment, see [VERIQRA-RENAME.md](VERIQRA-RENAME.md).
 
-本文保存初次实现的 52 项测试历史记录。后续审查与修复结果见 [针对性代码审查](PHASE2-R1-CODE-REVIEW.md)。
+本文保存初次实现的 52 项测试历史记录。当前实现与验证以仓库源码和测试为准。
 
 日期：2026-09-07。仓库：<PROJECT_ROOT>，main。开始时只有既有 `docs/submission/` 未跟踪，本轮未修改该目录。
 

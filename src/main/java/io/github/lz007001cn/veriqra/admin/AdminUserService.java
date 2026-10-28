@@ -17,7 +17,11 @@ public final class AdminUserService {
         this.tx=Objects.requireNonNull(tx);this.policy=Objects.requireNonNull(policy);this.passwords=Objects.requireNonNull(passwords);
     }
     public Page<AdminUserView> list(long actor,int page,int size) {
-        return tx.execute(c->{policy.requireRead(c,actor);return new JdbcAdminUserDao(c).list(page,size);});
+        return list(actor,AdminUserQuery.page(page,size));
+    }
+    public Page<AdminUserView> list(long actor,AdminUserQuery query) {
+        Objects.requireNonNull(query);
+        return tx.execute(c->{policy.requireRead(c,actor);return new JdbcAdminUserDao(c).list(query);});
     }
     public AdminUserView get(long actor,long id) {
         return tx.execute(c->{policy.requireRead(c,actor);return new JdbcAdminUserDao(c).find(id)
@@ -35,7 +39,6 @@ public final class AdminUserService {
             return tx.execute(c->{
                 policy.requireWrite(c,ctx.actorId());
                 User created=new JdbcUserDao(c).insert(new User(null,username,displayName.strip(),hash,role,status,null,null,null));
-                new JdbcCreditDao(c).createAccount(created.id());
                 audit(c,ctx,"USER_CREATED",created.id(),"User created");
                 return new JdbcAdminUserDao(c).find(created.id()).orElseThrow();
             });

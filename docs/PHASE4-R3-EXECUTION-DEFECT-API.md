@@ -239,8 +239,4 @@ WAR 位置为 `target/qatrack-0.1.0-SNAPSHOT.war`（gitignored）；5 个运行�
 
 **本轮实现完成，可进入 Phase 4 Round 3 Final Review；不自动批准或执行 commit/push，也未进入 Round 4。**
 
-## Cloud Deployment Handoff / 云端部署交接
-
-补充交接见 [CLOUD-DEPLOYMENT-HANDOFF.md](CLOUD-DEPLOYMENT-HANDOFF.md)。已依据当前 WAR、真实配置加载器、认证/Session/驱动生命周期与 SQL 整理部署条件；未连接或修改云服务器。当前 WAR 可准备受控 smoke，但仍等待 Final Review 和部署指令。正式公网开放前必须完成安全 ADMIN bootstrap、登录限流、HTTPS/Secure Cookie、可信代理验证及完整 CSRF token 或严格 Origin/Host 策略。首次正式库执行 schema，不加载演示 seed；生产秘密不得放入 WAR/Git。
-
-上节 git status 为 Round 3 实现结束时快照；追加本交接后另新增 docs/CLOUD-DEPLOYMENT-HANDOFF.md，总计 12 个已跟踪文件修改、20 个新文件、0 暂存。此次补充仅变更两份文档，未改变构建产物或代码。
+当前部署方式见 [ECS 部署说明](ECS-DEPLOYMENT.md)。

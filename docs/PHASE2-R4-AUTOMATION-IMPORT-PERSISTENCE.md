@@ -38,7 +38,6 @@ requestKey 为 UUID，以大端的两个 long 写 BINARY(16)，与 Attempt 相�
 
 DAO 写入前拒绝非 32 字节摘要，防止 BINARY(32) 对短数据自动补零。null UUID/摘要交由 NOT NULL 拒绝，数据库异常转换 DataAccessException；读取检查 UUID/摘要实际宽度。生成 ID/时间由 MySQL 回读，insert 输入中的 id/importedAt 忽略。无 update/delete，不修改已导入批次。
 
-最终全层 Review 又补充了 Model 构造阶段的非空摘要长度校验：0/31/33 字节立即抛 IllegalArgumentException；null 仍交由写入时 NOT NULL 拒绝。长度边界移至 Model 单元测试，集成测试保留 NULL/原字节往返验证。下文 137 项是 Round 4 实现时的历史结果，最新结果见 [Phase 2 Final Persistence Review](PHASE2-FINAL-PERSISTENCE-REVIEW.md)。
 
 originalFilename 按传入文本保存；DAO 不净化路径或解析 XML。安全文件名、上传大小和 XML 解析限制应在后续入口实现。导入者是 batch.importedBy，自动化 Attempt.executedBy 保持 NULL，不冒充实际执行者。
 

@@ -61,7 +61,7 @@ class StaticAssetCacheTest {
             Path webroot = directory.resolve(contextPath.isEmpty() ? "root" : "veriqra");
             write(webroot, "index.html", "<!doctype html><title>Workspace</title>");
             write(webroot, "login.html", "<!doctype html><title>Login</title>");
-            write(webroot, "admin/system.html", "<!doctype html><title>System</title>");
+            write(webroot, "admin/users.html", "<!doctype html><title>Users</title>");
             write(webroot, "assets/css/app.css", "body { color: black; }");
             write(webroot, "assets/js/app.js", "window.cachePolicyTest = true;");
             write(webroot, "i18n/zh-CN.json", "{\"title\":\"工作区\"}");
@@ -118,7 +118,7 @@ class StaticAssetCacheTest {
 
     @ParameterizedTest @ValueSource(strings = {"", "/veriqra"})
     void htmlIncludingWelcomeAndAdminPagesRevalidates(String contextPath) throws Exception {
-        for (String path : new String[]{"/", "/index.html", "/login.html", "/admin/system.html"}) {
+        for (String path : new String[]{"/", "/index.html", "/login.html", "/admin/users.html"}) {
             HttpResponse<String> response = get(contextPath, path);
             assertEquals(200, response.statusCode(), path);
             assertEquals("max-age=0", header(response, "Cache-Control"), path);

@@ -22,7 +22,7 @@ abstract class ServiceFixture extends MysqlFixture {
     protected DefectService defects;
     protected AutomationService automation;
     protected TestImportService imports;
-    protected CollaborationService collaboration;
+    protected ProjectSettingsService projectSettings;
     protected final Clock clock = Clock.fixed(Instant.parse("2026-09-16T00:00:00Z"), ZoneOffset.UTC);
     protected final Clock executionClock = Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC);
 
@@ -41,7 +41,7 @@ abstract class ServiceFixture extends MysqlFixture {
         automation = new DefaultAutomationService(serviceTx, jdbcDaos, access);
         imports = new DefaultTestImportService(serviceTx, jdbcDaos, access,
                 new io.github.lz007001cn.veriqra.service.importing.JUnitXmlParser(), executionClock);
-        collaboration = new DefaultCollaborationService(serviceTx, jdbcDaos, access, executionClock);
+        projectSettings = new DefaultProjectSettingsService(serviceTx, jdbcDaos, access);
     }
 
     protected User actor(String username, SystemRole role, UserStatus status) {

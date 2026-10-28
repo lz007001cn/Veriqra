@@ -38,6 +38,25 @@ public final class JdbcTestCaseRequirementDao implements TestCaseRequirementDao 
         return query(SELECT + " WHERE test_case_id=? ORDER BY requirement_id", testCaseId);
     }
 
+    @Override public List<RequirementCoverage> listCoverageByProject(Long projectId) {
+        // Semantic edits invalidate CONFIRMED in the asset services' write transaction. updated_at
+        // is not a review version: priority/status-only changes intentionally preserve a review.
+        String sql = "SELECT r.id AS requirement_id,COUNT(tc.id) AS confirmed_case_count FROM requirements r "
+                + "LEFT JOIN test_case_requirements tr ON tr.requirement_id=r.id AND tr.status='CONFIRMED' "
+                + "AND tr.reviewed_by IS NOT NULL AND tr.reviewed_at IS NOT NULL "
+                + "LEFT JOIN test_cases tc ON tc.id=tr.test_case_id AND tc.project_id=r.project_id "
+                + "AND tc.status='READY' AND r.status='ACTIVE' "
+                + "WHERE r.project_id=? GROUP BY r.id,r.key_no ORDER BY r.key_no,r.id";
+        try (PreparedStatement s = connection.prepareStatement(sql)) {
+            s.setObject(1, projectId, Types.BIGINT);
+            try (ResultSet rs = s.executeQuery()) {
+                List<RequirementCoverage> rows = new ArrayList<>();
+                while (rs.next()) rows.add(new RequirementCoverage(rs.getLong("requirement_id"), rs.getLong("confirmed_case_count")));
+                return List.copyOf(rows);
+            }
+        } catch (SQLException e) { throw new DataAccessException("List requirement coverage", e); }
+    }
+
     private List<TestCaseRequirement> query(String sql, Long... values) {
         try (PreparedStatement s = connection.prepareStatement(sql)) {
             for (int i = 0; i < values.length; i++) s.setObject(i + 1, values[i], Types.BIGINT);
