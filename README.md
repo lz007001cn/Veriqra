@@ -4,7 +4,7 @@
 
 主线：**需求 → AI 辅助生成用例 → 测试计划 → 执行结果 → 缺陷 → 复测关闭**。支持手工执行和 JUnit XML 结果导入。
 
-v0.3.0 已部署到 [veriqra.xyz](https://veriqra.xyz)，当前开发版为 `0.9.0-SNAPSHOT`。
+当前版本为 `0.9.0`，最终展示验收已完成，发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)。最近一次 ECS 部署为 [v0.3.0](https://veriqra.xyz)；ECS 尚未启动，v0.9 暂未部署。
 
 ## 功能
 
@@ -30,7 +30,7 @@ mvn clean package
 node --test src/test/js/*.test.js
 ```
 
-输出 `target/veriqra-0.9.0-SNAPSHOT.war`，部署到 Tomcat 10.1。
+输出 `target/veriqra-0.9.0.war`，部署到 Tomcat 10.1。
 
 1. 按[数据库说明](database/README.md)安装数据库；已有 v0.3 实例不需要结构迁移。
 2. 复制 `config/database.example.properties` 为 `config/database.local.properties`，填写本地数据库连接。部署时也可通过 `VERIQRA_DB_CONFIG` 指向外部配置文件。
@@ -43,5 +43,6 @@ node --test src/test/js/*.test.js
 
 - [开发与精简计划](docs/DEVELOPMENT-ROADMAP.md)
 - [ZZZSwitch 演示文案与操作顺序](docs/demo/ZZZSWITCH-DEMO.md)
+- [v0.9 发布说明](docs/RELEASE-0.9.0.md)
 - [v0.3 发布说明](docs/RELEASE-0.3.0.md)
 - [ECS 部署记录](docs/ECS-DEPLOYMENT.md)

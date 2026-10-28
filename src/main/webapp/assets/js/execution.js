@@ -264,6 +264,11 @@
   function field(name, value) {
     return $('<div class="asset-field">').append($('<dt>').text(name), $('<dd>').text(value == null || value === '' ? '—' : String(value)));
   }
+  function lockAttemptForm() {
+    $('#execution-attempt-form').addClass('d-none').find('input,select,textarea').prop('disabled', true);
+    $('#execution-submit, #execution-record-next').prop('disabled', true);
+  }
+  lockAttemptForm();
   function reset() {
     preserveDraft();
     generation++;
@@ -281,7 +286,7 @@
     $('#execution-existing-plan-wrap').addClass('d-none');
     $('#execution-list-status, #execution-items-status, #execution-history-status').text('');
     $('#execution-list-panel, #execution-detail-panel, #execution-form, #execution-case-panel').addClass('d-none');
-    $('#execution-save, #execution-submit').prop('disabled', false);
+    $('#execution-save').prop('disabled', false); lockAttemptForm();
     notice(''); formError(''); attemptError('');
   }
   function panels(which) {
@@ -347,6 +352,7 @@
     preserveDraft();
     const token = ++generation;
     detail = null; runCaseId = null; pendingAttempt = null;
+    renderedAttemptOwner = null; lockAttemptForm();
     completionImpact = null; completionImpactGeneration++; finishBusy = false;
     selectedAttemptId = idText(attemptId);
     selectRoute(view === 'test-plans' ? { planId: idText(id), sourceTestCaseId: routeContext().sourceTestCaseId }
@@ -533,9 +539,17 @@
     catch (failure) { if (valid(token)) { notice(conflict(failure), true); if (failure.status === 409) reloadConflict('#execution-notice', failure, function () { openDetail(plan.id); }); else retry('#execution-notice', function () { openDetail(plan.id); }); } }
     finally { if (valid(token)) $('#execution-actions button').prop('disabled', false); }
   }
+  async function loadImportSource(run, token) {
+    try {
+      const rows = await api.get(base('imports') + '?runId=' + encodeURIComponent(run.id));
+      if (!valid(token) || !detail || !sameId(detail.run.id, run.id)) return;
+      if (Array.isArray(rows) && rows.some(function (row) { return row && sameId(row.testRunId, run.id); }))
+        $('#execution-context').append(routeLink(t('imports.source', null, 'View import source'), 'automation', { runId: idText(run.id) }));
+    } catch (_) { /* Missing provenance must not turn a manual run into an imported run. */ }
+  }
   function renderRun(current) {
     const run = current.run;
-    if (run.testPlanId == null) $('#execution-context').append(routeLink(t('imports.source'), 'automation', { runId: idText(run.id) }));
+    if (run.testPlanId == null) loadImportSource(run, generation);
     if (run.testPlanId != null) $('#execution-context').append(routeLink(t('execution.viewSourcePlan', null, 'View source plan'), 'test-plans',
       { planId: idText(run.testPlanId) }));
     const status = progress(current, '#execution-progress');
@@ -681,7 +695,7 @@
     $('#execution-snapshot, #execution-history').empty();
     $('#execution-case-context, #execution-case-progress, #execution-case-navigation').empty();
     $('#execution-history-status').text(t('execution.loadingAttemptHistory', null, 'Loading attempt history…'));
-    $('#execution-attempt-form').addClass('d-none');
+    lockAttemptForm();
     try {
       const context = await loadContext(false); if (!valid(token)) return; qaContext = context;
       owner = submissionContext(runId, id); pendingAttempt = submissions.get(owner) || null;
@@ -752,7 +766,6 @@
         if (attempt.outcome === 'FAIL') { const associations = $('<div class="mt-2">'); card.append(associations); loadAttemptDefects(associations, runId, id, attempt, token); }
       });
       if (selectedAttemptId && !history.some(function (attempt) { return sameId(attempt.id, selectedAttemptId); })) notice(t('execution.sourceAttemptUnavailable', null, 'The referenced attempt is unavailable in this run case.'), true);
-      $('#execution-attempt-form').toggleClass('d-none', current.run.status !== 'IN_PROGRESS' || !canWrite());
       $('#execution-attempt-form')[0].reset();
       $('#execution-outcome').val('');
       renderedAttemptOwner = current.run.status === 'IN_PROGRESS' && canWrite() ? submissionContext(runId, id) : null;
@@ -777,6 +790,7 @@
         }
         retainedAttemptDrafts.delete(owner);
       }
+      $('#execution-attempt-form').toggleClass('d-none', !renderedAttemptOwner).find('input,select,textarea').prop('disabled', !renderedAttemptOwner);
       if (recordedMessage && recordedMessage.owner === submissionContext(runId, id)) { notice(recordedMessage.message); recordedMessage = null; }
       focusHeading(selectedAttemptId && history.some(function (attempt) { return sameId(attempt.id, selectedAttemptId); }) ? '#execution-attempt-' + selectedAttemptId : '#execution-case-title');
       return token;
@@ -979,7 +993,7 @@
       if (actorId != null && !sameId(value.actorId, actorId)) return;
       qaContext = value; refreshFormSave();
       $('#execution-new').prop('disabled', !canWrite());
-      $('#execution-submit, #execution-record-next').prop('disabled', !canWrite() || !!(pendingAttempt && pendingAttempt.busy));
+      $('#execution-submit, #execution-record-next').prop('disabled', !renderedAttemptOwner || !canWrite() || !!(pendingAttempt && pendingAttempt.busy));
       if (!canWrite()) notice(t('r2Exec.readOnly', null, 'This action requires an active project and ADMIN or active TESTER permission. Contact your project PM or ADMIN.'), true);
     } catch (failure) { if (valid(token)) { qaContext = null; notice(conflict(failure), true); } }
   });
@@ -1063,7 +1077,7 @@
   });
   $('#execution-attempt-form').on('submit', async function (event) {
     event.preventDefault();
-    if ($('#execution-submit').prop('disabled') || !canWrite() || !this.reportValidity() || view !== 'runs' || !detail || detail.run.status !== 'IN_PROGRESS' || runCaseId == null) return;
+    if ($('#execution-submit').prop('disabled') || !canWrite() || !this.reportValidity() || view !== 'runs' || !detail || detail.run.status !== 'IN_PROGRESS' || runCaseId == null || renderedAttemptOwner !== submissionContext(detail.run.id, runCaseId)) return;
     const token = generation;
     const runId = detail.run.id;
     const caseId = runCaseId;
