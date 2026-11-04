@@ -4,7 +4,7 @@
 
 主线：**需求 → AI 辅助生成用例 → 测试计划 → 执行结果 → 缺陷 → 复测关闭**。支持手工执行和 JUnit XML 结果导入。
 
-当前版本为 `0.9.0`，发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)。[部署记录](docs/ECS-DEPLOYMENT.md)最近条目为 2026-10-31 的 v0.9 更新；此后的本地界面与 AI 后台设置改动尚未记为 ECS 部署，版本字符串相同不代表构建内容相同。
+当前版本为 `0.9.0`，发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)。最新代码已推送 GitHub `main`，并于 2026-11-04 部署到 [veriqra.xyz](https://veriqra.xyz)；部署包以提交和 WAR SHA-256 识别，版本字符串相同不代表构建内容相同。
 
 ## 功能
 

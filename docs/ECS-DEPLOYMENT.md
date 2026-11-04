@@ -1,5 +1,16 @@
 # ECS 部署记录
 
+## 2026-11-04：管理员 AI 设置与运行总结更新
+
+已将提交 `55fe93e821d38e978ddb05693c881b873e4b993a` 推送到 GitHub `main` 和 `codex/v09-page-polish`，并部署到 [veriqra.xyz](https://veriqra.xyz)。本次包含管理员 AI 模型设置、Google 项目连接/Token 计数/配额/用量/账单状态读取，以及测试运行总结和需求操作更新。
+
+- 版本字符串仍为 `0.9.0`；WAR：6,123,405 字节；SHA-256：`9a84dbaa55caa76d5b001750e4735cce40a8c7eaa7b61d60cea92d37f892548a`。
+- 资产缓存令牌为 `55fe93e821d38e978ddb05693c881b873e4b993a-8a26effc0e1eba43832bdc785d4b6afb730b165e170046f99b80a70d13f93664`，普通刷新可取得新资源。
+- 沿用 35 张表和线上业务数据，未执行 DDL、迁移或业务数据同步；外部数据库、Vertex AI 配置和 systemd 配置均保留。
+- 发布前备份：ECS `/root/veriqra-backup-v09-admin-20261104T032443Z`，包含旧 WAR、展开目录、外部配置和 systemd 配置。
+
+验证：前端 Node 测试 372 项通过；Java 测试报告全部通过，Vertex AI 配置相关测试 1 项跳过；公网 `/`、`/login.html`、`/index.html`、`/admin/ai.html` 和新增运行总结脚本均返回 HTTP 200。Tomcat 启动正常，启动日志无 `SEVERE`/`ERROR`，线上安装 WAR 与本地 SHA-256 一致。
+
 ## 2026-10-31：AI 测试总结与需求操作更新
 
 已更新到 [veriqra.xyz](https://veriqra.xyz)。本次包含 AI 测试运行总结、需求列表与详情操作调整、AI 面板按需展开、需求主按钮及关联用例按钮的排版修复。
