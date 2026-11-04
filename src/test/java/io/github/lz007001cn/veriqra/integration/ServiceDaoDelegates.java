@@ -193,6 +193,7 @@ final class ServiceDaoDelegates {
         public Optional<TestAttemptDefect> find(Long a, Long d) { return target.find(a, d); }
         public boolean existsRecord(Long a, Long d) { return target.existsRecord(a, d); }
         public List<TestAttemptDefect> listDefectsByAttempt(Long a) { return target.listDefectsByAttempt(a); }
+        public List<Long> listDefectIdsByRun(Long run) { return target.listDefectIdsByRun(run); }
         public List<TestAttemptDefect> listAttemptsByDefect(Long d) { return target.listAttemptsByDefect(d); }
         public List<TestAttemptDefect> listAttemptsByDefectForUpdate(Long d) {
             return target.listAttemptsByDefectForUpdate(d);

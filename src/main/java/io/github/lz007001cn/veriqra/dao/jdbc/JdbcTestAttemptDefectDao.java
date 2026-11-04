@@ -31,6 +31,21 @@ public final class JdbcTestAttemptDefectDao implements TestAttemptDefectDao {
     @Override public List<TestAttemptDefect> listDefectsByAttempt(Long attemptId) {
         return query(SELECT + " WHERE pc.attempt_id=? ORDER BY pc.defect_id", attemptId);
     }
+    @Override public List<Long> listDefectIdsByRun(Long testRunId) {
+        String sql = "SELECT DISTINCT ad.defect_id FROM test_attempt_defects ad "
+                + "JOIN test_attempts a ON a.id=ad.attempt_id "
+                + "JOIN test_run_cases rc ON rc.id=a.test_run_case_id "
+                + "JOIN test_runs r ON r.id=rc.test_run_id JOIN defects d ON d.id=ad.defect_id "
+                + "WHERE rc.test_run_id=? AND a.status='FAIL' AND d.project_id=r.project_id ORDER BY ad.defect_id";
+        try (PreparedStatement s = connection.prepareStatement(sql)) {
+            s.setObject(1, testRunId, Types.BIGINT);
+            try (ResultSet rs = s.executeQuery()) {
+                List<Long> rows = new ArrayList<>();
+                while (rs.next()) rows.add(rs.getObject("defect_id", Long.class));
+                return List.copyOf(rows);
+            }
+        } catch (SQLException e) { throw new DataAccessException("Find run defect IDs", e); }
+    }
     @Override public List<TestAttemptDefect> listAttemptsByDefect(Long defectId) {
         return query(SELECT + " WHERE pc.defect_id=? ORDER BY pc.attempt_id", defectId);
     }

@@ -36,6 +36,28 @@
   const retainedDrafts = new Map();
   const retainedAttemptDrafts = new Map();
   const submissions = new Map();
+  const listPositions = new Map();
+  let renderedListScope = null;
+  const listScope = function () { return projectId + '/' + view; };
+  function listPosition() {
+    const scope = listScope();
+    if (!listPositions.has(scope)) listPositions.set(scope, { scroll: 0, selectedId: null });
+    return listPositions.get(scope);
+  }
+  function preserveListPosition() {
+    if (projectId && active() && renderedListScope === listScope() && !$('#execution-list-panel').hasClass('d-none'))
+      listPosition().scroll = Number(window.scrollY) || 0;
+  }
+  function restoreListPosition(token, position, link) {
+    const restore = function () {
+      if (!valid(token) || $('#execution-list-panel').hasClass('d-none')) return;
+      if (link && link[0] && typeof link[0].focus === 'function') link[0].focus({ preventScroll: true });
+      if (typeof window.scrollTo === 'function') window.scrollTo(0, position.scroll);
+      renderedListScope = listScope();
+    };
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(restore);
+    else restore();
+  }
   const active = function () { return view === 'test-plans' || view === 'runs'; };
   const valid = function (token) { return token === generation && !!projectId && active(); };
   const base = function (resource) { return 'projects/' + encodeURIComponent(projectId) + '/' + resource; };
@@ -72,18 +94,26 @@
     const byId = new Map(cases.map(function (row) { return [idText(row.id), row]; }));
     const blockers = current.testCaseIds.filter(function (id) { const row = byId.get(idText(id)); return !row || row.status !== 'READY'; });
     const ready = !!current.testCaseIds.length && !blockers.length && current.plan.status !== 'ARCHIVED' && (!requireReady || current.plan.status === 'READY');
-    const region = $(target).append($('<h3 class="fs-6">').text(t('r2Exec.planChecklist', null, 'Current run preparation checklist')));
-    region.append($('<p class="small mb-1">').text(t('r2Exec.planStateSeparate', { status: label(current.plan.status) },
-      'Saved plan status: {status}. Current case readiness is checked separately; later case edits may block a READY plan.')));
+    const region = $('<section class="workflow-next">');
+    $(target).append(region);
+    region.append($('<div class="workflow-next-heading">').append(
+      $('<h3 class="fs-6">').text(t('execution.preparationHeading', null, 'Run preparation')), badge(current.plan.status)));
     if (!current.testCaseIds.length) region.append($('<p class="text-danger">').text(t('r2Exec.emptyPlan', null, 'Add at least one test case before marking this plan READY.')));
     if (requireReady && current.plan.status !== 'READY') region.append($('<p class="text-danger">').text(t('execution.planMustBeReady', null,
       'Open the source plan and mark it Ready before creating a run.')));
+    if (blockers.length) region.append($('<p class="mb-1">').text(t('execution.blockerCount', { count: blockers.length },
+      'This plan is currently blocked by {count} case(s).')));
     blockers.forEach(function (id) {
       const row = byId.get(idText(id));
       region.append($('<div class="asset-link-row">').append(row ? routeLink('TC-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title, 'test-cases', { testCaseId: idText(id), sourcePlanId: idText(current.plan.id) }, '') : $('<span>').text(t('r2Exec.missingCase', null, 'A plan member is unavailable. Reload or remove it from this plan.')),
         $('<span class="text-danger small">').text(row ? t('r2Exec.blockedCase', { status: label(row.status) }, '{status} — review this case and mark it READY before creating a run.') : '')));
     });
-    if (current.testCaseIds.length && !blockers.length) region.append($('<p class="text-success small">').text(t('r2Exec.allCasesReady', null, 'All current member cases are READY. The server validates them again when creating the run.')));
+    if (current.testCaseIds.length && !blockers.length) region.append($('<p class="mb-1">').text(t('execution.readyCaseCount',
+      { count: current.testCaseIds.length }, '{count} cases are ready for execution.')));
+    region.append($('<details class="workflow-details">').append(
+      $('<summary>').text(t('execution.preparationDetails', null, 'How plan readiness works')),
+      $('<p>').text(t('r2Exec.planStateSeparate', { status: label(current.plan.status) },
+        'Saved plan status: {status}. Current case readiness is checked separately; later case edits may block a READY plan.'))));
     return { ready: ready, blockers: blockers, cases: byId };
   }
   function preserveDraft() {
@@ -148,10 +178,10 @@
     const region = $(target).empty().append($('<p class="mb-2">').text(t('execution.recordedProgress',
       { recorded: window.I18n.formatNumber(recorded), total: window.I18n.formatNumber(total), remaining: window.I18n.formatNumber(counts.NOT_RUN) },
       '{recorded} of {total} cases recorded · {remaining} not run')));
-    const outcomes = $('<div class="d-flex flex-wrap gap-2 mb-3">');
+    const outcomes = $('<div class="run-outcome-summary d-flex flex-wrap gap-2 mb-3">');
     Object.keys(counts).forEach(function (outcome) { outcomes.append($('<span>').text(t('execution.outcomeCount',
       { outcome: label(outcome), count: window.I18n.formatNumber(counts[outcome]) }, '{outcome}: {count}'))); });
-    region.append(outcomes);
+    region.append(badge(current.run.status).attr('aria-label', t('common.status', null, 'Status') + ': ' + label(current.run.status)), outcomes);
     return { remaining: counts.NOT_RUN, recorded: recorded, total: total };
   }
   function focusHeading(selector) { $(selector).attr('tabindex', '-1').trigger('focus'); }
@@ -270,6 +300,9 @@
   }
   lockAttemptForm();
   function reset() {
+    preserveListPosition();
+    renderedListScope = null;
+    if (window.VeriqraAiRunSummary) window.VeriqraAiRunSummary.clear();
     preserveDraft();
     generation++;
     detail = null; qaContext = null; formBaseline = null; currentFormDraftKey = null; caseFilter = ''; runFilter = 'ALL';
@@ -290,6 +323,7 @@
     notice(''); formError(''); attemptError('');
   }
   function panels(which) {
+    if (which !== 'detail' && window.VeriqraAiRunSummary) window.VeriqraAiRunSummary.clear();
     if (which !== 'case') localeAttemptDraft = null;
     $('#execution-list-panel').toggleClass('d-none', which !== 'list');
     $('#execution-detail-panel').toggleClass('d-none', which !== 'detail');
@@ -320,6 +354,8 @@
 
   async function list() {
     if (!projectId || !active()) return;
+    preserveListPosition();
+    renderedListScope = null;
     preserveDraft();
     const token = ++generation;
     detail = null; runCaseId = null; pendingAttempt = null;
@@ -334,22 +370,33 @@
       const rows = await api.get(base(view === 'test-plans' ? 'test-plans' : 'runs'));
       if (!valid(token)) return;
       $('#execution-list-status').text(rows.length ? t('execution.itemCount', { count: window.I18n.formatNumber(rows.length) }, '{count} item(s)') : t("execution.noItemsYet", null, 'No items yet.'));
+      const position = listPosition(); let recentLink = null;
       rows.forEach(function (row) {
         const title = view === 'test-plans' ? planKey(row) + ' · ' + row.name : row.name;
         const meta = $('<div class="asset-list-meta">').append(badge(row.status),
           $('<span>').text(view === 'runs' ? (row.testPlanId == null ? t("execution.adHoc", null, 'Ad-hoc') : t("execution.planBased", null, 'Plan-based')) : 'v' + row.version),
           $('<small>').text(date(row.createdAt)));
-        $('#execution-list').append($('<div class="asset-list-row">').append(
-          $('<div class="asset-list-summary">').append($('<strong>').text(title),
+        const context = view === 'test-plans' ? { planId: idText(row.id) } : { runId: idText(row.id) };
+        const titleLink = routeLink(title, view, context, 'asset-title-link').attr('data-execution-title', row.id);
+        titleLink.on('click', function (event) {
+          if (event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          position.selectedId = idText(row.id);
+        });
+        if (sameId(position.selectedId, row.id)) recentLink = titleLink;
+        $('#execution-list').append($('<div class="asset-list-row">').attr('data-execution-id', row.id).toggleClass('is-recently-viewed', sameId(position.selectedId, row.id)).append(
+          $('<div class="asset-list-summary">').append(titleLink,
             $('<p class="mb-1 text-secondary">').text(view === 'test-plans' ? (row.description || t("common.noDescription", null, 'No description')) : (row.environment || t("execution.noEnvironment", null, 'No environment')))),
           meta, $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('common.view', null, 'View'))
             .attr('aria-label', t('execution.viewItem', { title: title }, 'View {title}'))
             .on('click', function () { openDetail(row.id); })));
       });
+      restoreListPosition(token, position, recentLink);
     } catch (failure) { if (valid(token)) { $('#execution-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(failure.message, true); retry('#execution-list', list); } }
   }
 
   async function openDetail(id, caseId, attemptId) {
+    preserveListPosition(); listPosition().selectedId = idText(id);
+    if (window.VeriqraAiRunSummary) window.VeriqraAiRunSummary.clear();
     preserveDraft();
     const token = ++generation;
     detail = null; runCaseId = null; pendingAttempt = null;
@@ -380,10 +427,11 @@
   async function renderPlan(current, token) {
     const plan = current.plan;
     const sourceCase = routeContext().sourceTestCaseId;
+    $('#execution-actions').addClass('workflow-next-actions');
     if (sourceCase) $('#execution-context').append(routeLink(t('execution.backToSourceCase', null, 'Back to source test case'), 'test-cases', { testCaseId: sourceCase }));
     $('#execution-detail-title').text(planKey(plan) + ' · ' + plan.name);
     $('#execution-detail').append($('<dl class="asset-fields">').append(
-      field(t("common.description", null, 'Description'), plan.description, true), field(t("common.status", null, 'Status'), label(plan.status)),
+      field(t("common.description", null, 'Description'), plan.description, true),
       field(t("common.version", null, 'Version'), plan.version), field(t("common.created", null, 'Created'), date(plan.createdAt)), field(t("common.updated", null, 'Updated'), date(plan.updatedAt))));
     $('#execution-items-title').text(t('execution.includedCases', { count: window.I18n.formatNumber(current.testCaseIds.length) }, 'Included test cases ({count})'));
     $('#execution-items-status').text(t('execution.loadingCaseLabels', null, 'Loading current case labels…'));
@@ -404,16 +452,16 @@
       $('#execution-items').append(row);
     });
     const sourceCandidate = sourceCase && byId.get(String(sourceCase));
-    if (sourceCandidate && sourceCandidate.status !== 'ARCHIVED' && !current.testCaseIds.some(function (id) { return sameId(id, sourceCase); })
-      && plan.status !== 'ARCHIVED' && canWrite() && !planIntents.has(intentKey(plan.id))) $('#execution-actions').append(
+    const addingSource = sourceCandidate && sourceCandidate.status !== 'ARCHIVED' && !current.testCaseIds.some(function (id) { return sameId(id, sourceCase); })
+      && plan.status !== 'ARCHIVED' && canWrite() && !planIntents.has(intentKey(plan.id));
+    if (addingSource) $('#execution-actions').append(
       $('<button type="button" class="btn btn-primary">').attr('id', 'execution-add-source-case')
         .text(t('execution.addSourceCaseToPlan', null, 'Add this case to the plan')).on('click', function () { addMembers(plan, [sourceCandidate.id]); }));
     if (plan.status === 'READY' && prep.ready && canWrite() && !planIntents.has(intentKey(plan.id))) $('#execution-actions').append(
       $('<p class="w-100 mb-0">').text(t('execution.planNextCreateRun', { count: window.I18n.formatNumber(current.testCaseIds.length) },
         'Next: create a run to record results for these {count} cases.')),
       routeLink(t('execution.createRunFromPlan', null, 'Create run from this plan'), 'runs',
-        { action: 'create', sourcePlanId: idText(plan.id) }, 'btn btn-primary').attr('id', 'execution-create-plan-run'));
-    if (plan.status === 'READY' && !prep.ready) $('#execution-progress').append($('<p class="alert alert-warning">').text(t('r2Exec.readyButBlocked', null, 'This plan is saved as READY, but it is currently blocked. Open the listed cases, review them and mark them READY.')));
+        { action: 'create', sourcePlanId: idText(plan.id) }, 'btn ' + (addingSource ? 'btn-outline-primary' : 'btn-primary')).attr('id', 'execution-create-plan-run'));
     if (plan.status === 'ARCHIVED' || !canWrite()) return;
     if (planIntents.has(intentKey(plan.id))) {
       $('#execution-actions').append($('<p class="text-danger">').text(t('r2Exec.planWriteUnknown', null, 'A previous plan change has an unconfirmed result. Review the latest scope; this page will not resend it automatically.'))); return;
@@ -421,19 +469,23 @@
     if (plan.status === 'DRAFT') {
       if (prep.ready) $('#execution-actions').append($('<p class="w-100 mb-0">').text(t('execution.planNextReady', null,
         'Next: mark this plan Ready, then create its test run.')));
-      $('#execution-actions').append($('<button type="button" class="btn btn-primary">').attr('id', 'execution-plan-ready').text(t('r2Exec.markPlanReady', null, 'Check and mark plan READY')).prop('disabled', !prep.ready)
+      $('#execution-actions').append($('<button type="button" class="btn">').addClass(prep.ready && !addingSource ? 'btn-primary' : 'btn-outline-secondary').attr('id', 'execution-plan-ready').text(t('r2Exec.markPlanReady', null, 'Check and mark plan READY')).prop('disabled', !prep.ready)
         .on('click', function () { markPlanReady(plan); }));
     }
-    $('#execution-actions').append($('<button type="button" class="btn btn-outline-primary">').text(t("execution.editPlan", null, 'Edit plan'))
+    const firstBlocker = prep.blockers.map(function (id) { return byId.get(String(id)); }).find(function (row) { return row && row.status !== 'ARCHIVED'; });
+    if (firstBlocker && !addingSource) $('#execution-actions').append(routeLink(t('execution.reviewBlockedCase',
+      { title: 'TC-' + String(firstBlocker.keyNo).padStart(3, '0') + ' · ' + firstBlocker.title }, 'Review {title}'), 'test-cases',
+      { testCaseId: idText(firstBlocker.id), sourcePlanId: idText(plan.id) }, 'btn btn-primary').attr('id', 'execution-review-blocker'));
+    $('#execution-actions').append($('<button type="button" class="btn">').addClass(prep.blockers.length && !firstBlocker && !addingSource ? 'btn-primary' : 'btn-outline-secondary').text(t("execution.editPlan", null, 'Edit plan'))
       .on('click', function () { showForm(true); }));
     $('#execution-actions').append($('<button type="button" class="btn btn-outline-danger">').text(t("execution.archivePlan", null, 'Archive plan'))
       .on('click', function () { archivePlan(plan); }));
     const available = cases.filter(function (item) { return item.status !== 'ARCHIVED' && !current.testCaseIds.some(function (id) { return sameId(id, item.id); }); });
     if (!current.testCaseIds.length) {
-      if (available.length) $('#execution-actions').append($('<button type="button" class="btn btn-primary">').text(t('execution.choosePlanCases', null, 'Choose cases to add'))
+      if (available.length) $('#execution-actions').append($('<button type="button" class="btn">').addClass(addingSource ? 'btn-outline-secondary' : 'btn-primary').text(t('execution.choosePlanCases', null, 'Choose cases to add'))
         .on('click', function () { $('#execution-plan-case-search').trigger('focus'); }));
       else $('#execution-actions').append(routeLink(t('execution.createFirstPlanCase', null, 'Create a test case first'), 'test-cases',
-        { action: 'create', sourcePlanId: idText(plan.id) }, 'btn btn-primary'));
+        { action: 'create', sourcePlanId: idText(plan.id) }, 'btn ' + (addingSource ? 'btn-outline-primary' : 'btn-primary')));
     }
     if (available.length) {
       const chooser = $('<fieldset class="w-100 mt-3">').append($('<legend class="fs-6">').text(t('r2Exec.addSelectedCases', null, 'Add selected cases')));
@@ -446,7 +498,8 @@
         selections.push({ id: item.id, checkbox: checkbox, row: row, title: title }); chooser.append(row);
       });
       search.on('input', function () { const term = this.value.trim().toLocaleLowerCase(); selections.forEach(function (item) { item.row.toggleClass('d-none', !item.title.toLocaleLowerCase().includes(term)); }); });
-      chooser.append($('<p class="small text-secondary">').text(t('r2Exec.sequentialAdds', null, 'Each selected case is added separately, in order. Successful additions remain if a later item fails. No cases are selected automatically.')),
+      chooser.append($('<details class="workflow-details">').append($('<summary>').text(t('execution.addCasesDetails', null, 'About adding several cases')),
+        $('<p>').text(t('r2Exec.sequentialAdds', null, 'Each selected case is added separately, in order. Successful additions remain if a later item fails. No cases are selected automatically.'))),
         $('<button type="button" class="btn btn-outline-primary">').attr('id', 'execution-add-selected').text(t('r2Exec.addSelectedCases', null, 'Add selected cases')).on('click', function () { addMembers(plan, selections.filter(function (item) { return item.checkbox.prop('checked'); }).map(function (item) { return item.id; })); }));
       $('#execution-actions').append(search, chooser);
     }
@@ -550,6 +603,12 @@
   }
   function renderRun(current) {
     const run = current.run;
+    $('#execution-actions').addClass('workflow-next-actions');
+    if (window.VeriqraAiRunSummary) {
+      const token = generation;
+      window.VeriqraAiRunSummary.mount({ projectId: projectId, run: run,
+        isCurrent: function () { return valid(token) && view === 'runs' && detail === current && runCaseId == null; } });
+    }
     if (run.testPlanId == null) loadImportSource(run, generation);
     if (run.testPlanId != null) $('#execution-context').append(routeLink(t('execution.viewSourcePlan', null, 'View source plan'), 'test-plans',
       { planId: idText(run.testPlanId) }));
@@ -559,7 +618,7 @@
     if (routeContext().defectId) $('#execution-context').append(routeLink(t('execution.backToDefect', null, 'Back to defect and link the retest PASS'), 'defects', { defectId: routeContext().defectId }));
     $('#execution-detail-title').text(run.name);
     $('#execution-detail').append($('<dl class="asset-fields">').append(
-      field(t("common.status", null, 'Status'), label(run.status)), field(t("execution.source", null, 'Source'), run.testPlanId == null ? t("execution.adHoc", null, 'Ad-hoc') : t('execution.planNumber', { number: run.testPlanId }, 'Plan #{number}')),
+      field(t("execution.source", null, 'Source'), run.testPlanId == null ? t("execution.adHoc", null, 'Ad-hoc') : t('execution.planNumber', { number: run.testPlanId }, 'Plan #{number}')),
       field(t("execution.environment", null, 'Environment'), run.environment), field(t("execution.build", null, 'Build'), run.buildVersion),
       field(t("common.created", null, 'Created'), date(run.createdAt)), field(t("execution.ended", null, 'Ended'), date(run.endedAt))));
     $('#execution-items-title').text(t('execution.runCaseSnapshots', { count: window.I18n.formatNumber(current.cases.length) }, 'Run case snapshots ({count})'));
@@ -583,18 +642,19 @@
       const next = current.cases.find(function (item) { return item.currentOutcome === 'NOT_RUN'; });
       if (next) $('#execution-actions').append(
         $('<p class="w-100 mb-0">').text(t('execution.runNextCase', { title: next.snapshotTitle }, 'Next: record the result for “{title}”.')),
-        routeLink(t('execution.continueExecution', null, 'Continue execution'), 'runs',
+        routeLink(t(status.recorded ? 'execution.continueExecution' : 'execution.startExecution', null, status.recorded ? 'Continue execution' : 'Start execution'), 'runs',
           { runId: idText(run.id), runCaseId: idText(next.runCaseId) }, 'btn btn-primary').attr('id', 'execution-continue-run'));
       else $('#execution-progress').append($('<p class="text-secondary">').text(t('execution.allCasesRecorded', null, 'Every case has an attempt.')));
-      if (!status.total || status.remaining) $('#execution-progress').append($('<p class="text-secondary">').text(t('execution.completionRequiresAllCases', null,
-        'Record at least one attempt for every case before completing this run.')));
       [[t("execution.completeRun", null, 'Complete run'), 'complete'], [t("execution.cancelRun", null, 'Cancel run'), 'cancel']].forEach(function (entry) {
-        $('#execution-actions').append($('<button type="button" class="btn btn-outline-secondary">').text(entry[0])
+        $('#execution-actions').append($('<button type="button" class="btn">').addClass(entry[1] === 'complete' && status.total && !status.remaining ? 'btn-primary' : 'btn-outline-secondary').text(entry[0])
           .attr('data-execution-action', entry[1])
+          .attr('title', entry[1] === 'complete' && (!status.total || status.remaining) ? t('execution.completionRequiresAllCases') : '')
           .prop('disabled', entry[1] === 'complete' && (!status.total || !!status.remaining))
           .on('click', function () { finishRun(run, entry[1]); }));
       });
-    } else if (run.status !== 'IN_PROGRESS') $('#execution-progress').append($('<p class="small text-secondary">').text(t('execution.terminalRetestPath', null, 'This run is read-only. Its history is retained. For unresolved defects, execute a compatible READY Test Case in a new run and explicitly link its PASS from the defect page.')));
+    } else if (run.status !== 'IN_PROGRESS') $('#execution-progress').append($('<details class="workflow-details">').append(
+      $('<summary>').text(t('execution.completedRunHelp', null, 'Retesting after this run')),
+      $('<p>').text(t('execution.terminalRetestPath', null, 'This run is read-only. Its history is retained. For unresolved defects, execute a compatible READY Test Case in a new run and explicitly link its PASS from the defect page.'))));
   }
   function renderCompletionImpact() {
     const target = $('#execution-completion-impact').empty();
@@ -605,8 +665,7 @@
       retry(target, function () { if (detail && !finishBusy) return loadCompletionImpact(detail); }); return;
     }
     const value = completionImpact.value;
-    const outcomes = ['PASS', 'FAIL', 'BLOCKED', 'SKIPPED', 'NOT_RUN'].map(function (name) { return t('execution.outcomeCount', { outcome: label(name), count: window.I18n.formatNumber(value.outcomes[name]) }, '{outcome}: {count}'); }).join(' · ');
-    target.append($('<p class="small mb-1">').text(outcomes), $('<p class="small mb-1">').text(t('execution.defectCompletionImpact',
+    target.append($('<p class="small mb-1">').text(t('execution.defectCompletionImpact',
       { defects: window.I18n.formatNumber(value.openDefectCount), retests: window.I18n.formatNumber(value.pendingRetestDefectCount) }, 'Unclosed defects: {defects} · defects awaiting valid retest: {retests}')));
   }
   async function loadCompletionImpact(current) {
@@ -732,9 +791,9 @@
           const remaining = current.cases.slice(position + 1).concat(current.cases.slice(0, position)).find(function (row) { return row.currentOutcome === 'NOT_RUN'; });
           if (remaining) $('#execution-case-progress').append($('<p class="mb-1">').text(t('execution.caseResultSaved', null, 'This case has a recorded result.')),
             routeLink(t('execution.nextUnrecordedCase', { title: remaining.snapshotTitle }, 'Next unrecorded case: {title}'), 'runs',
-              { runId: idText(runId), runCaseId: idText(remaining.runCaseId) }, 'btn btn-primary btn-sm mb-2'));
+              { runId: idText(runId), runCaseId: idText(remaining.runCaseId) }, 'btn btn-outline-primary btn-sm mb-2'));
           else $('#execution-case-progress').append(routeLink(t('execution.reviewRunToComplete', null, 'Review results and complete the run'), 'runs',
-            { runId: idText(runId) }, 'btn btn-primary btn-sm mb-2'));
+            { runId: idText(runId) }, 'btn btn-outline-primary btn-sm mb-2'));
         }
         $('#execution-case-navigation').append($('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('execution.goToRecordResult', null, 'Record a result'))
           .on('click', function () { $('#execution-outcome').trigger('focus'); }));
@@ -773,8 +832,8 @@
       $('#execution-failure-wrap').addClass('d-none');
       $('#execution-submit').prop('disabled', !!(pendingAttempt && pendingAttempt.busy)).text(history.length ? t("execution.recordRetestAsNewAttempt", null, 'Record retest as new attempt') : t("execution.recordNewAttempt", null, 'Record new attempt'));
       $('#execution-record-next').remove();
-      if (current.run.status === 'IN_PROGRESS' && canWrite() && current.cases[position + 1]) $('#execution-attempt-form').append($('<button id="execution-record-next" type="submit" class="btn btn-outline-primary ms-2">')
-        .prop('disabled', !!(pendingAttempt && pendingAttempt.busy)).text(t('execution.recordAndNext', null, 'Record attempt and next case')));
+      if (current.run.status === 'IN_PROGRESS' && canWrite() && current.cases[position + 1]) $('#execution-attempt-actions').append($('<button id="execution-record-next" type="submit" class="btn btn-outline-primary">')
+        .prop('disabled', !!(pendingAttempt && pendingAttempt.busy)).text(t('execution.recordAndNext', null, 'Record attempt and next case')), $('#execution-attempt-cancel-bottom'));
       if (current.run.status !== 'IN_PROGRESS') $('#execution-case-context').append($('<p class="text-secondary mt-2">').text(t('execution.runReadOnly', null, 'This run is read-only. Earlier attempts remain available.')));
       permissionNote('#execution-case-context');
       if (pendingAttempt) {
@@ -1002,9 +1061,9 @@
   $('#execution-plan').on('change', updatePlanPreview);
   $('#execution-outcome').on('change', function () { $('#execution-failure-wrap').toggleClass('d-none', this.value !== 'FAIL'); });
   $('#execution-back').on('click', function () { if (nav()) nav().open(view, { projectId: projectId }); else list(); });
-  $('#execution-case-back').on('click', function () { if (detail) { if (nav()) nav().open('runs', runDestination({ runId: idText(detail.run.id) })); else openDetail(detail.run.id); } });
+  $('#execution-case-back, #execution-attempt-cancel-bottom').on('click', function () { if (detail) { if (nav()) nav().open('runs', runDestination({ runId: idText(detail.run.id) })); else openDetail(detail.run.id); } });
   $('#execution-new').on('click', function () { showForm(false); });
-  $('#execution-cancel').on('click', function () { if (editing && detail) openDetail(detail.plan.id); else list(); });
+  $('#execution-cancel, #execution-cancel-bottom').on('click', function () { if (editing && detail) openDetail(detail.plan.id); else list(); });
   $('#execution-add-existing').on('click', async function () {
     if ($(this).prop('disabled') || $('#execution-save').prop('disabled') || !formContext.sourceTestCaseId) return;
     const plan = existingPlans.find(function (row) { return sameId(row.id, $('#execution-existing-plan').val()); });

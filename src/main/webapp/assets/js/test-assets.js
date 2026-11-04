@@ -17,6 +17,7 @@
   let formContext = {};
   let pendingLink = null;
   let tracePickerGeneration = 0;
+  let traceOpener = null;
   let qaContext = null;
   let permissionState = 'loading';
   let formBaseline = null;
@@ -24,6 +25,7 @@
   let statusFilter = '';
   let traceCandidates = [];
   let traceTargetType = '';
+  let traceEmptyKey = 'assets.noEligibleLinks';
   let formNeedsReview = false;
   let latestFormValue = null;
   let formCheckLoading = false;
@@ -33,6 +35,12 @@
   let sourceRequirementState = 'none';
   let sourceFailure = null;
   let sourceRequest = 0;
+  const listMemory = new Map();
+  const requirementSections = new Map();
+  let requirementSection = 'content';
+  let selectedListTarget = null;
+  let renderedListScope = null;
+  let aiCasesOpen = false;
   const uncertainWrites = new Map();
   const draftOwner = 'test-assets';
   const root = $('#asset-workspace');
@@ -45,6 +53,35 @@
   const sameId = function (left, right) { return String(left) === String(right); };
   const canWrite = function () { return permissionState === 'loaded' && qaContext && qaContext.canWriteAssets === true && !projectArchived; };
   const writable = function () { return detail && canWrite() && detail.row.status !== 'ARCHIVED'; };
+  function listScope() { return projectId && active() ? projectId + '/' + view : null; }
+  function rememberedList() {
+    const scope = listScope();
+    if (!scope) return null;
+    if (!listMemory.has(scope)) listMemory.set(scope, { search: '', status: '', scroll: 0, selectedId: null });
+    return listMemory.get(scope);
+  }
+  function rememberListPosition(selectedId) {
+    const state = rememberedList();
+    if (!state) return;
+    if (renderedListScope === listScope() && !$('#asset-list-panel').hasClass('d-none')) {
+      state.search = searchText; state.status = statusFilter;
+      state.scroll = Math.max(0, Number(window.scrollY || window.pageYOffset) || 0);
+    }
+    if (selectedId != null) state.selectedId = String(selectedId);
+  }
+  function restoreListFilters() {
+    const state = rememberedList(); searchText = state ? state.search : ''; statusFilter = state ? state.status : '';
+  }
+  function restoreListPosition(token) {
+    const scope = listScope(), state = rememberedList(), target = selectedListTarget;
+    if (!state) return;
+    const restore = function () {
+      if (!valid(token) || scope !== listScope() || $('#asset-list-panel').hasClass('d-none')) return;
+      if (target && target.isConnected !== false && typeof target.focus === 'function') target.focus({ preventScroll: true });
+      if (typeof window.scrollTo === 'function') window.scrollTo(0, state.scroll);
+    };
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(restore); else restore();
+  }
   function scopeKey(type, id) { return [projectId, qaContext && qaContext.actorId, type, id || 'create'].join(':'); }
   function unknown(failure) { return !failure.status || failure.status >= 500; }
   function reconcileSavedUpdate(value) {
@@ -91,11 +128,17 @@
     $('#asset-primary-actions').before($('<div id="asset-ready-panel" class="alert alert-info d-none" role="status">').append(
       $('<p id="asset-ready-checks" class="mb-2">'),
       $('<button id="asset-ready" type="button" class="btn btn-primary btn-sm">')));
-    $('#trace-form').append($('<label id="trace-search-label" for="trace-search" class="form-label mt-2">'),
-      $('<input id="trace-search" type="search" class="form-control">'));
+    $('#trace-target-label').before($('<label id="trace-search-label" for="trace-search" class="form-label mt-2">'),
+      $('<input id="trace-search" type="search" class="form-control">'),
+      $('<p id="trace-picker-help" class="text-secondary small mt-2 d-none" role="status">'));
+    $('#asset-filter-count').after($('<button id="asset-filter-reset" type="button" class="btn btn-link btn-sm mb-2 d-none">').on('click', function () {
+      searchText = ''; statusFilter = ''; rememberListPosition(); renderList(); $('#asset-search').trigger('focus');
+    }));
+    $('#asset-detail').before($('<section id="asset-workflow-next" class="workflow-next d-none" aria-live="polite">'),
+      $('<nav id="requirement-section-nav" class="detail-section-nav d-none">'));
     translateExtras();
-    $('#asset-search').on('input', function () { searchText = $(this).val(); renderList(); });
-    $('#asset-status-filter').on('change', function () { statusFilter = $(this).val(); renderList(); });
+    $('#asset-search').on('input', function () { searchText = $(this).val(); rememberListPosition(); renderList(); });
+    $('#asset-status-filter').on('change', function () { statusFilter = $(this).val(); rememberListPosition(); renderList(); });
     $('#trace-search').on('input', renderTraceCandidates);
     $('#asset-description-template').on('click', function () {
       if (!canWrite() || writing || view !== 'requirements') return;
@@ -103,7 +146,10 @@
       if (field.val().trim() && !window.confirm(t('r2Assets.replaceTemplate', null, 'Replace this description with an editable template?'))) return;
       field.val(t('r2Assets.requirementTemplate', null, 'User need:\nAs a …, I want to …, so that …\n\nAcceptance criteria:\n1. Given …, when …, then …\n2. Boundary / error case: …')).trigger('focus');
     });
-    $('#asset-ready').on('click', checkAndReady);
+    $('#asset-ready').on('click', function () {
+      if (view === 'test-cases' && detail && readyProblems(detail).length) return completeCaseSteps();
+      return checkAndReady();
+    });
     $('#asset-form-check-read').on('click', checkFormLatest);
     $('#asset-use-latest-version').on('click', function () {
       if (!editing || !latestFormValue || !canWrite() || writing || formCheckLoading || latestFormValue.row.status === 'ARCHIVED') return;
@@ -117,7 +163,16 @@
     guard();
   }
   function translateExtras() {
-    $('#asset-search-label').text(t('r2Assets.search', null, 'Search saved items'));
+    root.toggleClass('requirements-workspace', view === 'requirements');
+    $('#asset-search-label').text(t(view === 'requirements' ? 'requirements.search' : 'r2Assets.search', null, view === 'requirements' ? 'Search requirements' : 'Search saved items'));
+    $('#asset-filter-reset').text(t('requirements.clearFilters', null, 'Clear filters'));
+    $('#asset-trace-title').text(t(view === 'requirements' ? 'requirements.linkedCases' : 'shell.traceability'));
+    $('#trace-add-button').text(t(view === 'requirements' ? 'requirements.linkExisting' : 'shell.linkItem'));
+    $('#asset-edit').text(t(view === 'requirements' ? 'assets.editRequirement' : 'common.edit'));
+    $('#asset-edit').removeClass('btn-primary').addClass('btn-outline-secondary');
+    $('#asset-description-label').text(t(view === 'requirements' ? 'requirements.description' : 'common.description'));
+    $('#asset-description').attr('rows', view === 'requirements' ? '7' : '3');
+    $('#trace-submit').text(t(view === 'requirements' ? 'requirements.linkSelected' : 'shell.link'));
     $('#asset-search').attr('placeholder', t(view === 'requirements' ? 'assets.searchRequirements' : 'assets.searchCases', null,
       view === 'requirements' ? 'Filter existing requirements by title, key or description' : 'Filter existing cases by title, key or description'));
     $('#asset-status-filter-label').text(t('common.status', null, 'Status'));
@@ -125,14 +180,14 @@
     $('#asset-description-template').text(t('r2Assets.useTemplate', null, 'Use acceptance criteria template'));
     $('#asset-ready').text(t('r2Assets.checkReady', null, 'Check and mark Ready'));
     $('#asset-trace-load').text(t('r2Assets.viewCoverage', null, 'View requirement coverage'));
-    $('#trace-search-label').text(t('r2Assets.searchCandidates', null, 'Search link candidates'));
+    $('#trace-search-label').text(t(view === 'requirements' ? 'requirements.searchCases' : 'r2Assets.searchCandidates', null, 'Search link candidates'));
     $('#asset-form-check-read').text(t('r2Assets.checkLatest', null, 'Read latest saved definition'));
     $('#asset-use-latest-version').text(t('r2Assets.useLatestVersion', null, 'I reviewed it — keep my draft with this version'));
     $('#asset-source-retry').text(t('r2Assets.retrySourceRead', null, 'Read source requirement again'));
     renderSourceContext(); renderFormFeedback();
     if (latestFormValue) renderLatestSummary(latestFormValue);
     renderFormGuidance();
-    if (!$('#asset-form').hasClass('d-none')) $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save case') : t('common.save', null, 'Save'));
+    if (!$('#asset-form').hasClass('d-none')) $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save case') : t('requirements.save', null, 'Save requirement'));
     const statuses = view === 'requirements' ? ['DRAFT', 'ACTIVE', 'ARCHIVED'] : ['DRAFT', 'READY', 'ARCHIVED'];
     $('#asset-status-filter').empty().append($('<option>').val('').text(t('r2Assets.allStates', null, 'All states')));
     statuses.forEach(function (value) { $('#asset-status-filter').append($('<option>').val(value).text(label(value))); });
@@ -141,7 +196,7 @@
   function renderFormGuidance() {
     $('#asset-form-guidance').text(editing
       ? t(view === 'test-cases' ? 'assets.definitionChangeHint' : 'assets.requirementChangeHint')
-      : t(view === 'test-cases' ? 'assets.newCaseHint' : 'assets.newRequirementHint', null,
+      : t(view === 'test-cases' ? 'assets.newCaseHint' : 'requirements.createHint', null,
         view === 'test-cases' ? 'Enter the case and its steps, then save the draft.' : 'Describe the requirement and acceptance criteria. After saving, you can generate test cases with AI.'));
   }
   function loadPermissions(force) {
@@ -245,12 +300,21 @@
       .attr('href', nav ? nav.href(nextView, context) : '#' + nextView).text(text);
     link.on('click', function (event) {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || (event.button != null && event.button !== 0)) return;
+      if (!$('#asset-list-panel').hasClass('d-none')) rememberListPosition(context.requirementId || context.testCaseId);
       if (nav) { event.preventDefault(); nav.open(nextView, context); }
       else if (nextView === view && (context.requirementId || context.testCaseId)) {
         event.preventDefault(); openDetail(context.requirementId || context.testCaseId);
       }
     });
     return link;
+  }
+  function syncAssetPrimaryEmphasis() {
+    const inlineTask = !$('#asset-detail-panel').hasClass('d-none') && (aiCasesOpen || !$('#trace-form').hasClass('d-none'));
+    $('#asset-edit, #asset-ready, #asset-primary-actions a, #asset-primary-actions button, #asset-workflow-next a, #asset-workflow-next button').each(function () {
+      const button = $(this);
+      if (button.hasClass('asset-primary-demoted')) button.removeClass('asset-primary-demoted btn-outline-primary').addClass('btn-primary');
+      if (inlineTask && button.hasClass('btn-primary')) button.removeClass('btn-primary').addClass('btn-outline-primary asset-primary-demoted');
+    });
   }
   function updateControls() {
     $('#asset-new').prop('disabled', !canWrite() || writing);
@@ -260,15 +324,19 @@
     $('#asset-use-latest-version').prop('disabled', writing || formCheckLoading || !canWrite());
     $('#asset-source-retry').prop('disabled', writing || sourceRequirementState === 'loading');
     $('#asset-ready').prop('disabled', !writable() || writing || (detail && detail.row.status === 'READY') || uncertainWrites.has(scopeKey('ready', detail && detail.row.id)));
-    $('#trace-add-button').prop('disabled', !writable() || writing || traceState !== 'loaded');
-    $('#trace-submit').prop('disabled', !writable() || writing || traceState !== 'loaded' || !$('#trace-target').val());
+    $('#trace-add-button').toggleClass('d-none', view === 'requirements').prop('disabled', !writable() || writing || traceState !== 'loaded' || aiCasesOpen);
+    $('#trace-submit').prop('disabled', !writable() || writing || traceState !== 'loaded' || aiCasesOpen || !$('#trace-target').val());
     $('#asset-traces button, #asset-primary-actions a').attr('aria-disabled', writing ? 'true' : 'false');
     $('#asset-traces button, #asset-primary-actions button').prop('disabled', writing);
+    $('#requirement-link-open').prop('disabled', !writable() || writing || traceState !== 'loaded' || aiCasesOpen);
+    $('#requirement-ai-open').prop('disabled', !writable() || writing || !$('#trace-form').hasClass('d-none'));
+    $('#asset-workflow-next button').prop('disabled', writing);
     $('#asset-partial-link-retry').prop('disabled', writing || !canWrite());
     $('#asset-permission-note').toggleClass('d-none', !!canWrite()).text(permissionState === 'loading' ? t('r2Assets.permissionsLoading', null, 'Checking project permissions…')
       : permissionState !== 'loaded' ? t('r2Assets.permissionsUnknown', null, 'Permissions could not be verified. Reopen the project after signing in; changes are disabled.')
       : canWrite() ? ''
       : t('r2Assets.readerRole', { role: label(qaContext.projectRole || qaContext.systemRole) }, 'Read-only access. Ask a project tester or administrator to make changes.'));
+    syncAssetPrimaryEmphasis();
   }
   function conflict(failure) { return failure.status === 409 ? t('assets.conflict', null,
     'This item changed or cannot be edited in its current state. Reload its latest details before trying again.') : failure.message || t('r2Assets.requestFailed', null, 'The request could not be completed. Check your session and reload the saved state.'); }
@@ -297,19 +365,23 @@
   function reset() {
     if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
     generation++;
+    renderedListScope = null; selectedListTarget = null; aiCasesOpen = false;
     rows = [];
     detail = null;
     detailId = null;
     currentLinks = [];
     editing = false;
-    traceState = 'idle'; writing = false; formContext = {}; pendingLink = null; formBaseline = null; traceCandidates = []; formNeedsReview = false; latestFormValue = null; formCheckLoading = false;
+    traceState = 'idle'; writing = false; formContext = {}; pendingLink = null; formBaseline = null; traceCandidates = []; traceOpener = null; formNeedsReview = false; latestFormValue = null; formCheckLoading = false;
     recoveryDescriptor = null; sourceRequirement = null; sourceRequirementState = 'none'; sourceFailure = null; sourceRequest++;
     root.find('#asset-list, #asset-detail, #asset-steps, #asset-traces, #step-editor').empty();
     $('#asset-save, #trace-add-button, #trace-submit').prop('disabled', false);
     root.find('#asset-list-panel, #asset-detail-panel, #asset-form, #trace-form').addClass('d-none');
     $('#asset-list-status').text('');
     $('#asset-primary-actions').empty();
+    $('#requirement-coverage-summary').empty().addClass('d-none');
     $('#asset-ready-panel').addClass('d-none');
+    $('#asset-workflow-next, #requirement-section-nav').empty().addClass('d-none');
+    $('#asset-trace-section').removeClass('d-none');
     $('#asset-form-recovery').addClass('d-none');
     $('#asset-source-retry').addClass('d-none');
     $('#asset-readonly-note, #asset-trace-load, #asset-trace-retry, #asset-partial-link-panel').addClass('d-none');
@@ -321,6 +393,9 @@
     $('#asset-detail-panel').toggleClass('d-none', which !== 'detail');
     $('#asset-form').toggleClass('d-none', which !== 'form');
     $('#trace-form').addClass('d-none');
+    $('#asset-workflow-next, #requirement-section-nav').toggleClass('d-none', which !== 'detail' || view !== 'requirements');
+    if (view !== 'requirements') $('#asset-trace-section').removeClass('d-none');
+    syncAssetPrimaryEmphasis();
   }
   function badge(status) {
     const colors = { DRAFT: 'secondary', ACTIVE: 'success', READY: 'success', ARCHIVED: 'secondary', CONFIRMED: 'success', NEEDS_REVIEW: 'warning', REMOVED: 'secondary' };
@@ -336,6 +411,7 @@
 
   async function list() {
     if (!projectId || !active()) return;
+    rememberListPosition(); renderedListScope = null; restoreListFilters();
     if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
     const token = ++generation;
     detail = null; detailId = null; writing = false; formBaseline = null;
@@ -345,6 +421,7 @@
     $('#asset-list-title').text(view === 'requirements' ? t("common.requirements", null, 'Requirements') : t("common.testCases", null, 'Test cases'));
     $('#asset-new').text(view === 'requirements' ? t("assets.createRequirement", null, 'Create requirement') : t("assets.createTestCase", null, 'Create test case'));
     $('#asset-list').empty();
+    $('#asset-filter-reset').addClass('d-none');
     $('#asset-list-filters, #asset-filter-count').addClass('d-none');
     $('#asset-list-status').text(t("common.loading", null, 'Loading…'));
     focusHeading('#asset-list-title');
@@ -354,7 +431,7 @@
       rows = result;
       $('#asset-list-status').text(result.length ? t('assets.itemCount', { count: window.I18n.formatNumber(result.length) }, '{count} item(s)')
         : t('assets.noItemsYetCreateTheFirstOne', { action: $('#asset-new').text() }, 'No items yet. Click “{action}” to add the first one.'));
-      translateExtras(); renderList();
+      translateExtras(); renderList(); restoreListPosition(token);
     } catch (failure) { if (valid(token)) {
       rows = [];
       $('#asset-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(failure.message, true);
@@ -363,23 +440,51 @@
     } }
   }
   function renderList() {
+    renderedListScope = listScope();
+    selectedListTarget = null;
+    const remembered = rememberedList();
     const query = searchText.trim().toLocaleLowerCase();
     const filtered = rows.filter(function (item) { return (!statusFilter || item.status === statusFilter)
       && (!query || [key(item), item.title, item.description || ''].join(' ').toLocaleLowerCase().includes(query)); });
     $('#asset-search').val(searchText); $('#asset-status-filter').val(statusFilter);
     $('#asset-list-filters, #asset-filter-count').toggleClass('d-none', !rows.length);
-    $('#asset-list').empty();
+    $('#asset-list').empty().toggleClass('requirement-list', view === 'requirements');
+    $('#asset-filter-reset').toggleClass('d-none', !searchText && !statusFilter);
+    if (view === 'requirements' && filtered.length) {
+      $('#asset-list').attr('role', 'table').attr('aria-label', t('common.requirements'));
+      const heading = $('<div class="requirement-list-heading" role="row">');
+      ['requirements.requirement', 'common.status', 'common.priority', 'common.updated'].forEach(function (name) {
+        heading.append($('<span role="columnheader">').text(t(name)));
+      });
+      $('#asset-list').append(heading);
+    } else $('#asset-list').removeAttr('role').removeAttr('aria-label');
     $('#asset-filter-count').text(t('r2Assets.filterCount', { shown: filtered.length, total: rows.length }, 'Showing {shown} of {total} saved items.'));
     if (rows.length && !filtered.length) $('#asset-list').append($('<p class="text-secondary">').text(t('r2Assets.noMatches', null, 'No matching items. Clear the search or change the state filter.')));
       filtered.forEach(function (item) {
-        const card = $('<div class="asset-list-row">');
+        if (view === 'requirements') {
+          const context = { projectId: projectId, requirementId: String(item.id) };
+          const title = linkTo(view, context, item.title).removeClass('btn btn-outline-secondary btn-sm').addClass('requirement-title')
+            .attr('aria-label', key(item) + ' · ' + item.title).prepend($('<span class="requirement-key">').text(key(item)));
+          if (remembered && sameId(remembered.selectedId, item.id)) selectedListTarget = title[0];
+          $('#asset-list').append($('<div class="requirement-list-row" role="row">').attr('data-asset-id', item.id)
+            .toggleClass('is-recently-viewed', !!remembered && sameId(remembered.selectedId, item.id)).append(
+            $('<div class="requirement-list-main" role="cell">').append(title,
+              $('<p class="requirement-preview">').text(item.description || t('common.noDescription'))),
+            $('<div class="requirement-state" role="cell">').append(badge(item.status)),
+            $('<div class="requirement-priority" role="cell">').attr('aria-label', t('common.priority')).text(label(item.priority)),
+            $('<div class="requirement-updated" role="cell">').text(window.I18n.formatDateTime(item.updatedAt))));
+          return;
+        }
+        const context = { projectId: projectId, testCaseId: String(item.id) };
+        const title = linkTo(view, context, key(item) + ' · ' + item.title).removeClass('btn btn-outline-secondary btn-sm').addClass('asset-title-link');
+        const card = $('<div class="asset-list-row">').attr('data-asset-id', item.id)
+          .toggleClass('is-recently-viewed', !!remembered && sameId(remembered.selectedId, item.id));
         const summary = $('<div class="asset-list-summary">').append(
-          $('<strong>').text(key(item) + ' · ' + item.title),
+          title,
           $('<p class="mb-1 text-secondary">').text(item.description || t("common.noDescription", null, 'No description')));
         const meta = $('<div class="asset-list-meta">').append(badge(item.status),
           $('<span>').text(label(item.priority)), $('<small>').text('v' + item.version));
-        const context = { projectId: projectId };
-        context[view === 'requirements' ? 'requirementId' : 'testCaseId'] = String(item.id);
+        if (remembered && sameId(remembered.selectedId, item.id)) selectedListTarget = title[0];
         const open = linkTo(view, context, t('assets.viewItem', { key: key(item) }, 'View {key}'));
         card.append(summary, meta, open);
         $('#asset-list').append(card);
@@ -393,7 +498,9 @@
   }
 
   async function openDetail(id, message) {
+    rememberListPosition(id);
     const token = ++generation;
+    if (!sameId(detailId, id)) aiCasesOpen = false;
     detail = null;
     detailId = String(id);
     currentLinks = [];
@@ -405,7 +512,9 @@
     focusHeading('#asset-detail-title');
     $('#asset-detail, #asset-steps, #asset-traces').empty();
     $('#asset-primary-actions').empty();
+    $('#requirement-coverage-summary').empty().addClass('d-none');
     $('#asset-ready-panel').addClass('d-none');
+    $('#asset-workflow-next, #requirement-section-nav').empty().addClass('d-none');
     $('#asset-readonly-note, #asset-trace-load, #asset-trace-retry, #asset-partial-link-panel').addClass('d-none');
     $('#asset-trace-status').text(''); updateControls();
     if (pendingLink && sameId(pendingLink.caseId, id)) showPendingLink();
@@ -416,7 +525,8 @@
       detail = { row: row, steps: view === 'test-cases' ? current.steps : [] };
       const reconciled = reconcileSavedUpdate(detail);
       $('#asset-detail-title').text(key(row) + ' · ' + row.title);
-      $('#asset-detail').append($('<dl class="asset-fields">').append(
+      if (view === 'requirements') renderRequirement(row);
+      else $('#asset-detail').append($('<dl class="asset-fields">').append(
         statusField(row.status), field(t("common.priority", null, 'Priority'), label(row.priority)),
         field(t("common.description", null, 'Description'), row.description, true), field(t("common.version", null, 'Version'), row.version), field(t("common.updated", null, 'Updated'), window.I18n.formatDateTime(row.updatedAt))));
       $('#asset-steps-section').toggleClass('d-none', view !== 'test-cases');
@@ -427,8 +537,8 @@
       $('#asset-readonly-note').text(t(projectArchived ? 'assets.projectReadOnly' : 'assets.readOnly'))
         .toggleClass('d-none', !projectArchived && row.status !== 'ARCHIVED');
       renderPrimaryActions(); renderReady(); updateControls();
-      $('#trace-help').text(view === 'requirements' ? t("assets.linkedTestCasesIncludingRemovedHistory", null, 'Linked test cases, including removed history.') : t("assets.linkedRequirementsIncludingRemovedHistory", null, 'Linked requirements, including removed history.'));
-      $('#trace-help').append(document.createTextNode(' ' + t('assets.traceMeaning', null, 'Link status describes coverage review, not an execution result.')));
+      $('#trace-help').text(view === 'requirements' ? t('requirements.coverageHelp')
+        : t('assets.linkedRequirementsIncludingRemovedHistory') + ' ' + t('assets.traceMeaning'));
       if (message) notice(message);
       else if (reconciled) notice(t('r2Assets.saveObserved', null, 'The previously uncertain save is now visible in the saved definition. No request was repeated.'));
       if (pendingLink && sameId(pendingLink.caseId, row.id)) showPendingLink();
@@ -446,10 +556,79 @@
         }));
     } }
   }
+  function renderRequirement(row) {
+    requirementSection = requirementSections.get(projectId + '/' + row.id) || 'content';
+    $('#asset-detail').append($('<div class="requirement-meta">').append(badge(row.status),
+      $('<span>').text(t('common.priority') + ': ' + label(row.priority)),
+      $('<span>').text(t('common.version') + ' ' + row.version),
+      $('<span>').text(t('common.updated') + ' ' + window.I18n.formatDateTime(row.updatedAt))),
+      $('<section class="requirement-description">').append($('<h3>').text(t('requirements.description')),
+        $('<p>').text(row.description || t('requirements.noDescription'))));
+    const token = generation, id = row.id;
+    $('#requirement-section-nav').empty().removeClass('d-none').attr('aria-label', t('uxAssets.requirementSections', null, 'Requirement sections')).append(
+      $('<button id="requirement-content-show" type="button" aria-controls="asset-detail">').text(t('uxAssets.requirementContent', null, 'Requirement content'))
+        .on('click', function () { if (valid(token) && detail && sameId(detail.row.id, id)) setRequirementSection('content'); }),
+      $('<button id="requirement-links-show" type="button" aria-controls="asset-trace-section">')
+        .on('click', function () { if (valid(token) && detail && sameId(detail.row.id, id)) setRequirementSection('links'); }));
+    updateRequirementSections();
+  }
+  function setRequirementSection(section) {
+    if (view !== 'requirements' || !detail) return;
+    requirementSection = section; requirementSections.set(projectId + '/' + detail.row.id, section); updateRequirementSections();
+  }
+  function updateRequirementSections() {
+    if (view !== 'requirements' || !detail) return;
+    $('#asset-detail .requirement-description').toggleClass('d-none', requirementSection !== 'content');
+    $('#asset-trace-section').toggleClass('d-none', requirementSection !== 'links');
+    $('#requirement-content-show').attr('aria-pressed', String(requirementSection === 'content'));
+    $('#requirement-links-show').attr('aria-pressed', String(requirementSection === 'links')).text(traceState === 'loaded'
+      ? t('uxAssets.linkedCaseCount', { count: currentLinks.filter(function (entry) { return entry.status !== 'REMOVED'; }).length }, 'Linked cases ({count})')
+      : t('requirements.linkedCases', null, 'Linked test cases'));
+  }
+  function renderRequirementNext() {
+    const target = $('#asset-workflow-next').empty().toggleClass('d-none', view !== 'requirements' || !detail);
+    if (view !== 'requirements' || !detail) return;
+    const row = detail.row, token = generation, id = row.id;
+    const actions = $('<div class="workflow-next-actions">');
+    const guarded = function (fn) { return function () { if (valid(token) && detail && sameId(detail.row.id, id) && !writing) fn(); }; };
+    let message;
+    if (row.status === 'ARCHIVED' || projectArchived) message = t('requirements.archivedHint');
+    else if (row.status === 'DRAFT') {
+      message = t('uxAssets.requirementDraftNext', null, 'This requirement is still a draft. Review its acceptance criteria, then activate it to count effective coverage.');
+      if (writable()) actions.append($('<button id="requirement-activate-edit" type="button" class="btn btn-outline-primary">')
+        .text(t('uxAssets.editAndActivate', null, 'Review and activate')).on('click', guarded(function () {
+          if (!writable() || !confirmDiscard()) return;
+          showForm(true); $('#asset-status').val('ACTIVE').trigger('focus');
+        })));
+    } else if (traceState !== 'loaded') message = t('uxAssets.coveragePending', null, 'Read the linked cases to see the next coverage task.');
+    else {
+      const current = currentLinks.filter(function (entry) { return entry.status !== 'REMOVED'; });
+      const pending = current.filter(function (entry) { return entry.status === 'NEEDS_REVIEW' && entry.testCase.status !== 'ARCHIVED'; });
+      const draft = current.find(function (entry) { return entry.testCase.status === 'DRAFT'; });
+      const covered = current.filter(function (entry) { return entry.status === 'CONFIRMED' && entry.testCase.status === 'READY'; });
+      if (!current.length) message = t('uxAssets.requirementNeedsCases', null, 'No cases are linked yet. Add cases to define how this requirement will be verified.');
+      else if (pending.length) {
+        message = t('uxAssets.coverageNeedsReview', { count: pending.length }, '{count} linked case(s) still need coverage review. Open the linked cases and confirm that they verify this requirement.');
+        actions.append($('<button id="requirement-review-links" type="button" class="btn btn-primary">')
+          .text(t('uxAssets.reviewCoverage', null, 'Review coverage')).on('click', guarded(function () { setRequirementSection('links'); })));
+      } else if (draft) {
+        message = t('uxAssets.coverageDraftCase', { title: draft.testCase.title }, '“{title}” is still a draft and does not count as effective coverage. Complete its steps and mark it Ready.');
+        actions.append(linkTo('test-cases', Object.assign(originContext(), { testCaseId: String(draft.testCase.id), sourceRequirementId: String(row.id) }),
+          t('uxAssets.completeLinkedCase', null, 'Complete linked case'), true));
+      } else if (covered.length) {
+        message = t('uxAssets.coverageReady', { count: covered.length }, '{count} case(s) provide effective coverage. Open a Ready case to add it to a test plan.');
+        actions.append($('<button type="button" class="btn btn-primary">').text(t('uxAssets.viewLinkedCases', null, 'View linked cases'))
+          .on('click', guarded(function () { setRequirementSection('links'); })));
+      } else message = t('uxAssets.coverageUnavailableCases', null, 'The linked cases are archived or not eligible for coverage. Add a current case to continue.');
+    }
+    if (routeContext().defectId) actions.find('a, button').removeClass('btn-primary').addClass('btn-outline-secondary');
+    target.append($('<p class="mb-0">').text(message), actions);
+    syncAssetPrimaryEmphasis();
+  }
   function renderPrimaryActions() {
     if (window.VeriqraAiCases) window.VeriqraAiCases.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable() } : null);
     const current = routeContext();
-    const target = $('#asset-primary-actions').empty();
+    const target = $('#asset-primary-actions').empty().toggleClass('requirement-actions', view === 'requirements');
     if (current.sourceRequirementId && view === 'test-cases') target.append(linkTo('requirements',
       Object.assign(originContext(), { requirementId: current.sourceRequirementId, sourceTestCaseId: String(detail.row.id) }), t('assets.backToRequirement')));
     if (current.sourceTestCaseId && view === 'requirements') target.append(linkTo('test-cases',
@@ -457,7 +636,7 @@
     const returnToDefect = !!current.defectId;
     if (returnToDefect) target.append(linkTo('defects', { projectId: projectId, defectId: current.defectId },
       t('assets.backToDefect', null, 'Return to defect'), true));
-    const returnToPlan = !!current.sourcePlanId && view === 'test-cases' && writable();
+    const returnToPlan = !returnToDefect && !!current.sourcePlanId && view === 'test-cases' && writable();
     if (current.sourcePlanId) {
       const destination = { projectId: projectId, planId: current.sourcePlanId };
       if (view === 'test-cases') destination.sourceTestCaseId = String(detail.row.id);
@@ -466,11 +645,28 @@
     }
     if (current.runId && current.runCaseId) target.append(linkTo('runs',
       { projectId: projectId, runId: current.runId, runCaseId: current.runCaseId, attemptId: current.attemptId }, t('shell.backToRun')));
-    if (!writable()) return;
-    if (returnToPlan || returnToDefect) return;
-    target.append(view === 'requirements' ? linkTo('test-cases',
-      { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('assets.createLinkedTestCase'), false)
-      : linkTo('test-plans', { projectId: projectId, action: 'create', sourceTestCaseId: String(detail.row.id) }, t('assets.createPlanWithCase'), true));
+    $('#asset-edit').removeClass('btn-primary btn-outline-primary asset-primary-demoted').addClass('btn-outline-secondary');
+    if (view === 'requirements') {
+      $('#asset-edit').toggleClass('btn-primary', !!writable() && detail.row.status === 'DRAFT' && !returnToDefect)
+        .toggleClass('btn-outline-secondary', !writable() || detail.row.status !== 'DRAFT' || returnToDefect);
+      renderRequirementNext();
+    }
+    if (!writable()) { syncAssetPrimaryEmphasis(); return; }
+    if (returnToPlan || returnToDefect) { syncAssetPrimaryEmphasis(); return; }
+    if (view === 'requirements') {
+      if (window.VeriqraAiCases) target.append($('<button id="requirement-ai-open" type="button" class="btn btn-outline-primary" aria-controls="ai-cases-panel">')
+        .text(t('requirements.generateCases')).on('click', function () {
+          if (writable() && !writing && $('#trace-form').hasClass('d-none') && window.VeriqraAiCases) window.VeriqraAiCases.open();
+        }));
+      const hasCurrent = currentLinks.some(function (entry) { return entry.status !== 'REMOVED'; });
+      target.append(linkTo('test-cases', { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('requirements.newCase'), detail.row.status === 'ACTIVE' && traceState === 'loaded' && !hasCurrent).removeClass('btn-sm'),
+        $('<button id="requirement-link-open" type="button" class="btn btn-outline-secondary" aria-controls="trace-form">')
+          .prop('disabled', traceState !== 'loaded').text(t('requirements.linkExisting')).on('click', loadTraceTargets));
+      syncAssetPrimaryEmphasis(); return;
+    }
+    if (detail.row.status === 'READY') target.append(linkTo('test-plans',
+      { projectId: projectId, action: 'create', sourceTestCaseId: String(detail.row.id) }, t('uxAssets.addToPlan', null, 'Add to test plan'), true));
+    syncAssetPrimaryEmphasis();
   }
   function readyProblems(value) {
     const result = [];
@@ -496,12 +692,27 @@
     $('#asset-ready-panel').toggleClass('d-none', !detail || view !== 'test-cases');
     if (!detail || view !== 'test-cases') return;
     const problems = readyProblems(detail);
+    const origin = routeContext(), originPrimary = !!origin.defectId || !!origin.sourcePlanId;
+    $('#asset-ready-panel').removeClass('alert alert-info').addClass('workflow-next');
     $('#asset-ready-checks').text(detail.row.status === 'READY'
       ? t('r2Assets.alreadyReady', null, 'This case is Ready and can be added to a test plan.')
       : (problems.length ? problems.join(' ') : t('r2Assets.readyComplete', null, 'Review the complete steps and mark this case Ready to add it to a plan. Review requirement coverage below.')));
     const lock = uncertainWrites.get(scopeKey('ready', detail.row.id));
     if (lock && detail.row.status === 'READY' && sameReadyDefinition(detail, lock.body) && detail.row.version > lock.body.expectedVersion) uncertainWrites.delete(scopeKey('ready', detail.row.id));
-    $('#asset-ready').toggleClass('d-none', detail.row.status === 'ARCHIVED' || detail.row.status === 'READY');
+    $('#asset-ready').removeClass('asset-primary-demoted').toggleClass('d-none', detail.row.status === 'ARCHIVED' || detail.row.status === 'READY')
+      .toggleClass('btn-primary', !originPrimary).toggleClass('btn-outline-primary', originPrimary)
+      .text(problems.length ? t('uxAssets.completeSteps', null, 'Complete case steps') : t('r2Assets.checkReady'));
+    syncAssetPrimaryEmphasis();
+  }
+  function completeCaseSteps() {
+    if (!writable() || writing || view !== 'test-cases' || !confirmDiscard()) return;
+    const current = detail;
+    showForm(true);
+    if (!current.row.title || !current.row.title.trim()) { $('#asset-title').trigger('focus'); return; }
+    if (!current.steps.length) stepRow({});
+    const index = Math.max(0, current.steps.findIndex(function (step) { return !step.action || !step.action.trim() || !step.expectedResult || !step.expectedResult.trim(); }));
+    const missingAction = !current.steps[index] || !current.steps[index].action || !current.steps[index].action.trim();
+    $('#step-editor ' + (missingAction ? '.step-action' : '.step-expected')).eq(index).trigger('focus');
   }
   async function checkAndReady() {
     if (view !== 'test-cases' || !writable() || writing || detail.row.status === 'READY') return;
@@ -542,7 +753,9 @@
     const token = generation;
     const request = ++traceRequest;
     traceState = 'loading'; currentLinks = [];
+    if (view === 'requirements') { renderRequirementNext(); updateRequirementSections(); }
     $('#asset-traces').empty(); $('#trace-form').addClass('d-none');
+    $('#requirement-coverage-summary').empty().addClass('d-none');
     $('#asset-trace-load, #asset-trace-retry').addClass('d-none');
     $('#asset-trace-status').text(t('assets.loadingTraceability', null, 'Loading traceability…')); updateControls();
     try {
@@ -551,6 +764,7 @@
       traceState = 'loaded'; $('#asset-trace-status').text(''); renderLinks(links); updateControls();
     } catch (failure) { if (valid(token) && request === traceRequest && detail && sameId(detail.row.id, id)) {
       traceState = 'error';
+      if (view === 'requirements') { renderRequirementNext(); updateRequirementSections(); }
       $('#asset-trace-status').text(t('assets.traceLoadFailed', null, 'Traceability could not be loaded. Retry before changing links.') + ' ' + failure.message);
       $('#asset-trace-retry').removeClass('d-none'); updateControls();
     } }
@@ -567,8 +781,23 @@
   }
   function renderLinks(links) {
     currentLinks = links;
+    if (view === 'requirements') { renderPrimaryActions(); updateRequirementSections(); }
     const target = $('#asset-traces').empty();
-    if (!links.length) { target.append($('<p class="text-secondary">').text(t("assets.noTraceabilityRecordsYet", null, 'No traceability records yet.'))); return; }
+    let history = null;
+    if (view === 'requirements') {
+      const current = links.filter(function (entry) { return entry.status !== 'REMOVED'; });
+      const pending = current.filter(function (entry) { return entry.status === 'NEEDS_REVIEW'; }).length;
+      const covered = detail.row.status === 'ACTIVE' ? current.filter(function (entry) { return entry.status === 'CONFIRMED' && entry.testCase.status === 'READY'; }).length : 0;
+      $('#requirement-coverage-summary').removeClass('d-none').empty().append($('<p class="requirement-coverage-facts">')
+        .text(t('requirements.coverageCounts', { linked: current.length, pending: pending, covered: covered }, 'Linked {linked} · Needs coverage review {pending} · Effective coverage {covered}')));
+      if (!current.length) target.append($('<p class="text-secondary">').text(t('requirements.noLinkedCases', null, 'No cases linked yet. Generate cases with AI, create a case manually, or link an existing case using the actions above.')));
+      const removed = links.length - current.length;
+      if (removed) history = $('<details class="requirement-link-history">').append($('<summary>').text(t('requirements.removedHistory', { count: removed })));
+    } else $('#requirement-coverage-summary').empty().addClass('d-none');
+    if (!links.length) {
+      if (view !== 'requirements') target.append($('<p class="text-secondary">').text(t('assets.noTraceabilityRecordsYet')));
+      return;
+    }
     links.forEach(function (entry) {
       const row = view === 'requirements' ? entry.testCase : entry.requirement;
       const status = view === 'requirements' ? entry.status : entry.link.status;
@@ -577,17 +806,22 @@
       ['', 'confirm', 'remove'].forEach(function (action) {
         if ((action === 'confirm' && status === 'CONFIRMED') || (action === 'remove' && status === 'REMOVED') || (!action && status !== 'REMOVED')) uncertainWrites.delete(scopeKey('trace-' + action, requirementId + '/' + caseId));
       });
-      const item = $('<div class="asset-link-row">').append(
-        $('<span>').text((view === 'requirements' ? 'TC-' : 'REQ-') + String(row.keyNo).padStart(3, '0') + ' · ' + row.title), badge(status), badge(row.status));
-      item.append(view === 'requirements' ? linkTo('test-cases', Object.assign(originContext(), { testCaseId: String(caseId), sourceRequirementId: String(requirementId) }), t('assets.openTestCase'))
+      const item = $('<div class="asset-link-row">');
+      const summary = view === 'requirements' ? $('<div class="requirement-link-summary">') : item;
+      const actions = view === 'requirements' ? $('<div class="requirement-link-actions">') : item;
+      if (view === 'requirements') item.addClass('requirement-linked-case').append(summary, actions);
+      summary.append($('<span>').text((view === 'requirements' ? 'TC-' : 'REQ-') + String(row.keyNo).padStart(3, '0') + ' · ' + row.title), badge(status), badge(row.status));
+      actions.append(view === 'requirements' ? linkTo('test-cases', Object.assign(originContext(), { testCaseId: String(caseId), sourceRequirementId: String(requirementId) }), t('assets.openTestCase'))
         : linkTo('requirements', Object.assign(originContext(), { requirementId: String(requirementId), sourceTestCaseId: String(caseId) }), t('assets.openRequirement')));
       if (writable() && row.status !== 'ARCHIVED') {
-        if (status === 'NEEDS_REVIEW') item.append(actionButton(t("common.confirm", null, 'Confirm'), 'confirm', requirementId, caseId, row.title));
-        if (status !== 'REMOVED') item.append(actionButton(t("assets.markRemoved", null, 'Mark removed'), 'remove', requirementId, caseId, row.title));
-        if (status === 'REMOVED') item.append(actionButton(t("assets.reattach", null, 'Reattach'), '', requirementId, caseId, row.title));
+        if (status === 'NEEDS_REVIEW') actions.append(actionButton(t(view === 'requirements' ? 'requirements.confirmCoverage' : 'common.confirm'), 'confirm', requirementId, caseId, row.title));
+        if (status !== 'REMOVED') actions.append(actionButton(t(view === 'requirements' ? 'requirements.unlink' : 'assets.markRemoved'), 'remove', requirementId, caseId, row.title));
+        if (status === 'REMOVED') actions.append(actionButton(t("assets.reattach", null, 'Reattach'), '', requirementId, caseId, row.title));
       }
-      target.append(item);
+      if (history && status === 'REMOVED') history.append(item);
+      else target.append(item);
     });
+    if (history) target.append(history);
   }
   function actionButton(text, action, reqId, caseId, name) {
     return $('<button type="button" class="btn btn-outline-secondary btn-sm">').text(text).on('click', async function () {
@@ -669,7 +903,7 @@
     if (view === 'test-cases' && update) detail.steps.forEach(stepRow);
     panels('form');
     $('#asset-description-tools').toggleClass('d-none', view !== 'requirements');
-    $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save case') : t('common.save', null, 'Save'));
+    $('#asset-save').text(view === 'test-cases' ? t('r2Assets.saveDraft', null, 'Save case') : t('requirements.save', null, 'Save requirement'));
     formBaseline = draftValue(); updateControls();
     $('#asset-title').trigger('focus');
     if (!update && view === 'test-cases' && formContext.sourceRequirementId) verifySourceRequirement(generation);
@@ -721,9 +955,11 @@
     }
   }
   function applyRoute(context) {
+    translateExtras();
     const current = context || routeContext();
     if (current.projectId && !sameId(current.projectId, projectId)) return;
     const id = view === 'requirements' ? current.requirementId : current.testCaseId;
+    if (view === 'requirements' && id && current.sourceTestCaseId) requirementSections.set(projectId + '/' + id, 'links');
     if (current.action === 'create' && projectArchived) {
       list(); notice(t('assets.projectReadOnly', null, 'This project is archived and read-only.'), true);
     } else if (current.action === 'create') { showForm(false, current); updateControls(); }
@@ -735,23 +971,26 @@
   document.addEventListener('veriqra:ai-saved', function (event) {
     const saved = event.detail;
     if (saved && view === 'requirements' && detail && sameId(saved.projectId, projectId)
-      && sameId(saved.requirementId, detail.row.id) && $('#asset-form').hasClass('d-none')) loadTraceability(true);
+      && sameId(saved.requirementId, detail.row.id) && $('#asset-form').hasClass('d-none')) {
+      setRequirementSection('links'); loadTraceability(true);
+    }
   });
   $(document).on('veriqra:project', function (event) {
+    rememberListPosition();
     reset();
     const project = event.originalEvent.detail.project;
     projectId = project ? String(project.id) : null;
     projectArchived = !!project && project.status === 'ARCHIVED';
     qaContext = null; permissionState = 'loading';
-    searchText = ''; statusFilter = '';
     const current = routeContext();
     if (current.view) view = current.view;
+    restoreListFilters();
     if (projectId && active()) applyRoute();
     loadPermissions();
   });
   $(document).on('veriqra:view', function (event) {
     const next = event.originalEvent.detail.view;
-    reset(); view = next; searchText = ''; statusFilter = ''; translateExtras(); updateControls();
+    rememberListPosition(); reset(); view = next; restoreListFilters(); translateExtras(); updateControls();
     if (projectId && active()) applyRoute(event.originalEvent.detail.context);
   });
   document.addEventListener('veriqra:localechange', function () {
@@ -792,13 +1031,26 @@
       else if (detail) openDetail(detail.row.id);
     });
   });
+  document.addEventListener('veriqra:ai-cases-visibility', function (event) {
+    const owner = event.detail || {};
+    if (view !== 'requirements' || !detail || !sameId(owner.projectId, projectId) || !sameId(owner.requirementId, detail.row.id)) return;
+    aiCasesOpen = owner.open === true; updateControls();
+  });
   $('#asset-back').on('click', function () { if (!writing && confirmDiscard()) return list(); });
   $('#asset-new').on('click', function () {
     if (!canWrite() || writing || !confirmDiscard()) return;
     selectContext({ projectId: projectId, action: 'create' }); showForm(false);
   });
   $('#asset-edit').on('click', function () { if (detail) showForm(true); });
-  $('#asset-form-cancel').on('click', function () { if (writing || !confirmDiscard()) return; if (editing && detail) openDetail(detail.row.id); else list(); });
+  $('#asset-form-cancel, #asset-form-cancel-bottom').on('click', function () {
+    if (writing) return;
+    if (!editing && view === 'test-cases' && formContext.sourceRequirementId && navigation()) {
+      // Cross-view navigation owns the shared draft confirmation and preserves the source context.
+      navigation().open('requirements', Object.assign(originContext(), { requirementId: String(formContext.sourceRequirementId) })); return;
+    }
+    if (!confirmDiscard()) return;
+    if (editing && detail) openDetail(detail.row.id); else list();
+  });
   $('#step-add').on('click', function () { stepRow({}); });
   $('#asset-trace-load, #asset-trace-retry').on('click', loadTraceability);
   $('#asset-partial-link-retry').on('click', async function () {
@@ -874,8 +1126,10 @@
       }
     } finally { if (token === generation) { writing = false; button.prop('disabled', false); updateControls(); } }
   });
-  async function loadTraceTargets() {
-    if (!writable() || writing || traceState !== 'loaded') return;
+  async function loadTraceTargets(event) {
+    if (!writable() || writing || traceState !== 'loaded' || aiCasesOpen) return;
+    if (view === 'requirements') setRequirementSection('links');
+    if (event && event.currentTarget) traceOpener = event.currentTarget;
     const token = generation;
     const selection = ++tracePickerGeneration;
     const current = function () { return valid(token) && selection === tracePickerGeneration; };
@@ -883,6 +1137,8 @@
     const target = $('#trace-target').empty().prop('disabled', true)
       .append($('<option>').val('').text(t('common.loading', null, 'Loading…')));
     $('#trace-form').removeClass('d-none');
+    updateControls();
+    $('#trace-picker-help').empty().addClass('d-none');
     $('#trace-search').val(''); traceCandidates = [];
     focusHeading('#trace-target-label');
     try {
@@ -893,9 +1149,9 @@
         return String(view === 'requirements' ? link.testCase.id : link.requirement.id);
       });
       const eligible = options.filter(function (row) { return row.status !== 'ARCHIVED' && !linkedIds.includes(String(row.id)); });
-      traceCandidates = eligible; traceTargetType = type; renderTraceCandidates();
-      if (!target.children().length) target.append($('<option>').val('').text(t(!options.length
-        ? (view === 'requirements' ? 'assets.noCasesForLink' : 'assets.noRequirementsForLink') : 'assets.noEligibleLinks')));
+      traceCandidates = eligible; traceTargetType = type;
+      traceEmptyKey = !options.length ? (view === 'requirements' ? 'assets.noCasesForLink' : 'assets.noRequirementsForLink') : 'assets.noEligibleLinks';
+      renderTraceCandidates();
       $('#trace-target-label').text(view === 'requirements' ? t("assets.testCase", null, 'Test case') : t("assets.requirement", null, 'Requirement'));
       $('#trace-submit').prop('disabled', !eligible.length);
       $('#trace-form').removeClass('d-none');
@@ -915,14 +1171,20 @@
     const target = $('#trace-target').empty().prop('disabled', !candidates.length);
     candidates.forEach(function (row) { target.append($('<option>').val(row.id).text((traceTargetType === 'test-cases' ? 'TC-' : 'REQ-') + String(row.keyNo).padStart(3, '0') + ' · ' + row.title + ' · ' + label(row.status))); });
     if (candidates.some(function (row) { return sameId(row.id, selected); })) target.val(selected);
-    if (!candidates.length) target.append($('<option>').val('').text(t('r2Assets.noMatches', null, 'No matching items. Clear the search or change the state filter.')));
+    $('#trace-picker-help').toggleClass('d-none', !!candidates.length).text(candidates.length ? '' : t(query ? 'r2Assets.noMatches' : traceEmptyKey));
+    if (!candidates.length) target.append($('<option>').val('').text(t(query ? 'r2Assets.noMatches' : traceEmptyKey)));
     updateControls();
   }
   $('#trace-add-button').on('click', loadTraceTargets);
-  $('#trace-cancel').on('click', function () { ++tracePickerGeneration; $('#trace-form').addClass('d-none'); notice(''); updateControls(); $('#trace-add-button').trigger('focus'); });
+  $('#trace-cancel').on('click', function () {
+    ++tracePickerGeneration; $('#trace-form').addClass('d-none'); notice(''); updateControls();
+    if (traceOpener && traceOpener.isConnected !== false) $(traceOpener).trigger('focus');
+    else $('#trace-add-button').trigger('focus');
+    traceOpener = null;
+  });
   $('#trace-form').on('submit', async function (event) {
     event.preventDefault();
-    if (!writable() || writing || traceState !== 'loaded' || !$('#trace-target').val()) return;
+    if (!writable() || writing || traceState !== 'loaded' || aiCasesOpen || !$('#trace-target').val()) return;
     const token = generation;
     const button = $('#trace-submit').prop('disabled', true);
     const reqId = view === 'requirements' ? detail.row.id : $('#trace-target').val();

@@ -321,6 +321,22 @@ test('already authenticated login and fresh login both reject external returnTo 
   }
 });
 
+test('fresh and existing sessions return to approved admin pages without carrying arbitrary query data', async () => {
+  for (const base of ['https://example.test/', 'https://example.test/veriqra/']) {
+    for (const path of ['admin/users.html', 'admin/ai.html']) for (const existing of [true, false]) {
+      const ui = browser({ base, href: base + 'login.html?returnTo=' + encodeURIComponent(base + path + '?ignored=secret#unused') });
+      await ui.loadLogin();
+      if (existing) ui.requests[0].call.resolve(actor());
+      else {
+        ui.requests[0].call.reject(failure(401));
+        ui.$('#username').val('synthetic-user'); ui.$('#password').val('synthetic-test-value'); ui.submitLogin();
+        ui.requests[1].call.resolve(actor());
+      }
+      assert.deepEqual(ui.replacements, [base + path]);
+    }
+  }
+});
+
 test('unknown write outcome never automatically retries and typed errors expose only safe public descriptors', () => {
   const ui = browser(); let error;
   ui.api.put('projects/7/test-cases/20', { expectedVersion: 2 }).fail(value => { error = value; });

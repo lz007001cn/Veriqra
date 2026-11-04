@@ -10,6 +10,8 @@ public interface TestAttemptDefectDao {
     boolean existsRecord(Long attemptId, Long defectId);
     /** Returns association records, ordered by defect ID. */
     List<TestAttemptDefect> listDefectsByAttempt(Long attemptId);
+    /** Distinct defects linked to any FAIL attempt in this run, including older attempts. */
+    List<Long> listDefectIdsByRun(Long testRunId);
     /** Returns association records, ordered by attempt ID. */
     List<TestAttemptDefect> listAttemptsByDefect(Long defectId);
     /** Current locking read of the evidence set; caller locks Attempt hierarchy, then Defect first. */

@@ -11,6 +11,7 @@ const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve();
 // Executes the production module. This DOM fixture models its jQuery operations, while requests stay deferred.
 function browser(initial = { view: 'requirements', projectId: '7', requirementId: '10' }, integrated = false, permissions = {}) {
   const nodes = new Map(), requests = [], sourceReads = [], nativeListeners = new Map(), navigation = [];
+  const frames = [], scrolls = [];
   let currentLocale = 'en';
   let route = { ...initial };
   class Node {
@@ -20,6 +21,7 @@ function browser(initial = { view: 'requirements', projectId: '7', requirementId
     }
     reset() { for (const node of nodes.values()) if (['input', 'textarea', 'select'].includes(node.tag)) node.value = ''; }
     reportValidity() { return true; }
+    focus(options) { document.activeElement = this; this.focusOptions = options; }
   }
   function descendants(node) { return node.childrenNodes.flatMap(child => child instanceof Node ? [child, ...descendants(child)] : []); }
   function matches(node, selector) {
@@ -121,6 +123,9 @@ function browser(initial = { view: 'requirements', projectId: '7', requirementId
     t: (key, values, fallback) => (permissions.translations?.[currentLocale]?.[key] || fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''),
     enumLabel: value => value, formatNumber: String, formatDateTime: String, init: async () => {}
   } };
+  window.scrollY = 0;
+  window.scrollTo = (_, top) => { window.scrollY = top; scrolls.push(top); };
+  window.requestAnimationFrame = fn => { if (permissions.deferFrames) frames.push(fn); else fn(); };
   const permissionReads = [], guards = new Map();
   const qaPermissions = { actorId: 1, systemRole: 'USER', projectRole: 'TESTER', canWriteAssets: true, projectStatus: 'ACTIVE', ...permissions };
   const contextStub = { load(projectId, force) {
@@ -149,10 +154,288 @@ function browser(initial = { view: 'requirements', projectId: '7', requirementId
   const caseRow = (id = 20, status = 'DRAFT') => ({ id, projectId: 7, keyNo: id, title: 'Case ' + id, status, priority: 'MEDIUM', version: 3 });
   const requirement = (id = 10, status = 'ACTIVE') => ({ id, projectId: 7, keyNo: id, title: 'Requirement ' + id, status, priority: 'MEDIUM', version: 2 });
   return { $, nodes, requests, sourceReads, nav: integrated ? window.VeriqraQaNavigation : nav, navigation, dispatchProject, click, submit, caseRow, requirement, fire,
+    scrolls, frames, flushFrames() { frames.splice(0).forEach(fn => fn()); },
     fireAiSaved: detail => document.dispatchEvent({ type: 'veriqra:ai-saved', detail }),
+    fireAiVisibility: detail => document.dispatchEvent({ type: 'veriqra:ai-cases-visibility', detail }),
     pageshow: () => fire(windowNode, 'pageshow'), locale: () => document.dispatchEvent({ type: 'veriqra:localechange' }), reauth: () => document.dispatchEvent({ type: 'veriqra:reauthenticated' }),
     location, permissions: qaPermissions, permissionReads, guards, window, setLocale(value) { currentLocale = value; document.dispatchEvent({ type: 'veriqra:localechange' }); }, route: () => integrated ? window.VeriqraQaNavigation.read() : route, focused: () => document.activeElement };
 }
+
+test('asset round trip restores project-scoped filters, scroll position and the recently viewed row', async () => {
+  const ui = browser({ view: 'requirements', projectId: '7' }); ui.dispatchProject();
+  const inventory = [{ ...ui.requirement(), title: 'Cache switching' }, { ...ui.requirement(11, 'DRAFT'), title: 'Installer' }];
+  ui.requests[0].resolve(inventory); await flush();
+  ui.$('#asset-search').val('cache'); await ui.fire(ui.$('#asset-search')[0], 'input');
+  ui.$('#asset-status-filter').val('ACTIVE'); await ui.fire(ui.$('#asset-status-filter')[0], 'change');
+  ui.window.scrollY = 240;
+  await ui.fire(ui.$('#asset-list').find('.requirement-title')[0], 'click');
+  ui.requests[1].resolve(inventory[0]); await flush(); ui.requests[2].resolve([]); await flush();
+  const returning = ui.click('#asset-back'); ui.requests[3].resolve(inventory); await returning;
+  assert.equal(ui.$('#asset-search').val(), 'cache'); assert.equal(ui.$('#asset-status-filter').val(), 'ACTIVE');
+  assert.equal(ui.scrolls.at(-1), 240); assert.equal(ui.$('#asset-list').find('.is-recently-viewed').length, 1);
+  assert.equal(ui.focused(), ui.$('#asset-list').find('.requirement-title')[0]); assert.equal(ui.focused().focusOptions.preventScroll, true);
+  ui.nav.select('requirements', { projectId: '8' }); ui.dispatchProject('8'); ui.requests[4].resolve([]); await flush();
+  assert.equal(ui.$('#asset-search').val(), ''); assert.equal(ui.$('#asset-status-filter').val(), '');
+  ui.nav.select('requirements', { projectId: '7' }); ui.dispatchProject('7'); ui.requests[5].resolve(inventory); await flush();
+  assert.equal(ui.$('#asset-search').val(), 'cache'); assert.equal(ui.$('#asset-status-filter').val(), 'ACTIVE');
+  assert.equal(ui.scrolls.at(-1), 240);
+});
+
+test('a pending locale list reload cannot overwrite saved scroll after loading moves focus and the project changes', async () => {
+  for (const view of ['requirements', 'test-cases']) {
+    const ui = browser({ view, projectId: '7' }); ui.dispatchProject();
+    const inventory = view === 'requirements' ? [ui.requirement()] : [ui.caseRow()];
+    ui.requests[0].resolve(inventory); await flush();
+    ui.$('#asset-search').val(view === 'requirements' ? 'Requirement' : 'Case'); await ui.fire(ui.$('#asset-search')[0], 'input');
+    ui.window.scrollY = 240;
+    ui.locale();
+    assert.equal(ui.requests[1].url, 'projects/7/' + view);
+    ui.window.scrollY = 0; // Clearing the inventory and focusing its heading can move the viewport while GET is pending.
+    ui.nav.select(view, { projectId: '8' }); ui.dispatchProject('8');
+    ui.requests[2].resolve([]); await flush();
+    ui.requests[1].resolve(inventory); await flush();
+    assert.equal(ui.$('#asset-search').val(), '', 'The old locale response cannot populate the new project.');
+    ui.nav.select(view, { projectId: '7' }); ui.dispatchProject('7');
+    ui.requests[3].resolve(inventory); await flush();
+    assert.equal(ui.scrolls.at(-1), 240, 'The saved position belongs to the last rendered inventory, not its loading placeholder.');
+    assert.equal(ui.$('#asset-search').val(), view === 'requirements' ? 'Requirement' : 'Case');
+  }
+});
+
+test('asset modules remember independent filters and a stale layout frame cannot scroll a different view', async () => {
+  const ui = browser({ view: 'requirements', projectId: '7' }, false, { deferFrames: true }); ui.dispatchProject();
+  ui.requests[0].resolve([ui.requirement()]); await flush();
+  ui.$('#asset-search').val('Requirement'); await ui.fire(ui.$('#asset-search')[0], 'input'); ui.window.scrollY = 180;
+  ui.nav.open('test-cases', { projectId: '7' }); ui.flushFrames();
+  assert.equal(ui.scrolls.length, 0, 'A queued restore from requirements cannot scroll the cases view.');
+  ui.requests[1].resolve([ui.caseRow()]); await flush(); ui.flushFrames();
+  assert.equal(ui.$('#asset-search').val(), '');
+  ui.$('#asset-search').val('Case'); await ui.fire(ui.$('#asset-search')[0], 'input'); ui.window.scrollY = 45;
+  ui.nav.open('requirements', { projectId: '7' }); ui.requests[2].resolve([ui.requirement()]); await flush(); ui.flushFrames();
+  assert.equal(ui.$('#asset-search').val(), 'Requirement'); assert.equal(ui.scrolls.at(-1), 180);
+  ui.nav.open('test-cases', { projectId: '7' }); ui.requests[3].resolve([ui.caseRow()]); await flush(); ui.flushFrames();
+  assert.equal(ui.$('#asset-search').val(), 'Case'); assert.equal(ui.scrolls.at(-1), 45);
+});
+
+test('requirement sections keep content, coverage and metadata separate without discarding the selected section on reload', async () => {
+  const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+  ui.requests[1].resolve([{ testCase: ui.caseRow(20, 'READY'), status: 'CONFIRMED' }]); await flush();
+  assert.equal(ui.$('#asset-trace-section').hasClass('d-none'), true);
+  assert.equal(ui.$('#asset-detail').find('.requirement-description').hasClass('d-none'), false);
+  await ui.click('#requirement-links-show');
+  assert.equal(ui.$('#asset-trace-section').hasClass('d-none'), false);
+  assert.equal(ui.$('#asset-detail').find('.requirement-description').hasClass('d-none'), true);
+  assert.equal(ui.$('#asset-workflow-next').hasClass('d-none'), false);
+  assert.equal(ui.$('#requirement-links-show').text(), 'Linked cases (1)');
+  ui.locale(); ui.requests[2].resolve(ui.requirement()); await flush(); ui.requests[3].resolve([]); await flush();
+  assert.equal(ui.$('#requirement-links-show').attr('aria-pressed'), 'true');
+  await ui.click('#requirement-content-show'); ui.fireAiSaved({ projectId: '7', requirementId: '10' });
+  assert.equal(ui.$('#requirement-links-show').attr('aria-pressed'), 'true');
+  ui.requests[4].resolve([]); await flush();
+  await ui.click('#asset-edit'); assert.equal(ui.$('#requirement-section-nav').hasClass('d-none'), true);
+});
+
+test('requirement state determines its one primary task and activation remains an explicit edit', async () => {
+  const ui = browser();
+  ui.window.VeriqraAiCases = { clear() {}, mount() {}, open() {}, hasDraft: () => false };
+  ui.dispatchProject(); ui.requests[0].resolve(ui.requirement(10, 'DRAFT')); await flush(); ui.requests[1].resolve([]); await flush();
+  assert.equal(ui.$('#asset-edit').hasClass('btn-primary'), true);
+  assert.equal(ui.$('#requirement-ai-open').hasClass('btn-primary'), false);
+  await ui.click('#requirement-activate-edit');
+  assert.equal(ui.$('#asset-form').hasClass('d-none'), false); assert.equal(ui.$('#asset-status').val(), 'ACTIVE');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+  const cancel = ui.click('#asset-form-cancel-bottom'); ui.requests[2].resolve(ui.requirement(10, 'ACTIVE')); await flush();
+  ui.requests[3].resolve([{ testCase: ui.caseRow(20, 'READY'), status: 'NEEDS_REVIEW' }]); await cancel; await flush();
+  assert.equal(ui.$('#asset-edit').hasClass('btn-primary'), false);
+  assert.equal(ui.$('#requirement-review-links').hasClass('btn-primary'), true);
+  assert.equal(ui.$('#asset-primary-actions').find('a').get().some(node => node.classes.has('btn-primary')), false);
+  await ui.click('#requirement-review-links'); assert.equal(ui.$('#asset-trace-section').hasClass('d-none'), false);
+});
+
+test('draft case prioritizes completing steps, complete draft prioritizes Ready, and Ready prioritizes plan membership', async () => {
+  const ui = browser({ view: 'test-cases', projectId: '7', testCaseId: '20' });
+  ui.dispatchProject(); ui.requests[0].resolve({ testCase: ui.caseRow(), steps: [] }); await flush();
+  assert.equal(ui.$('#asset-edit').hasClass('btn-primary'), false);
+  assert.equal(ui.$('#asset-ready').hasClass('btn-primary'), true); assert.equal(ui.$('#asset-ready').text(), 'Complete case steps');
+  await ui.click('#asset-ready');
+  assert.equal(ui.$('#asset-form').hasClass('d-none'), false); assert.equal(ui.$('#step-editor').find('.step-action').length, 1);
+  assert.equal(ui.focused(), ui.$('#step-editor').find('.step-action')[0]); assert.equal(ui.requests.length, 1);
+  const cancel = ui.click('#asset-form-cancel'); ui.requests[1].resolve({ testCase: ui.caseRow(), steps: completeSteps }); await cancel;
+  assert.equal(ui.$('#asset-ready').hasClass('btn-primary'), true);
+  assert.equal(ui.$('#asset-primary-actions').find('a').get().some(link => /#test-plans$/.test(link.attributes.href)), false);
+  const refresh = ui.locale(); ui.requests[2].resolve({ testCase: ui.caseRow(20, 'READY'), steps: completeSteps }); await flush();
+  assert.equal(ui.$('#asset-ready').hasClass('d-none'), true);
+  const plan = ui.$('#asset-primary-actions').find('a').get().find(link => /#test-plans$/.test(link.attributes.href));
+  assert.ok(plan.classes.has('btn-primary')); assert.match(plan.attributes.href, /sourceTestCaseId=20/);
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
+test('inline case linking owns the primary action and preserves its selection until explicit cancellation', async () => {
+  for (const status of ['DRAFT', 'ACTIVE']) {
+    const ui = browser(); let aiOpens = 0;
+    ui.window.VeriqraAiCases = { clear() {}, mount() {}, open() { aiOpens++; }, hasDraft: () => false };
+    ui.dispatchProject(); ui.requests[0].resolve(ui.requirement(10, status)); await flush();
+    ui.requests[1].resolve([{ testCase: ui.caseRow(20, 'READY'), status: 'NEEDS_REVIEW' }]); await flush();
+    const background = status === 'DRAFT' ? '#asset-edit' : '#requirement-review-links';
+    assert.equal(ui.$(background).hasClass('btn-primary'), true);
+    assert.equal(ui.$('#trace-add-button').hasClass('d-none'), true, 'Requirements retain the single toolbar linking entry.');
+    ui.$('#trace-submit').addClass('btn-primary');
+    const loading = ui.click('#requirement-link-open');
+    assert.equal(ui.$(background).hasClass('btn-primary'), false);
+    assert.equal(ui.$('#requirement-ai-open').prop('disabled'), true);
+    ui.requests[2].resolve([ui.caseRow(21, 'READY')]); await loading;
+    ui.$('#trace-target').val('21');
+    await ui.click('#requirement-ai-open');
+    assert.equal(aiOpens, 0, 'A programmatic click cannot open a competing AI task.');
+    assert.equal(ui.$('#trace-target').val(), '21'); assert.equal(ui.$('#trace-submit').hasClass('btn-primary'), true);
+    await ui.click('#trace-cancel');
+    assert.equal(ui.$(background).hasClass('btn-primary'), true);
+    assert.equal(ui.$('#requirement-ai-open').prop('disabled'), false);
+    assert.equal(ui.requests.every(call => call.method === 'get'), true);
+  }
+});
+
+test('scoped AI visibility demotes background tasks and restores the current priority without accepting stale events', async () => {
+  const ui = browser();
+  ui.window.VeriqraAiCases = { clear() {}, mount() {}, open() { ui.fireAiVisibility({ projectId: '7', requirementId: '10', open: true }); }, hasDraft: () => false };
+  ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush(); ui.requests[1].resolve([]); await flush();
+  const currentPrimary = () => ui.$('#asset-primary-actions').find('a').get().filter(node => node.classes.has('btn-primary'));
+  assert.equal(currentPrimary().length, 1);
+  await ui.click('#requirement-ai-open');
+  assert.equal(currentPrimary().length, 0); assert.equal(ui.$('#requirement-link-open').prop('disabled'), true);
+  const count = ui.requests.length; await ui.click('#requirement-link-open'); await ui.submit('#trace-form');
+  assert.equal(ui.requests.length, count, 'A competing trace callback cannot load or submit while AI is open.');
+  ui.fireAiVisibility({ projectId: '8', requirementId: '10', open: false });
+  ui.fireAiVisibility({ projectId: '7', requirementId: '11', open: false });
+  assert.equal(currentPrimary().length, 0); assert.equal(ui.$('#requirement-link-open').prop('disabled'), true);
+  ui.fireAiSaved({ projectId: '7', requirementId: '10' });
+  ui.requests.at(-1).resolve([{ testCase: ui.caseRow(20, 'READY'), status: 'NEEDS_REVIEW' }]); await flush();
+  assert.equal(ui.$('#requirement-review-links').hasClass('btn-primary'), false, 'A coverage refresh cannot promote a competing background task.');
+  ui.fireAiVisibility({ projectId: '7', requirementId: '10', open: false });
+  assert.equal(ui.$('#requirement-review-links').hasClass('btn-primary'), true); assert.equal(ui.$('#requirement-link-open').prop('disabled'), false);
+  ui.nav.open('test-cases', { projectId: '7', testCaseId: '20' });
+  ui.requests.at(-1).resolve({ testCase: ui.caseRow(), steps: completeSteps }); await flush();
+  assert.equal(ui.$('#trace-add-button').hasClass('d-none'), false, 'Case traceability retains its linking entry.');
+  ui.fireAiVisibility({ projectId: '7', requirementId: '10', open: true });
+  assert.equal(ui.$('#asset-ready').hasClass('btn-primary'), true);
+});
+
+test('case list titles have native navigation semantics and returning to a source requirement selects its linked cases', async () => {
+  const ui = browser({ view: 'test-cases', projectId: '7' }); ui.dispatchProject(); ui.requests[0].resolve([ui.caseRow()]); await flush();
+  const title = ui.$('#asset-list').find('.asset-title-link')[0];
+  await ui.fire(title, 'click', { ctrlKey: true }); assert.equal(ui.requests.length, 1);
+  await ui.fire(title, 'click'); assert.equal(ui.requests[1].url, 'projects/7/test-cases/20');
+  ui.requests[1].resolve({ testCase: ui.caseRow(), steps: completeSteps }); await flush();
+  ui.nav.open('requirements', { projectId: '7', requirementId: '10', sourceTestCaseId: '20' });
+  ui.requests[2].resolve(ui.requirement()); await flush(); ui.requests[3].resolve([]); await flush();
+  assert.equal(ui.$('#requirement-links-show').attr('aria-pressed'), 'true');
+});
+
+test('requirement titles open the selected requirement and preserve native modified-click navigation', async () => {
+  const ui = browser({ view: 'requirements', projectId: '7' }); ui.dispatchProject();
+  ui.requests[0].resolve([ui.requirement(10), ui.requirement(11, 'DRAFT')]); await flush();
+  const titles = ui.$('#asset-list').find('.requirement-title').get();
+  assert.equal(titles.length, 2); assert.match(titles[1].attributes.href, /requirementId=11/);
+  assert.match(titles[1].attributes['aria-label'], /REQ-011.*Requirement 11/);
+  for (const fields of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }]) await ui.fire(titles[1], 'click', fields);
+  assert.equal(ui.requests.length, 1); assert.equal(ui.navigation.length, 0);
+  await ui.fire(titles[1], 'click');
+  assert.equal(ui.route().requirementId, '11'); assert.equal(ui.requests[1].url, 'projects/7/requirements/11');
+});
+
+test('requirement actions open AI or a source-linked form without generating or writing automatically', async () => {
+  const ui = browser(); let opens = 0;
+  ui.window.VeriqraAiCases = { clear() {}, mount() {}, open() { opens++; }, hasDraft: () => false };
+  ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+  assert.equal(ui.$('#requirement-link-open').prop('disabled'), true);
+  const reads = ui.requests.length; await ui.click('#requirement-ai-open');
+  assert.equal(opens, 1); assert.equal(ui.requests.length, reads);
+  ui.requests[1].resolve([]); await flush();
+  assert.equal(ui.$('#requirement-link-open').prop('disabled'), false);
+  const manual = ui.$('#asset-primary-actions').find('a').get().find(link => /action=create/.test(link.attributes.href));
+  assert.ok(manual); await ui.fire(manual, 'click');
+  assert.equal(ui.route().view, 'test-cases'); assert.equal(ui.route().sourceRequirementId, '10');
+  assert.equal(ui.$('#asset-form').hasClass('d-none'), false);
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+  await ui.click('#asset-form-cancel');
+  assert.equal(ui.route().view, 'requirements'); assert.equal(ui.route().requirementId, '10');
+  assert.equal(ui.requests.at(-1).url, 'projects/7/requirements/10');
+});
+
+test('requirement coverage distinguishes active confirmed Ready cases from pending, removed and draft cases', async () => {
+  for (const status of ['ACTIVE', 'DRAFT']) {
+    const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement(10, status)); await flush();
+    ui.requests[1].resolve([
+      { testCase: ui.caseRow(20, 'READY'), status: 'CONFIRMED' },
+      { testCase: ui.caseRow(21, 'READY'), status: 'NEEDS_REVIEW' },
+      { testCase: ui.caseRow(22, 'DRAFT'), status: 'CONFIRMED' },
+      { testCase: ui.caseRow(23, 'READY'), status: 'REMOVED' }
+    ]); await flush();
+    const summary = ui.$('#requirement-coverage-summary').find('p').text();
+    assert.match(summary, /Linked 3.*review 1/); assert.match(summary, new RegExp('Effective coverage ' + (status === 'ACTIVE' ? 1 : 0)));
+    const history = ui.$('#asset-traces').find('.requirement-link-history');
+    assert.equal(history.length, 1); assert.notEqual(history.prop('open'), true);
+    assert.equal(history.find('a').length, 1);
+    assert.equal(ui.$('#asset-traces').children().length, 4, 'Three current links followed by collapsed history.');
+    assert.equal(ui.requests.every(call => call.method === 'get'), true);
+  }
+});
+
+test('cancelling the requirement link picker returns focus to the action that opened it', async () => {
+  const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+  ui.requests[1].resolve([]); await flush();
+  const opener = ui.$('#requirement-link-open')[0];
+  const opening = ui.click('#requirement-link-open', { currentTarget: opener });
+  ui.requests[2].resolve([ui.caseRow()]); await opening;
+  assert.equal(ui.$('#trace-form').hasClass('d-none'), false);
+  await ui.click('#trace-cancel');
+  assert.equal(ui.$('#trace-form').hasClass('d-none'), true); assert.equal(ui.focused(), opener);
+});
+
+test('grouped requirement case actions retain coverage confirmation and source-aware navigation', async () => {
+  const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+  ui.requests[1].resolve([{ testCase: ui.caseRow(20, 'READY'), status: 'NEEDS_REVIEW' }]); await flush();
+  const summary = ui.$('#asset-traces').find('.requirement-link-summary');
+  let actions = ui.$('#asset-traces').find('.requirement-link-actions');
+  assert.equal(summary.length, 1); assert.equal(summary.find('span').length, 3);
+  assert.equal(actions.find('a').length, 1); assert.equal(actions.find('button').length, 2);
+  const confirming = ui.fire(actions.find('button')[0], 'click'); await flush();
+  assert.equal(ui.requests[2].url, 'projects/7/requirements/10/test-cases/20/confirm');
+  ui.requests[2].resolve(); await flush(); ui.requests[3].resolve(ui.requirement()); await flush();
+  ui.requests[4].resolve([{ testCase: ui.caseRow(20, 'READY'), status: 'CONFIRMED' }]); await confirming; await flush();
+  actions = ui.$('#asset-traces').find('.requirement-link-actions');
+  assert.equal(actions.find('button').length, 1, 'Confirmed coverage leaves the unlink action.');
+  const open = actions.find('a')[0];
+  await ui.fire(open, 'click', { ctrlKey: true }); assert.equal(ui.navigation.length, 0);
+  await ui.fire(open, 'click');
+  assert.equal(ui.route().view, 'test-cases'); assert.equal(ui.route().testCaseId, '20');
+  assert.equal(ui.route().sourceRequirementId, '10');
+  assert.equal(ui.requests.filter(call => call.method === 'post').length, 1);
+});
+
+test('link picker distinguishes an exhausted inventory from search misses without sending mutations', async () => {
+  const ui = browser(); ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+  ui.requests[1].resolve([{ testCase: ui.caseRow(20), status: 'CONFIRMED' }]); await flush();
+  const opening = ui.click('#requirement-link-open'); ui.requests[2].resolve([ui.caseRow(20)]); await opening;
+  assert.equal(ui.$('#trace-picker-help').hasClass('d-none'), false);
+  assert.equal(ui.$('#trace-picker-help').text(), 'assets.noEligibleLinks');
+  assert.equal(ui.$('#trace-submit').prop('disabled'), true);
+  ui.$('#trace-search').val('other'); await ui.fire(ui.$('#trace-search')[0], 'input');
+  assert.equal(ui.$('#trace-picker-help').text(), 'r2Assets.noMatches');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
+});
+
+test('clearing requirement filters restores the loaded inventory without an extra request', async () => {
+  const ui = browser({ view: 'requirements', projectId: '7' }); ui.dispatchProject();
+  ui.requests[0].resolve([ui.requirement(), ui.requirement(11, 'DRAFT')]); await flush();
+  ui.$('#asset-search').val('no match'); await ui.fire(ui.$('#asset-search')[0], 'input');
+  ui.$('#asset-status-filter').val('DRAFT'); await ui.fire(ui.$('#asset-status-filter')[0], 'change');
+  assert.equal(ui.$('#asset-filter-reset').hasClass('d-none'), false);
+  await ui.click('#asset-filter-reset');
+  assert.equal(ui.$('#asset-list').find('.requirement-title').length, 2);
+  assert.equal(ui.$('#asset-search').val(), ''); assert.equal(ui.$('#asset-status-filter').val(), '');
+  assert.equal(ui.requests.length, 1); assert.equal(ui.focused(), ui.$('#asset-search')[0]);
+});
 
 test('locale during pending requirement or case detail preserves the selected route and rejects the earlier response', async () => {
   for (const view of ['requirements', 'test-cases']) {
@@ -230,7 +513,7 @@ test('failed trace read stays distinct from empty and gates links until retry su
   await ui.click('#trace-add-button'); assert.equal(ui.requests.length, 2);
   const retry = ui.click('#asset-trace-retry'); ui.requests[2].resolve([]); await retry; await flush();
   assert.equal(ui.$('#trace-add-button').prop('disabled'), false);
-  assert.equal(ui.$('#asset-traces').children()[0].content, 'No traceability records yet.');
+  assert.match(ui.$('#asset-traces').children()[0].content, /No cases linked yet/);
 });
 
 test('reverse traceability uses one scoped GET and a failed read does not offer partial links', async () => {
@@ -418,6 +701,25 @@ test('actual app create route preserves source requirement through partial link 
   ui.requests[6].resolve(); await flush(); ui.requests[7].resolve({ testCase: ui.caseRow(), steps: [] }); await retrying;
   assert.equal(ui.$('#asset-partial-link-panel').hasClass('d-none'), true);
   assert.equal(ui.requests.filter(call => call.method === 'post' && call.url === 'projects/7/test-cases').length, 1);
+});
+
+test('cancelling a source-linked case creation delegates its sole dirty decision to the actual app route', async () => {
+  const ui = browser({ view: 'test-cases', projectId: '7', action: 'create', sourceRequirementId: '10' }, true);
+  await ui.pageshow(); await flush(); ui.requests[0].resolve({ id: 1, username: 'tester', systemRole: 'USER' }); await flush();
+  ui.requests[1].resolve([{ id: 7, projectKey: 'QA', name: 'Quality', status: 'ACTIVE' }]); await flush();
+  ui.requests[2].resolve({ id: 7, projectKey: 'QA', name: 'Quality', status: 'ACTIVE' }); await flush();
+  ui.$('#asset-title').val('Keep this unsaved case');
+  let accepted = false, routeChecks = 0, localChecks = 0;
+  ui.window.VeriqraDraftGuard.allowLeave = () => { routeChecks++; return accepted; };
+  ui.window.confirm = () => { localChecks++; return true; };
+  await ui.click('#asset-form-cancel-bottom');
+  assert.equal(ui.route().view, 'test-cases'); assert.equal(ui.route().action, 'create');
+  assert.equal(ui.$('#asset-title').val(), 'Keep this unsaved case'); assert.equal(ui.requests.length, 3);
+  accepted = true; await ui.click('#asset-form-cancel-bottom');
+  assert.equal(ui.route().view, 'requirements'); assert.equal(ui.route().requirementId, '10');
+  assert.equal(routeChecks, 2); assert.equal(localChecks, 0, 'Cross-view cancellation must not add a second module confirmation.');
+  assert.equal(ui.requests.at(-1).url, 'projects/7/requirements/10');
+  assert.equal(ui.requests.every(call => call.method === 'get'), true);
 });
 
 test('actual app requirement round trip preserves plan and frozen-run origin', async () => {

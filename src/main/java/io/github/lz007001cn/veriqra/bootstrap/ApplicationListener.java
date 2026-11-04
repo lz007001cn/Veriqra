@@ -44,10 +44,19 @@ public final class ApplicationListener implements ServletContextListener {
             var daos = new JdbcServiceDaoFactory();
             var access = new ProjectAccessPolicy();
             var passwords = new PasswordVerifier();
-            aiProvider = new io.github.lz007001cn.veriqra.service.ai.VertexAiProvider(io.github.lz007001cn.veriqra.config.AiConfig.load());
+            var aiConfig = io.github.lz007001cn.veriqra.config.AiConfig.load();
+            var aiSettings = new io.github.lz007001cn.veriqra.service.ai.AiSettingsManager(aiConfig);
+            aiProvider = new io.github.lz007001cn.veriqra.service.ai.VertexAiProvider(aiConfig, aiSettings);
+            context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiSettingsManager.class.getName(), aiSettings);
+            context.setAttribute(io.github.lz007001cn.veriqra.service.ai.VertexAiProvider.class.getName(), aiProvider);
+            context.setAttribute(io.github.lz007001cn.veriqra.admin.GoogleAiDashboard.ATTRIBUTE,
+                    new io.github.lz007001cn.veriqra.admin.GoogleAiDashboard(aiProvider::getGoogleJson, java.time.Clock.systemUTC()));
             context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName(),
                     new io.github.lz007001cn.veriqra.service.ai.AiCaseService(transactions, daos, access,
                             aiProvider));
+            context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService.class.getName(),
+                    new io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService(transactions, daos, access,
+                            aiProvider, java.time.Clock.systemUTC()));
             var adminPolicy = new AdminAccessPolicy();
             context.setAttribute(AdminServices.ATTRIBUTE, new AdminServices(
                     new AdminUserService(transactions, adminPolicy, passwords),
@@ -80,6 +89,10 @@ public final class ApplicationListener implements ServletContextListener {
     @Override public void contextDestroyed(ServletContextEvent event) {
         event.getServletContext().removeAttribute(WebServices.ATTRIBUTE);
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName());
+        event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService.class.getName());
+        event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiSettingsManager.class.getName());
+        event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.VertexAiProvider.class.getName());
+        event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.admin.GoogleAiDashboard.ATTRIBUTE);
         event.getServletContext().removeAttribute(AdminServices.ATTRIBUTE);
         event.getServletContext().removeAttribute(ProjectSettingsService.class.getName());
         closePool(event.getServletContext());

@@ -17,6 +17,10 @@ public final class AdminHandler {
     public static void handle(HttpServletRequest request, HttpServletResponse response, AdminServices admin,
                               long actor, String[] parts) throws IOException {
         admin.logs().requireAdmin(actor);
+        if (parts.length >= 3 && parts[2].equals("ai")) {
+            AdminAiHandler.handle(request, response, parts);
+            return;
+        }
         if (parts.length >= 3 && parts[2].equals("users")) {
             users(request, response, admin, actor, parts);
             return;

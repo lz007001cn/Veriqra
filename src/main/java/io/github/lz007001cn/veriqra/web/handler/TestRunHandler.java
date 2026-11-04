@@ -7,9 +7,19 @@ import java.io.IOException;
 
 public final class TestRunHandler {
     private TestRunHandler() { }
+    public record AiSummaryRequest(String language) { }
     public static void handle(HttpServletRequest req, HttpServletResponse res, WebServices s,
                               Long actor, Long project, String[] path) throws IOException {
         String method = req.getMethod();
+        if (path.length == 6 && path[5].equals("ai-summary")) {
+            JsonHttp.method(res, method, "POST");
+            var body = JsonHttp.read(req, AiSummaryRequest.class);
+            var service = (io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService) req.getServletContext()
+                    .getAttribute(io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService.class.getName());
+            if (service == null) throw new HttpFailure(503, "AI_NOT_CONFIGURED", "AI is not configured");
+            JsonHttp.write(res, 200, service.generate(actor, project, JsonHttp.positiveId(path[4]), body.language()));
+            return;
+        }
         if (path.length == 4) {
             JsonHttp.method(res, method, "GET", "POST");
             if (method.equals("GET")) {

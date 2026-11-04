@@ -11,7 +11,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 
 // A small DOM fixture runs the actual UI module with deferred server responses.
 function browser() {
-  const requests = [], navigation = [], listeners = new Map(), guards = new Map();
+  const requests = [], navigation = [], listeners = new Map(), guards = new Map(), visibility = [];
   let locale = 'en';
   class Element {
     constructor(tag = 'div', attributes = {}) {
@@ -19,9 +19,10 @@ function browser() {
       this.classes = new Set((attributes.class || '').split(/\s+/)); this.handlers = new Map();
       this.value = ''; this.checked = Object.hasOwn(attributes, 'checked'); this.disabled = false;
     }
+    focus() { document.activeElement = this; }
   }
-  const root = new Element(), detail = new Element('section', { id: 'asset-detail' });
-  root.childNodes.push(detail); detail.parent = root;
+  const root = new Element(), actions = new Element('div', { id: 'asset-primary-actions' }), detail = new Element('section', { id: 'asset-detail' });
+  root.childNodes.push(actions, detail); actions.parent = root; detail.parent = root;
   function descendants(node) { return node.childNodes.flatMap(child => child.nodeType === 1 ? [child, ...descendants(child)] : []); }
   function matches(node, selector) {
     if (selector.endsWith(':checked')) return matches(node, selector.slice(0, -8)) && node.checked;
@@ -72,6 +73,7 @@ function browser() {
       if (!this.handlers.has(name)) this.handlers.set(name, []);
       this.handlers.get(name).push({ selector: fn ? selector : null, fn: fn || selector });
     }); }
+    trigger(name) { return this.each(function () { if (name === 'focus') this.focus(); }); }
     remove() { return this.each(function () { this.parent.childNodes.splice(this.parent.childNodes.indexOf(this), 1); }); }
   }
   function $(selector) {
@@ -81,8 +83,12 @@ function browser() {
     return new Collection(descendants(root).filter(node => selector.split(',').some(part => matches(node, part.trim()))));
   }
   const document = {
+    activeElement: null,
     addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(fn); },
-    dispatchEvent(event) { (listeners.get(event.type) || []).forEach(fn => fn(event)); }
+    dispatchEvent(event) {
+      if (event.type === 'veriqra:ai-cases-visibility') visibility.push(JSON.parse(JSON.stringify(event.detail)));
+      (listeners.get(event.type) || []).forEach(fn => fn(event));
+    }
   };
   const window = {
     I18n: { t: (key, values, fallback) => catalogs[locale][key] || fallback || key, enumLabel: String },
@@ -108,13 +114,14 @@ function browser() {
     return event;
   }
   mount();
-  return { $, requests, navigation, guards, mount, fire, window,
+  return { $, requests, navigation, guards, mount, fire, window, root, visibility, focused: () => document.activeElement,
     locale(next) { locale = next; document.dispatchEvent({ type: 'veriqra:localechange' }); } };
 }
 
 const candidate = title => ({ title, description: 'Description', preconditions: 'Preconditions', priority: 'MEDIUM',
   steps: [{ action: 'Switch server', expectedResult: 'Server switched' }] });
 async function generate(ui) {
+  ui.window.VeriqraAiCases.open();
   const work = ui.fire(ui.$('.ai-generate')[0]);
   ui.requests[0].resolve({ expectedVersion: 2, candidates: [candidate('Empty cache'), candidate('Normal cache'), candidate('Missing cache')] });
   await work; await flush();
@@ -150,6 +157,7 @@ test('generation basis identifies the selected saved requirement and optional in
   assert.match(ui.$('.ai-basis').text(), /description, including acceptance criteria/);
   assert.match(ui.$('.ai-basis').text(), /additional instructions below/);
   ui.mount(7, 11, { keyNo: 4, title: 'Title only', description: '' });
+  ui.window.VeriqraAiCases.open();
   assert.equal(ui.$('.ai-basis-requirement').text(), 'REQ-004 · Title only');
   const work = ui.fire(ui.$('.ai-generate')[0]);
   assert.equal(ui.requests[0].url, 'projects/7/requirements/11/ai-cases/preview');
@@ -220,4 +228,68 @@ test('late AI acceptance from a previous requirement cannot render saved links i
   ui.requests[1].resolve([{ id: 20, keyNo: 4, title: 'Old saved case' }]); await work;
   assert.equal(ui.$('.ai-saved').hasClass('d-none'), true); assert.equal(ui.$('.ai-saved').find('a').length, 0);
   assert.equal(ui.guards.get('ai-cases').dirty(), false);
+});
+
+test('AI editor opens on demand beside requirement actions without generating or saving', () => {
+  const ui = browser(), panel = ui.$('#ai-cases-panel');
+  assert.equal(panel.hasClass('d-none'), true);
+  assert.deepEqual(ui.root.childNodes.map(node => node.attributes.id), ['asset-primary-actions', 'ai-cases-panel', 'asset-detail']);
+  assert.equal(ui.requests.length, 0);
+  ui.$('#asset-primary-actions')[0].focus();
+  ui.window.VeriqraAiCases.open();
+  assert.equal(panel.hasClass('d-none'), false);
+  assert.equal(ui.focused(), ui.$('.ai-instruction')[0]);
+  ui.$('.ai-instruction').val('Keep these boundary notes');
+  ui.mount();
+  assert.equal(panel.hasClass('d-none'), false, 'Permission refresh of the same saved requirement preserves expansion.');
+  assert.equal(ui.$('.ai-instruction').val(), 'Keep these boundary notes');
+  assert.equal(ui.requests.length, 0);
+  ui.window.VeriqraAiCases.clear(); ui.window.VeriqraAiCases.open();
+  assert.equal(panel.hasClass('d-none'), true); assert.equal(panel.children().length, 0);
+});
+
+test('collapsing and reopening preserves candidates and instructions, including hidden locale updates', async () => {
+  const ui = browser();
+  ui.$('#asset-primary-actions')[0].focus();
+  ui.window.VeriqraAiCases.open();
+  ui.$('.ai-instruction').val('Include empty and missing directories');
+  await generate(ui);
+  const title = ui.$('.ai-title')[0]; title.value = 'Retain edited candidate';
+  ui.$('.ai-select')[1].checked = false;
+  await ui.fire(ui.$('.ai-collapse')[0]);
+  assert.equal(ui.$('#ai-cases-panel').hasClass('d-none'), true);
+  assert.equal(ui.focused(), ui.$('#asset-primary-actions')[0]);
+  assert.equal(ui.guards.get('ai-cases').dirty(), true);
+  ui.locale('zh-CN');
+  assert.equal(ui.$('.ai-collapse').text(), catalogs['zh-CN']['ai.collapse'] || 'Collapse');
+  ui.mount();
+  assert.equal(ui.$('#ai-cases-panel').hasClass('d-none'), true, 'Same-context mount must not reopen a collapsed editor.');
+  ui.window.VeriqraAiCases.open();
+  assert.equal(ui.$('.ai-title')[0], title); assert.equal(title.value, 'Retain edited candidate');
+  assert.equal(ui.$('.ai-select')[1].checked, false);
+  assert.equal(ui.$('.ai-instruction').val(), 'Include empty and missing directories');
+  assert.equal(ui.requests.length, 1);
+});
+
+test('collapse stays available while generating and a completed response does not reopen the editor', async () => {
+  const ui = browser(); ui.window.VeriqraAiCases.open();
+  const work = ui.fire(ui.$('.ai-generate')[0]);
+  assert.equal(ui.$('.ai-collapse').prop('disabled'), false);
+  await ui.fire(ui.$('.ai-collapse')[0]);
+  ui.requests[0].resolve({ expectedVersion: 2, candidates: [candidate('Generated while collapsed')] });
+  await work;
+  assert.equal(ui.$('#ai-cases-panel').hasClass('d-none'), true);
+  assert.deepEqual(ui.visibility, [
+    { projectId: 7, requirementId: 10, open: true },
+    { projectId: 7, requirementId: 10, open: false }
+  ], 'A late preview must not reclaim primary actions from the visible requirement.');
+  ui.window.VeriqraAiCases.open();
+  assert.equal(ui.$('.ai-title').val(), 'Generated while collapsed');
+  ui.mount(8, 11);
+  assert.equal(ui.$('#ai-cases-panel').hasClass('d-none'), true);
+  assert.equal(ui.guards.get('ai-cases').dirty(), false);
+  assert.deepEqual(ui.visibility.at(-1), { projectId: 7, requirementId: 10, open: false },
+    'Clearing an editor releases only the requirement that owned it.');
+  ui.window.VeriqraAiCases.open();
+  assert.deepEqual(ui.visibility.at(-1), { projectId: 8, requirementId: 11, open: true });
 });

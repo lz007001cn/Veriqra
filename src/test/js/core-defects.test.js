@@ -27,9 +27,9 @@ function browser(context = { view: 'defects', projectId: '1' }, options = {}) {
     reportValidity() { return this.all().every(node => !node.required || node.disabled || !!node.value); }
   }
   function matches(node, selector) {
-    const match = /^(?:#([\w-]+)|([\w-]+))?(?:\[value="([^"]*)"\])?$/.exec(selector);
+    const match = /^(?:#([\w-]+)|([\w-]+)|\.([\w-]+))?(?:\[value="([^"]*)"\])?$/.exec(selector);
     return !!match && (!match[1] || node.attrs.id === match[1]) && (!match[2] || node.tag === match[2]) &&
-      (match[3] === undefined || String(node.value) === match[3]);
+      (!match[3] || node.classes.has(match[3])) && (match[4] === undefined || String(node.value) === match[4]);
   }
   function query(selector) {
     return selector.split(',').flatMap(part => {
@@ -136,9 +136,9 @@ function browser(context = { view: 'defects', projectId: '1' }, options = {}) {
   let sequence = 0;
   vm.runInNewContext(source, { window, document, jQuery: $, CustomEvent, location: { hash: '#defects' }, crypto: { randomUUID: () => '00000000-0000-4000-8000-' + String(++sequence).padStart(12, '0') } });
   const emit = (type, detail) => document.dispatchEvent({ type, detail });
-  const fire = (node, type = 'click') => Promise.all((node.handlers.get(type) || []).map(fn => fn.call(node, { preventDefault() {} })));
+  const fire = (node, type = 'click', fields = {}) => Promise.all((node.handlers.get(type) || []).map(fn => fn.call(node, { button: 0, preventDefault() {}, ...fields })));
   emit('veriqra:project', { project: { id: Number(context.projectId || 1) } });
-  return { $, nodes, calls, memberCalls, closureCalls, actorCalls, projectCalls, storage, emit, fire, opened, emitted, route: () => route, nav, focused: () => document.activeElement, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
+  return { $, nodes, calls, memberCalls, closureCalls, actorCalls, projectCalls, storage, window, emit, fire, opened, emitted, route: () => route, nav, focused: () => document.activeElement, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
 }
 
 const defect = (id = 9, status = 'OPEN') => ({ id, keyNo: id, projectId: 1, title: 'Broken login', status, severity: 'HIGH', priority: 'HIGH', version: 2 });
@@ -896,4 +896,95 @@ test('late rejected-close eligibility and obsolete Retry cannot change a newer d
   late.resolve(eligibility()); await oldRetry;
   assert.match(ui.$('#defect-detail-title').text(), /BUG-010/); assert.equal(button(ui, 'defect-actions', 'Close').disabled, false);
   assert.equal(ui.$('#defect-action-status').text(), ''); assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1);
+});
+
+test('defect list titles keep native modified clicks and restore the project-scoped position after returning', async () => {
+  const ui = browser(); const scrolls = [], frames = [];
+  ui.window.scrollY = 620; ui.window.scrollTo = (x, y) => scrolls.push([x, y]); ui.window.requestAnimationFrame = fn => frames.push(fn);
+  ui.calls[0].resolve([defect(9), defect(10)]); await flush();
+  const title = ui.nodes.get('defect-list').all().find(node => node.tag === 'a' && node.content.startsWith('BUG-009'));
+  for (const fields of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }]) await ui.fire(title, 'click', fields);
+  assert.equal(ui.opened.length, 0); assert.equal(ui.calls.length, 1);
+  await ui.fire(title); ui.calls[1].resolve({ defect: defect(9), evidence: [] }); await flush();
+  await ui.fire(ui.nodes.get('defect-back')); ui.window.scrollY = 0;
+  ui.calls[2].resolve([defect(9), defect(10)]); await flush();
+  const selected = ui.nodes.get('defect-list').children.find(node => node.attrs['data-defect-id'] === '9');
+  assert.equal(selected.classes.has('is-recently-viewed'), true);
+  frames.shift()(); assert.deepEqual(scrolls, [[0, 620]]);
+  ui.nav.select('defects', { projectId: '2' }); ui.emit('veriqra:project', { project: { id: 2 } });
+  ui.calls[3].resolve([defect(9)]); await flush();
+  assert.equal(ui.nodes.get('defect-list').children[0].classes.has('is-recently-viewed'), false);
+  assert.equal(frames.length, 0); assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('a delayed list scroll restoration cannot move a newer defect detail', async () => {
+  const ui = browser(); const frames = [], scrolls = [];
+  ui.window.scrollY = 410; ui.window.scrollTo = (x, y) => scrolls.push([x, y]); ui.window.requestAnimationFrame = fn => frames.push(fn);
+  ui.calls[0].resolve([defect(9)]); await flush();
+  await ui.fire(ui.nodes.get('defect-list').all().find(node => node.tag === 'a'));
+  ui.calls[1].resolve({ defect: defect(9), evidence: [] }); await flush();
+  await ui.fire(ui.nodes.get('defect-back')); ui.calls[2].resolve([defect(9)]); await flush();
+  const restore = frames.shift();
+  ui.nav.open('defects', { projectId: '1', defectId: '10' }); restore();
+  assert.deepEqual(scrolls, []);
+});
+
+test('resolved defects expose one primary next step and retain expanded closure history across rerender', async () => {
+  const history = [{ receipt: { closedAt: '2026-10-14', closedDefectVersion: 1, evidenceCount: 1, resolutionNote: 'Earlier fix' }, items: [] }];
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  await openClosure(ui, eligibility({ history }));
+  assert.match(ui.$('#defect-actions').text(), /1 failure\(s\) still need valid retest evidence/);
+  const primaries = ui.nodes.get('defect-detail-panel').all().filter(node => (node.tag === 'button' || node.tag === 'a') && node.classes.has('btn-primary'));
+  assert.deepEqual(primaries.map(node => node.content), ['Review retest results']);
+  const closedHistory = ui.nodes.get('defect-closure').all().find(node => node.attrs['data-section'] === 'closure-history');
+  assert.equal(closedHistory.open, false);
+  assert.ok(button(ui, 'defect-closure', 'Find retest PASS'), 'The current evidence action must remain reachable outside folded history.');
+  closedHistory.open = true; await ui.fire(closedHistory, 'toggle');
+  ui.locale('zh-CN'); await flush();
+  const retained = ui.nodes.get('defect-closure').all().find(node => node.attrs['data-section'] === 'closure-history');
+  assert.equal(retained.open, true); assert.match(ui.$('#defect-closure').text(), /Earlier fix/);
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('opening a defect action form transfers emphasis to the form and cancelling restores the next step', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' });
+  ui.calls[0].resolve({ defect: defect(9, 'IN_PROGRESS'), evidence: [] }); await flush();
+  assert.equal(button(ui, 'defect-actions', 'Resolve').classes.has('btn-primary'), true);
+  await ui.fire(button(ui, 'defect-actions', 'Resolve'));
+  assert.equal(button(ui, 'defect-actions', 'Resolve').classes.has('btn-primary'), false);
+  assert.equal(ui.$('#defect-action-form').hasClass('d-none'), false);
+  await ui.fire(ui.nodes.get('defect-action-cancel'));
+  assert.equal(button(ui, 'defect-actions', 'Resolve').classes.has('btn-primary'), true);
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('defect editors stay exclusive and keep entered values until their existing cancel action', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { manualEligibility: true });
+  await openClosure(ui); await chooseCandidate(ui);
+  ui.$('#defect-retest-note').val('Keep this review'); ui.$('#defect-retest-confirm').prop('checked', true);
+  const editWhileReviewing = button(ui, 'defect-actions', 'Edit and reassign');
+  assert.equal(editWhileReviewing.disabled, true);
+  await ui.fire(editWhileReviewing);
+  assert.equal(ui.$('#defect-action-form').hasClass('d-none'), true);
+  assert.equal(ui.$('#defect-retest-note').val(), 'Keep this review');
+  assert.equal(ui.$('#defect-retest-confirm').prop('checked'), true);
+  const useWhileReviewing = button(ui, 'defect-closure', 'Use this PASS');
+  assert.equal(useWhileReviewing.disabled, true);
+  await ui.fire(useWhileReviewing);
+  assert.equal(ui.$('#defect-retest-note').val(), 'Keep this review');
+
+  await ui.fire(button(ui, 'defect-retest-form', 'Cancel'));
+  assert.equal(button(ui, 'defect-actions', 'Edit and reassign').disabled, false);
+  await ui.fire(button(ui, 'defect-actions', 'Edit and reassign')); await flush();
+  ui.$('#defect-edit-title').val('Keep this edit');
+  const useWhileEditing = button(ui, 'defect-closure', 'Use this PASS');
+  assert.equal(useWhileEditing.disabled, true);
+  await ui.fire(useWhileEditing);
+  assert.equal(ui.nodes.get('defect-closure').all().some(node => node.attrs.id === 'defect-retest-form'), false);
+  assert.equal(ui.$('#defect-edit-title').val(), 'Keep this edit');
+  await ui.fire(ui.nodes.get('defect-action-cancel'));
+  assert.equal(button(ui, 'defect-closure', 'Use this PASS').disabled, false);
+  await ui.fire(button(ui, 'defect-closure', 'Use this PASS'));
+  assert.ok(ui.nodes.get('defect-closure').all().some(node => node.attrs.id === 'defect-retest-form'));
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
 });

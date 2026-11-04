@@ -4,13 +4,15 @@
 
 主线：**需求 → AI 辅助生成用例 → 测试计划 → 执行结果 → 缺陷 → 复测关闭**。支持手工执行和 JUnit XML 结果导入。
 
-当前版本为 `0.9.0`，最终展示验收已完成，发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)。最近一次 ECS 部署为 [v0.3.0](https://veriqra.xyz)；ECS 尚未启动，v0.9 暂未部署。
+当前版本为 `0.9.0`，发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)。[部署记录](docs/ECS-DEPLOYMENT.md)最近条目为 2026-10-31 的 v0.9 更新；此后的本地界面与 AI 后台设置改动尚未记为 ECS 部署，版本字符串相同不代表构建内容相同。
 
 ## 功能
 
 - 需求、测试用例和步骤、需求覆盖关联。
 - AI 生成候选用例，编辑、选择后保存为草稿。
 - 测试计划、运行、执行记录及历史用例内容。
+- AI 测试运行总结：根据本轮结果和关联缺陷生成概况、问题与后续建议，支持复制和重新生成；见[使用说明](docs/AI-RUN-SUMMARY.md)。
+- 管理员 AI 设置：保存运行时模型选择，检查 Google 项目连接与模型 Token 计数，读取配额、监测用量和账单状态；余额查询边界见[后台说明](docs/AI-ADMIN.md)。
 - 从失败创建缺陷，处理后复测并关闭。
 - JUnit XML 预览、映射、导入记录和来源查询。
 - 首页项目概况、项目成员与负责人设置、基础用户维护。
@@ -41,6 +43,8 @@ node --test src/test/js/*.test.js
 
 ## 项目资料
 
+- [软件设计说明书（v0.9，架构、模块、权限、流程与接口）](docs/SOFTWARE-DESIGN-v0.9.md)
+- [完整数据库数据字典（35 表、逐字段与约束）](docs/DATABASE-DICTIONARY-v0.9.md)
 - [开发与精简计划](docs/DEVELOPMENT-ROADMAP.md)
 - [ZZZSwitch 演示文案与操作顺序](docs/demo/ZZZSWITCH-DEMO.md)
 - [v0.9 发布说明](docs/RELEASE-0.9.0.md)

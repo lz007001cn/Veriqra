@@ -77,6 +77,8 @@ class I18nResourcesTest {
                     String key = keys.group(1);
                     if (script.getFileName().toString().equals("project-settings.js") && !key.contains("."))
                         key = "projectSettings." + key;
+                    if (script.getFileName().toString().equals("ai-run-summary.js") && !key.contains("."))
+                        key = "aiSummary." + key;
                     assertTrue(english.containsKey(key), script + ": " + key);
                 }
             }

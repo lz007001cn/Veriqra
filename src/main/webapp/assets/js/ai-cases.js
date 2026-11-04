@@ -1,16 +1,35 @@
 (function ($, api) {
   'use strict';
   const tr = function (key, fallback) { return window.I18n.t('ai.' + key, null, fallback); };
-  let context = null, preview = null, busy = false, uncertain = false, epoch = 0, statusKey = null;
-  const panel = $('<section id="ai-cases-panel" class="asset-panel mt-3 d-none">');
-  $('#asset-detail').after(panel);
+  let context = null, preview = null, busy = false, uncertain = false, epoch = 0, statusKey = null, returnFocus = null;
+  const panel = $('<section id="ai-cases-panel" class="asset-panel mt-3 d-none" aria-labelledby="ai-cases-title">');
+  $('#asset-primary-actions').after(panel);
   function text(tag, key, fallback) { return $(tag).attr('data-ai-text', key).attr('data-ai-fallback', fallback || '').text(tr(key, fallback)); }
-  function clear() { ++epoch; context = null; preview = null; busy = false; uncertain = false; statusKey = null; panel.empty().addClass('d-none'); }
+  function visibility(opened, owner) {
+    if (owner) document.dispatchEvent(new CustomEvent('veriqra:ai-cases-visibility', {
+      detail: { projectId: owner.projectId, requirementId: owner.requirement.id, open: opened }
+    }));
+  }
+  function clear() {
+    const owner = context;
+    ++epoch; context = null; preview = null; busy = false; uncertain = false; statusKey = null; returnFocus = null;
+    panel.empty().addClass('d-none'); visibility(false, owner);
+  }
+  function open() {
+    if (!context) return;
+    if (panel.hasClass('d-none')) returnFocus = document.activeElement;
+    panel.removeClass('d-none'); visibility(true, context); panel.find('.ai-instruction').trigger('focus');
+  }
+  function collapse() {
+    panel.addClass('d-none'); visibility(false, context);
+    if (returnFocus && typeof returnFocus.focus === 'function') returnFocus.focus();
+  }
   function hasDraft() { return busy || !!preview || uncertain; }
   function message(key, error) { statusKey = key; panel.find('.ai-status').text(key ? tr(key) : '').toggleClass('text-danger', !!error); }
   function path(action) { return 'projects/' + context.projectId + '/requirements/' + context.requirement.id + '/ai-cases/' + action; }
   function controls() {
     panel.find('input,textarea,select,button').prop('disabled', busy || uncertain);
+    panel.find('.ai-collapse').prop('disabled', false);
     panel.find('.ai-save').prop('disabled', busy || uncertain || !preview || !panel.find('.ai-select:checked').length);
   }
   function editor(key, value, multiline, max) {
@@ -122,7 +141,9 @@
     const basis = $('<div class="ai-basis small border-start ps-3 mb-3">').append(
       text('<strong>', 'basisLabel', 'Generation basis'), $('<p class="ai-basis-requirement mb-1">').text(identity),
       text('<p class="mb-0 text-secondary">', 'basisDescription', 'Generate 3–5 candidates from this requirement’s description, including acceptance criteria, and the additional instructions below.'));
-    panel.removeClass('d-none').append(text('<h3 class="fs-5">', 'heading'), basis,
+    panel.append($('<div class="asset-panel-heading">').append(
+      text('<h3 id="ai-cases-title" class="fs-5">', 'heading'),
+      text('<button type="button" class="ai-collapse btn btn-outline-secondary btn-sm">', 'collapse', 'Collapse').on('click', collapse)), basis,
       editor('instruction', '', true, 2000), text('<button type="button" class="ai-generate btn btn-outline-primary">', 'generate').on('click', generate),
       $('<p class="ai-status mt-2" role="status" aria-live="polite">'), $('<div class="ai-candidates">'),
       text('<button type="button" class="ai-save btn btn-primary d-none me-2">', 'save').on('click', save),
@@ -141,6 +162,6 @@
     panel.find('.ai-priority option').each(function () { $(this).text(window.I18n.enumLabel(this.value)); });
     if (statusKey) panel.find('.ai-status').text(tr(statusKey));
   });
-  window.VeriqraAiCases = Object.freeze({ mount: mount, clear: clear, hasDraft: hasDraft, validCandidates: validCandidates });
+  window.VeriqraAiCases = Object.freeze({ mount: mount, open: open, clear: clear, hasDraft: hasDraft, validCandidates: validCandidates });
   if (window.VeriqraDraftGuard) window.VeriqraDraftGuard.register('ai-cases', { dirty: hasDraft, clear: clear });
 })(jQuery, window.VeriqraApi);

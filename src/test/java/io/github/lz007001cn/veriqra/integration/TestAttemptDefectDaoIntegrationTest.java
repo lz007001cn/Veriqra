@@ -8,6 +8,27 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TestAttemptDefectDaoIntegrationTest extends ExecutionFixture {
+    @Test void summaryQueryDeduplicatesHistoricalFailuresAndExcludesOtherRunsPassAndOtherProjects() {
+        tx.inTransaction(c -> {
+            var e = execution(c); var attempts = new JdbcTestAttemptDao(c); var defects = new JdbcDefectDao(c);
+            var dao = new JdbcTestAttemptDefectDao(c);
+            var fail1 = attempts.insert(attempt(e,1,TestAttemptStatus.FAIL));
+            var fail2 = attempts.insert(attempt(e,2,TestAttemptStatus.FAIL));
+            var pass = attempts.insert(attempt(e,3,TestAttemptStatus.PASS));
+            var bug = defects.insert(defect(e.parents(),1)); var notFail = defects.insert(defect(e.parents(),2));
+            dao.add(new TestAttemptDefect(fail1.id(),bug.id(),e.parents().userId(),null));
+            dao.add(new TestAttemptDefect(fail2.id(),bug.id(),e.parents().userId(),null));
+            dao.add(new TestAttemptDefect(pass.id(),notFail.id(),e.parents().userId(),null));
+            var other = new JdbcProjectDao(c).insert(project("OTHERSUM",e.parents().userId()));
+            var crossProject = defects.insert(defect(new Parents(e.parents().userId(),other.id()),1));
+            dao.add(new TestAttemptDefect(fail1.id(),crossProject.id(),e.parents().userId(),null));
+            var anotherRun = new JdbcTestRunDao(c).insert(run(e.parents(),null));
+            assertEquals(List.of(bug.id()),dao.listDefectIdsByRun(e.run().id()));
+            assertTrue(dao.listDefectIdsByRun(anotherRun.id()).isEmpty());
+            assertTrue(dao.listDefectIdsByRun(-1L).isEmpty());
+            return null;
+        });
+    }
     @Test void manyToManyQueriesAndRemovingOnlyErroneousEvidenceLink() {
         tx.inTransaction(c -> {
             var e = execution(c); var attempts = new JdbcTestAttemptDao(c); var defects = new JdbcDefectDao(c);

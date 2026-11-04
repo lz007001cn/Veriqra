@@ -18,6 +18,7 @@
   <script defer src="assets/js/project-picker.js"></script>
   <script defer src="assets/js/test-assets.js"></script>
   <script defer src="assets/js/ai-cases.js"></script>
+  <script defer src="assets/js/ai-run-summary.js"></script>
   <script defer src="assets/js/execution.js"></script>
   <script defer src="assets/js/defects.js"></script>
   <script defer src="assets/js/automation-imports.js"></script>
@@ -102,12 +103,12 @@
           </div>
           <div id="asset-detail-panel" class="asset-panel d-none">
             <div class="asset-panel-heading"><h2 id="asset-detail-title"></h2><div class="d-flex gap-2"><button id="asset-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToList">Back to list</button><button id="asset-edit" class="btn btn-primary" type="button" data-i18n="common.edit">Edit</button></div></div>
+            <div id="asset-primary-actions" class="step-actions mb-3"></div>
             <div id="asset-detail" class="asset-detail"></div>
             <p id="asset-readonly-note" class="text-secondary small d-none" role="status"></p>
-            <div id="asset-primary-actions" class="step-actions mb-3"></div>
             <div id="asset-partial-link-panel" class="alert alert-warning d-none" role="status"><p id="asset-partial-link-status"></p><button id="asset-partial-link-retry" class="btn btn-outline-primary btn-sm" type="button" data-i18n="assets.retryRequirementLink">Retry requirement link</button></div>
             <div id="asset-steps-section" class="d-none"><h3 data-i18n="shell.steps">Steps</h3><div id="asset-steps"></div></div>
-            <div id="asset-trace-section"><div class="asset-panel-heading"><h3 data-i18n="shell.traceability">Traceability</h3><button id="trace-add-button" class="btn btn-outline-primary btn-sm" type="button" data-i18n="shell.linkItem">Link item</button></div><p id="trace-help" class="text-secondary small"></p><p id="asset-trace-status" role="status" aria-live="polite"></p><div class="step-actions mb-2"><button id="asset-trace-load" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="assets.loadRequirements">Load linked requirements</button><button id="asset-trace-retry" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="common.retry">Retry</button></div><div id="asset-traces"></div>
+            <div id="asset-trace-section"><div class="asset-panel-heading"><h3 id="asset-trace-title">Traceability</h3><button id="trace-add-button" class="btn btn-outline-primary btn-sm" type="button">Link item</button></div><p id="trace-help" class="text-secondary small"></p><p id="asset-trace-status" role="status" aria-live="polite"></p><div class="step-actions mb-2"><button id="asset-trace-load" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="assets.loadRequirements">Load linked requirements</button><button id="asset-trace-retry" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="common.retry">Retry</button></div><div id="requirement-coverage-summary" class="d-none" role="status" aria-live="polite"></div><div id="asset-traces"></div>
               <form id="trace-form" class="d-none" novalidate><label id="trace-target-label" for="trace-target" class="form-label" data-i18n="shell.linkTo">Link to</label><div class="d-flex flex-wrap gap-2"><select id="trace-target" class="form-select asset-link-select" required></select><button id="trace-submit" type="submit" class="btn btn-primary" data-i18n="shell.link">Link</button><button id="trace-cancel" type="button" class="btn btn-outline-secondary" data-i18n="common.cancel">Cancel</button></div></form>
             </div>
           </div>
@@ -116,10 +117,10 @@
             <div id="asset-form-error" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
             <p id="asset-form-context" class="text-secondary small" role="status"></p><p id="asset-form-guidance" class="text-secondary small"></p>
             <div class="mb-3"><label for="asset-title" class="form-label"><span data-i18n="common.title">Title</span> <span aria-hidden="true">*</span></label><input id="asset-title" class="form-control" maxlength="240" required aria-required="true"></div>
-            <div class="mb-3"><label for="asset-description" class="form-label" data-i18n="common.description">Description</label><textarea id="asset-description" class="form-control" rows="3"></textarea></div>
+            <div class="mb-3"><label id="asset-description-label" for="asset-description" class="form-label">Description</label><textarea id="asset-description" class="form-control" rows="3"></textarea></div>
             <div class="row g-3 mb-3"><div class="col-sm-6"><label for="asset-priority" class="form-label"><span data-i18n="common.priority">Priority</span> <span aria-hidden="true">*</span></label><select id="asset-priority" class="form-select" required><option value="LOW" data-i18n="shell.low">Low</option><option value="MEDIUM" data-i18n="shell.medium">Medium</option><option value="HIGH" data-i18n="shell.high">High</option></select></div><div id="asset-status-wrap" class="col-sm-6 d-none"><label for="asset-status" class="form-label" data-i18n="common.status">Status</label><select id="asset-status" class="form-select"></select></div></div>
             <div id="asset-case-fields" class="d-none"><div class="mb-3"><label for="asset-preconditions" class="form-label" data-i18n="shell.preconditions">Preconditions</label><textarea id="asset-preconditions" class="form-control" rows="2"></textarea></div><div class="asset-panel-heading"><h3 data-i18n="shell.testSteps">Test steps</h3><button id="step-add" class="btn btn-outline-primary btn-sm" type="button" data-i18n="shell.addStep">Add step</button></div><p class="text-secondary small" data-i18n="shell.stepsAreSavedTogetherWithTheTestCaseOrderStartsAt1">Steps are saved together with the test case. Order starts at 1.</p><div id="step-editor"></div></div>
-            <button id="asset-save" class="btn btn-primary" type="submit" data-i18n="common.save">Save</button>
+            <div class="form-footer"><button id="asset-save" class="btn btn-primary" type="submit" data-i18n="common.save">Save</button><button id="asset-form-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
           </form>
         </section>
         <section id="execution-workspace" class="d-none" aria-label="Plans and runs" data-i18n-aria-label="shell.plansAndRuns">
@@ -131,9 +132,9 @@
           </div>
           <div id="execution-detail-panel" class="asset-panel d-none">
             <div class="asset-panel-heading"><h2 id="execution-detail-title"></h2><button id="execution-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToList">Back to list</button></div>
-            <div id="execution-detail"></div>
             <div id="execution-context" class="step-actions mb-2"></div><div id="execution-progress" class="mb-3" role="status" aria-live="polite"></div>
             <div id="execution-actions" class="step-actions"></div>
+            <div id="execution-detail"></div>
             <section id="execution-items-section" class="mt-4" aria-label="Plan cases or run snapshots" data-i18n-aria-label="shell.planCasesOrRunSnapshots"><h3 id="execution-items-title"></h3><p id="execution-items-status" role="status" aria-live="polite"></p><div id="execution-items"></div></section>
           </div>
           <form id="execution-form" class="asset-panel d-none" novalidate>
@@ -150,7 +151,7 @@
               <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-environment" class="form-label" data-i18n="shell.environment">Environment</label><input id="execution-environment" class="form-control" maxlength="160"></div><div class="col-sm-6"><label for="execution-build" class="form-label" data-i18n="shell.buildVersion">Build version</label><input id="execution-build" class="form-control" maxlength="80"></div></div>
             </div>
             <fieldset id="execution-cases-fieldset" class="mb-3"><legend class="fs-6" data-i18n="common.testCases">Test cases</legend><p class="text-secondary small" data-i18n="shell.onlyCasesInTheCurrentProjectAreListedRunCreationRequiresREADYCases">Only cases in the current project are listed. Run creation requires READY cases.</p><div id="execution-case-selector" class="execution-selector"></div></fieldset>
-            <button id="execution-save" class="btn btn-primary" type="submit" data-i18n="common.save">Save</button>
+            <div class="form-footer"><button id="execution-save" class="btn btn-primary" type="submit" data-i18n="common.save">Save</button><button id="execution-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
           </form>
           <section id="execution-case-panel" class="asset-panel d-none" aria-label="Run case snapshot and attempts" data-i18n-aria-label="shell.runCaseSnapshotAndAttempts">
             <div class="asset-panel-heading"><h2 id="execution-case-title"></h2><button id="execution-case-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToRun">Back to run</button></div>
@@ -163,7 +164,7 @@
               <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-outcome" class="form-label" data-i18n="shell.outcome">Outcome</label><select id="execution-outcome" class="form-select" required><option value="" data-i18n="r2Exec.chooseOutcome">Choose the actual result</option><option value="PASS" data-i18n="status.pass">PASS</option><option value="FAIL" data-i18n="status.fail">FAIL</option><option value="BLOCKED" data-i18n="status.blocked">BLOCKED</option><option value="SKIPPED" data-i18n="status.skipped">SKIPPED</option></select></div><div class="col-sm-6"><label for="execution-duration" class="form-label" data-i18n="shell.durationMsOptional">Duration (ms, optional)</label><input id="execution-duration" class="form-control" type="number" min="0" step="1"></div></div>
               <div class="mb-3"><label for="execution-comment" class="form-label" data-i18n="shell.actualResultComment">Actual result / comment</label><textarea id="execution-comment" class="form-control" rows="3"></textarea></div>
               <div id="execution-failure-wrap" class="mb-3 d-none"><label for="execution-failure" class="form-label" data-i18n="shell.failureMessage">Failure message</label><textarea id="execution-failure" class="form-control" rows="2"></textarea></div>
-              <button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Save test result</button>
+              <div id="execution-attempt-actions" class="form-footer"><button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Save test result</button><button id="execution-attempt-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
             </form>
             <h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Execution history</h3>
             <p id="execution-history-status" role="status" aria-live="polite"></p><div id="execution-history"></div>
@@ -178,8 +179,8 @@
           </div>
           <div id="defect-detail-panel" class="asset-panel d-none">
             <div class="asset-panel-heading"><h2 id="defect-detail-title"></h2><button id="defect-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToDefects">Back to defects</button></div>
-            <div id="defect-detail"></div>
             <div id="defect-actions" class="step-actions"></div>
+            <div id="defect-detail"></div>
             <div id="defect-action-status" class="alert d-none mt-3" role="status" aria-live="polite"></div>
             <form id="defect-action-form" class="mt-4 d-none" novalidate>
               <h3 id="defect-action-title" class="fs-5"></h3>
@@ -197,7 +198,7 @@
                 <label for="defect-action-case" class="form-label" data-i18n="shell.runCaseSnapshot">Run Case snapshot</label><select id="defect-action-case" class="form-select mb-2"></select>
                 <label for="defect-action-attempt" class="form-label" data-i18n="shell.failAttempt">FAIL attempt</label><select id="defect-action-attempt" class="form-select mb-3"></select>
               </div>
-              <div class="d-flex flex-wrap gap-2"><button id="defect-action-submit" class="btn btn-primary" type="submit" data-i18n="common.confirm">Confirm</button><button id="defect-action-cancel" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
+              <div class="form-footer"><button id="defect-action-submit" class="btn btn-primary" type="submit" data-i18n="common.confirm">Confirm</button><button id="defect-action-cancel" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
             </form>
             <section class="mt-4" aria-labelledby="defect-closure-heading"><h3 id="defect-closure-heading" class="fs-5" data-i18n="defects.retestAndClosure">Retest and closure</h3><div id="defect-closure" aria-live="polite"></div></section>
             <h3 class="fs-5 mt-4" data-i18n="shell.failureEvidenceAndRetests">Failure evidence and retests</h3>
@@ -218,7 +219,7 @@
             <div class="row g-3 mb-3"><div class="col-sm-6"><label for="defect-create-severity" class="form-label" data-i18n="common.severity">Severity</label><select id="defect-create-severity" class="form-select"><option value="LOW" data-i18n="status.low">LOW</option><option value="MEDIUM" data-i18n="status.medium">MEDIUM</option><option value="HIGH" data-i18n="status.high">HIGH</option><option value="CRITICAL" data-i18n="status.critical">CRITICAL</option></select></div><div class="col-sm-6"><label for="defect-create-priority" class="form-label" data-i18n="common.priority">Priority</label><select id="defect-create-priority" class="form-select"><option value="LOW" data-i18n="status.low">LOW</option><option value="MEDIUM" data-i18n="status.medium">MEDIUM</option><option value="HIGH" data-i18n="status.high">HIGH</option></select></div></div>
             <div class="mb-3"><label for="defect-create-assignee-search" class="form-label" data-i18n="defects.searchAssignee">Search project members</label><input id="defect-create-assignee-search" class="form-control mb-2" type="search" autocomplete="off"><label for="defect-create-assignee" class="form-label" data-i18n="defects.optionalAssignee">Assignee (optional)</label><select id="defect-create-assignee" class="form-select" aria-describedby="defect-create-assignee-status"></select><div id="defect-create-assignee-status" class="small text-secondary mt-1" role="status"></div></div>
             </div>
-            <button id="defect-create-submit" class="btn btn-primary" type="submit" data-i18n="shell.createDefect">Create defect</button>
+            <div class="form-footer"><button id="defect-create-submit" class="btn btn-primary" type="submit" data-i18n="shell.createDefect">Create defect</button><button id="defect-create-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
           </form>
         </section>
         <section id="project-settings-workspace" class="d-none" aria-label="Project settings" data-i18n-aria-label="projectSettings.navigation"></section>

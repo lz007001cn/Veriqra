@@ -29,6 +29,9 @@
   let retestPending = null;
   let editBlocked = false;
   let actionFeedback = null;
+  let listLoaded = false;
+  const listPositions = new Map();
+  const expandedSections = new Map();
   const pickerData = { 'defect-create': {}, 'defect-action': {} };
   const pickerGeneration = { 'defect-create': 0, 'defect-action': 0 };
   const pickerFailures = { 'defect-create': {}, 'defect-action': {} };
@@ -51,9 +54,29 @@
     return $('<a class="btn btn-outline-primary btn-sm">').text(text)
       .attr('href', nav ? nav.href(next, Object.assign({ projectId: projectId }, context)) : '#' + next)
       .on('click', function (event) {
-        if (!nav || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        if (!nav || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || (event.button != null && event.button !== 0)) return;
         event.preventDefault(); nav.open(next, Object.assign({ projectId: projectId }, context));
       });
+  }
+  function rememberList(id) {
+    if (!active() || !listLoaded || $('#defect-list-panel').hasClass('d-none')) return;
+    const position = listPositions.get(projectId) || { scroll: 0 };
+    if (Number.isFinite(window.scrollY)) position.scroll = window.scrollY;
+    if (id != null) position.id = String(id);
+    listPositions.set(projectId, position);
+  }
+  function restoreList(token) {
+    const position = listPositions.get(projectId);
+    if (!position || typeof window.scrollTo !== 'function') return;
+    const restore = function () { if (valid(token) && !$('#defect-list-panel').hasClass('d-none')) window.scrollTo(0, position.scroll); };
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(restore); else restore();
+  }
+  function disclosure(name, title, content) {
+    const sectionKey = projectId + '/' + (detail ? detail.defect.id : '') + '/' + name;
+    const section = $('<details class="workflow-details">').attr('data-section', name).prop('open', expandedSections.get(sectionKey) === true)
+      .append($('<summary>').text(title), content);
+    section.on('toggle', function () { expandedSections.set(sectionKey, this.open === true); });
+    return section;
   }
   function mutationState(value) {
     mutating = value;
@@ -104,6 +127,7 @@
   }
   function reset() {
     generation++;
+    listLoaded = false;
     pickerGeneration['defect-create']++;
     pickerGeneration['defect-action']++;
     detail = null; actionMode = null; mutating = false; evidenceValues = null; evidenceLoading = false; linkableDefects = [];
@@ -126,6 +150,7 @@
   async function list() {
     if (!active()) return;
     const token = ++generation;
+    listLoaded = false;
     detail = null; actionMode = null; mutating = false;
     panels('list'); notice('');
     $('#defect-list').empty(); $('#defect-list-status').text(t("defects.loadingDefects", null, 'Loading defects…'));
@@ -136,14 +161,15 @@
       $('#defect-list-status').text(rows.length ? t('defects.defectCount', { count: window.I18n.formatNumber(rows.length) }, '{count} defect(s)') : t("defects.noDefectsInThisProject", null, 'No defects in this project.'));
       rows.forEach(function (row) {
         const title = 'BUG-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title;
-        $('#defect-list').append($('<div class="asset-list-row">').append(
-          $('<div class="asset-list-summary">').append($('<strong>').text(title),
+        const position = listPositions.get(projectId);
+        $('#defect-list').append($('<div class="asset-list-row">').attr('data-defect-id', row.id).toggleClass('is-recently-viewed', !!position && sameId(position.id, row.id)).append(
+          $('<div class="asset-list-summary">').append(routeLink(title, 'defects', { defectId: String(row.id) }).removeClass('btn btn-outline-primary btn-sm').addClass('asset-title-link'),
             $('<p class="mb-1 text-secondary">').text(row.description || t("common.noDescription", null, 'No description'))),
           $('<div class="asset-list-meta">').append(badge(row.status),
             $('<span>').text(t('defects.severityPriority', { severity: label(row.severity), priority: label(row.priority) }, 'Severity {severity} · Priority {priority}')),
-            $('<span>').text('v' + row.version), $('<small>').text(t('defects.updatedAt', { date: date(row.updatedAt) }, 'Updated {date}'))),
-          routeLink(t("defects.viewDefect", null, 'View defect'), 'defects', { defectId: String(row.id) })));
+            $('<span>').text('v' + row.version), $('<small>').text(t('defects.updatedAt', { date: date(row.updatedAt) }, 'Updated {date}')))));
       });
+      listLoaded = true; restoreList(token);
     } catch (error) { if (valid(token)) {
       $('#defect-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(error.message, true);
       $('#defect-list').append($('<button type="button" class="btn btn-outline-secondary btn-sm">')
@@ -197,14 +223,15 @@
         field(t("defects.failureMessage", null, 'Failure message'), source ? source.failureMessage : link.failureMessage, true),
         field(t('defects.linked', null, 'Linked'), date(link.linkedAt))));
     const later = (value.history || []).filter(function (attempt) { return attempt.attemptNo > link.attemptNo; });
-    card.append($('<p class="small fw-semibold mb-1">').text(t("defects.laterRetestsOnThisRunCase", null, 'Later retests on this Run Case')));
     if (value.unavailable) card.append($('<p class="small text-danger" role="status">').text(t('defects.evidenceUnavailable', null, 'Run or attempt history could not be loaded. Retest status is unavailable.')));
     else if (!later.length) card.append($('<p class="small text-secondary">').text(t("defects.noLaterAttemptRecorded", null, 'No later attempt recorded.')));
+    const laterHistory = $('<div>');
     later.forEach(function (attempt) {
-      card.append($('<div class="defect-retest">').append(
+      laterHistory.append($('<div class="defect-retest">').append(
         $('<span>').text(t('defects.attemptAt', { number: attempt.attemptNo, date: date(attempt.executedAt) }, 'Attempt #{number} · {date} · ')), badge(attempt.outcome),
         $('<span>').text(' ' + (attempt.comment || attempt.failureMessage || t("defects.noComment", null, 'No comment')))));
     });
+    if (later.length) card.append(disclosure('later-attempts-' + link.attemptId, t('defects.laterHistory', { count: later.length }, 'Later attempts ({count})'), laterHistory));
     const context = { runId: String(link.runId), runCaseId: String(link.runCaseId), attemptId: String(link.attemptId), defectId: String(defect.id) };
     card.append(routeLink(t('defects.openSourceAttempt', null, 'Open source attempt'), 'runs', context));
     if (value.runCase && value.runCase.testCaseId != null) card.append(routeLink(t('defects.openOriginalCase', null, 'Open original Test Case'), 'test-cases', Object.assign({}, context, { testCaseId: String(value.runCase.testCaseId) })).addClass('ms-2'));
@@ -214,6 +241,7 @@
   }
   async function openDetail(id, feedback) {
     if (!active()) return;
+    rememberList(id);
     const token = ++generation;
     actionMode = null; detail = null; mutating = false; evidenceValues = null; evidenceLoading = false; panels('detail'); notice(''); actionStatus('');
     closureEligibility = null; closureLoading = true; closureFailure = null; closureGeneration++; closureNeedsAccessRefresh = false; retestEditor = null; candidatePages.clear(); retestPending = null;
@@ -252,7 +280,8 @@
         field(t("common.created", null, 'Created'), date(defect.createdAt)), field(t("common.updated", null, 'Updated'), date(defect.updatedAt))));
   }
   function renderActions(defect) {
-    const actions = $('#defect-actions').empty();
+    const actions = $('#defect-actions').empty().addClass('workflow-next');
+    const controls = $('<div class="workflow-next-actions">');
     const tester = canManage();
     const processor = tester || canProcess(defect);
     const closeReady = !!(tester && !retestPending && !closureLoading && closureEligibility && closureEligibility.canClose && closureEligibility.defectVersion === defect.version);
@@ -261,16 +290,23 @@
       : defect.status === 'IN_PROGRESS' ? (processor ? ['defects.nextResolve', 'Next: enter the fix details and mark the defect resolved.'] : ['defects.nextWaitResolve', 'Waiting for the assignee to record the fix.'])
       : closeReady ? ['defects.nextClose', 'Retest passed. Next: close the defect.'] : ['defects.nextRetest', 'Next: retest the original failure and link its passing result.'];
     actions.append($('<p class="w-100 fw-semibold mb-1" role="status">').text(t(hint[0], null, hint[1])));
-    if (processor && ['OPEN', 'REOPENED'].includes(defect.status)) actions.append(actionButton(t("defects.startWork", null, 'Start work'), function () { return transition('start'); }, true));
-    if (processor && defect.status === 'IN_PROGRESS') actions.append(actionButton(t("defects.resolve", null, 'Resolve'), function () { showAction('resolve'); }, true));
-    if (tester && defect.status === 'RESOLVED') {
-      if (!closeReady) actions.append(actionButton(t('defects.enterRetest', null, 'Review retest results'), function () { focusHeading('#defect-closure-heading'); }, true));
-      actions.append(actionButton(t("common.close", null, 'Close'), function () { return transition('close'); }, closeReady)
-        .prop('disabled', mutating || !!retestPending || !closeReady));
+    if (defect.status === 'RESOLVED' && !closeReady && closureEligibility && closureEligibility.defectVersion === defect.version) {
+      const pending = (closureEligibility.failures || []).filter(function (failure) { return !failure.eligible; });
+      const reasons = (closureEligibility.reasons || []).concat(pending.flatMap(function (failure) { return failure.reasons || []; }));
+      if (pending.length) actions.append($('<p class="mb-2">').text(t('defects.pendingRetests', { count: pending.length }, '{count} failure(s) still need valid retest evidence.')));
+      if (reasons.length) actions.append($('<p class="mb-2">').text(reasonText(reasons[0])));
     }
-    if (tester && defect.status !== 'CLOSED') actions.append(actionButton(t('defects.editDefect', null, 'Edit and reassign'), function () { showAction('edit'); }));
-    if (tester && ['RESOLVED', 'CLOSED'].includes(defect.status)) actions.append(actionButton(t("defects.reopenWithNewFAIL", null, 'Reopen with new FAIL'), function () { showAction('reopen'); }));
-    if (tester && defect.status !== 'CLOSED') actions.append(actionButton(t("defects.addFailureEvidence", null, 'Add failure evidence'), function () { showAction('add'); }));
+    actions.append(controls);
+    if (processor && ['OPEN', 'REOPENED'].includes(defect.status)) controls.append(actionButton(t("defects.startWork", null, 'Start work'), function () { return transition('start'); }, true));
+    if (processor && defect.status === 'IN_PROGRESS') controls.append(actionButton(t("defects.resolve", null, 'Resolve'), function () { showAction('resolve'); }, true));
+    if (tester && defect.status === 'RESOLVED') {
+      if (!closeReady) controls.append(actionButton(t('defects.enterRetest', null, 'Review retest results'), function () { focusHeading('#defect-closure-heading'); }, true));
+      controls.append(actionButton(t("common.close", null, 'Close'), function () { return transition('close'); }, closeReady)
+        .prop('disabled', mutating || !!retestPending || editorActive() || !closeReady));
+    }
+    if (tester && defect.status !== 'CLOSED') controls.append(actionButton(t('defects.editDefect', null, 'Edit and reassign'), function () { showAction('edit'); }));
+    if (tester && ['RESOLVED', 'CLOSED'].includes(defect.status)) controls.append(actionButton(t("defects.reopenWithNewFAIL", null, 'Reopen with new FAIL'), function () { showAction('reopen'); }));
+    if (tester && defect.status !== 'CLOSED') controls.append(actionButton(t("defects.addFailureEvidence", null, 'Add failure evidence'), function () { showAction('add'); }));
     const members = detailMemberState();
     if (members && (members.loading || members.failed)) {
       const status = $('<div class="small text-secondary" role="status">').attr('id', 'defect-detail-members-status')
@@ -280,6 +316,7 @@
         .on('click', function () { if (!mutating && detailMemberState() === members && !members.loading) return loadMembers('defect-detail', members.retained); }));
       actions.append(status);
     }
+    $('#defect-closure .defect-retest-open').prop('disabled', mutating || !!retestPending || editorActive());
   }
   function detailMemberState() { const state = memberPickers['defect-detail']; return state && valid(state.generation) && state.accessGeneration === accessGeneration && state.owner === detail ? state : null; }
   function activeActorMember() { return actor && projectMembers.find(function (row) { return sameId(row.userId, actor.id) && row.status === 'ACTIVE' && row.userStatus === 'ACTIVE'; }); }
@@ -294,7 +331,8 @@
       if (detail) { renderActions(detail.defect); renderClosure(); if (evidenceValues) renderEvidence(detail); recoverStoredOperation(); }
     } catch (error) { if (valid(token) && accessToken === accessGeneration) { actor = null; if (detail) { renderActions(detail.defect); renderClosure(); } } }
   }
-  function actionButton(text, callback, primary) { return $('<button type="button" class="btn ' + (primary ? 'btn-primary' : 'btn-outline-primary') + '">').text(text).prop('disabled', mutating).on('click', function () { if (!mutating) return callback(); }); }
+  function editorActive() { return !!actionMode || !!retestEditor; }
+  function actionButton(text, callback, primary) { return $('<button type="button" class="btn ' + (primary && !editorActive() ? 'btn-primary' : 'btn-outline-primary') + '">').text(text).prop('disabled', mutating || editorActive()).on('click', function () { if (!mutating && !editorActive()) return callback(); }); }
   async function transition(mode) {
     const defect = detail && detail.defect;
     if (mode === 'close' && (retestPending || closureLoading || !canManage() || !closureEligibility || !closureEligibility.canClose || closureEligibility.defectVersion !== defect.version)) return;
@@ -337,10 +375,12 @@
   function executionContext(execution) { return { runId: String(execution.run.id), runCaseId: String(execution.runCase.id), attemptId: String(execution.attempt.id), defectId: detail && String(detail.defect.id) }; }
   function executionSummary(execution) {
     const attempt = execution.attempt;
-    return $('<div>').append($('<p class="mb-1 fw-semibold">').text(executionTitle(execution)),
+    const facts = $('<div>').append(
       $('<p class="small mb-1">').text(t('defects.executionOrigin', { source: attempt.importId == null ? t('defects.manualSource', null, 'Manual execution') : t('defects.importSource', null, 'JUnit import'), recorded: date(attempt.recordedAt) }, '{source} · recorded {recorded}')),
       $('<p class="small mb-1">').text(attempt.executedAt ? t('defects.actualExecutionTime', { time: date(attempt.executedAt) }, 'Actual execution time: {time}') : t('defects.externalTimingUnverified', null, 'The imported report does not provide verified actual execution time.')),
-      $('<p class="small mb-1">').text(t('defects.buildEnvironment', { build: execution.run.buildVersion || '—', environment: execution.run.environment || '—' }, 'Build: {build} · environment: {environment}')),
+      $('<p class="small mb-1">').text(t('defects.buildEnvironment', { build: execution.run.buildVersion || '—', environment: execution.run.environment || '—' }, 'Build: {build} · environment: {environment}')));
+    return $('<div>').append($('<p class="mb-1 fw-semibold">').text(executionTitle(execution)),
+      disclosure('execution-' + attempt.id, t('defects.executionDetails', null, 'Execution source and timing'), facts),
       routeLink(t('defects.openSourceAttempt', null, 'Open source attempt'), 'runs', executionContext(execution)));
   }
   async function loadEligibility(current, token, refreshAccess) {
@@ -390,12 +430,14 @@
     if (versionChanged) target.append($('<p class="small text-danger">').text(t('defects.eligibilityVersionChanged', null, 'The defect changed while evidence was loading. Reload the latest detail before making changes.')),
       $('<button type="button" class="btn btn-outline-secondary btn-sm mb-2">').text(t('defects.reviewLatest', null, 'Review latest details')).prop('disabled', mutating).on('click', function () { if (!mutating) return openDetail(detail.defect.id); }));
     target.append($('<p class="fw-semibold">').text(detail.defect.status === 'CLOSED' ? t('defects.closedEvidenceHistory', null, 'This defect is closed. The receipt records the evidence accepted then; current results may differ without changing that decision.') : readyToClose ? t('defects.readyToClose', null, 'Every retained FAIL has a valid current PASS. Closing will verify this again.') : t('defects.closureBlocked', null, 'Closure is currently blocked.')));
-    if (detail.defect.status !== 'CLOSED') (eligibility.reasons || []).forEach(function (code) { target.append($('<p class="small text-secondary">').text(reasonText(code))); });
+    const conditions = $('<div>');
+    if (detail.defect.status !== 'CLOSED') (eligibility.reasons || []).forEach(function (code) { conditions.append($('<p class="small text-secondary">').text(reasonText(code))); });
     const members = detailMemberState();
-    if (!canManage() && !(members && (members.loading || members.failed)) && detail.defect.status !== 'CLOSED') target.append($('<p class="small text-secondary">').text(t('defects.retestPermission', null, 'An active project Tester or platform Admin must review retest evidence and close the defect.')));
-    if (detail.defect.status === 'RESOLVED' && !versionChanged && canManage()) target.append($('<p class="small">').text(readyToClose
+    if (!canManage() && !(members && (members.loading || members.failed)) && detail.defect.status !== 'CLOSED') conditions.append($('<p class="small text-secondary">').text(t('defects.retestPermission', null, 'An active project Tester or platform Admin must review retest evidence and close the defect.')));
+    if (detail.defect.status === 'RESOLVED' && !versionChanged && canManage()) conditions.append($('<p class="small">').text(readyToClose
       ? t('defects.resolvedReadyToClose', null, 'Retest evidence is complete. Next, close the defect; the server will verify eligibility again when you submit.')
       : t('defects.resolvedNextStep', null, 'Next: perform the retest, link its PASS for each original FAIL, check eligibility, then close the defect.')));
+    if (detail.defect.status !== 'CLOSED') target.append(disclosure('closure-conditions', t('defects.closureConditions', null, 'Closure condition details'), conditions));
     (eligibility.failures || []).forEach(function (failure) {
       const source = failure.source, id = String(source.attempt.id);
       const card = $('<div class="execution-attempt mt-3">').attr('id', 'defect-closure-failure-' + id).append(
@@ -412,7 +454,7 @@
       if (canManage() && detail.defect.status !== 'CLOSED') {
         if (failure.currentCaseCompatible && source.currentCase && source.currentCase.status === 'READY') card.append(routeLink(t('defects.retestInNewRun', null, 'Retest in a new run'), 'runs', {
           action: 'create', sourceTestCaseId: String(source.currentCase.id), runId: String(source.run.id), runCaseId: String(source.runCase.id), failureAttemptId: id, defectId: String(detail.defect.id)
-        }).removeClass('btn-outline-primary').addClass('btn-primary mt-2'));
+        }).addClass('mt-2'));
         else {
           card.append($('<p class="small text-secondary mt-2">').text(source.currentCase && source.currentCase.status !== 'READY' ? t('defects.currentCaseNotReady', null, 'The current Test Case must be READY before creating a new retest run.') : t('defects.currentDefinitionChanged', null, 'The current Test Case definition differs from this frozen failure. A new run from it cannot be used to close this failure.')));
           if (source.currentCase && !failure.currentCaseCompatible) {
@@ -426,13 +468,14 @@
         if (failure.canRetestOriginal) card.append(routeLink(t('defects.goRetest', null, 'Go to retest'), 'runs', executionContext(source)).addClass('mt-2 ms-2'));
         card.append($('<button type="button" class="btn btn-outline-primary btn-sm mt-2 ms-2">').text(t('defects.findRetestPass', null, 'Find retest PASS'))
           .prop('disabled', mutating || !!retestPending).on('click', function () { if (!mutating && !retestPending) return loadCandidates(failure); }));
-        if (failure.selection && !failure.selection.revocation) card.append($('<button type="button" class="btn btn-outline-danger btn-sm mt-2 ms-2">').text(t('defects.revokeRetest', null, 'Revoke selected PASS'))
-          .prop('disabled', mutating || !!retestPending).on('click', function () { if (!mutating && !retestPending) showRetestEditor(failure, null, 'REVOKE'); }));
+        if (failure.selection && !failure.selection.revocation) card.append($('<button type="button" class="btn btn-outline-danger btn-sm mt-2 ms-2 defect-retest-open">').text(t('defects.revokeRetest', null, 'Revoke selected PASS'))
+          .prop('disabled', mutating || !!retestPending || editorActive()).on('click', function () { if (!mutating && !retestPending) showRetestEditor(failure, null, 'REVOKE'); }));
       }
       card.append($('<div class="mt-3">').attr('id', 'defect-candidates-' + id)); target.append(card);
       renderCandidates(failure);
     });
     if (eligibility.legacyClosed) target.append($('<p class="small text-secondary">').text(t('defects.legacyClosure', null, 'Legacy closure used the earlier same-run rule. No immutable closure receipt was saved.')));
+    const closureHistory = $('<div>');
     (eligibility.history || []).forEach(function (history) {
       const receipt = history.receipt;
       const card = $('<div class="execution-attempt mt-3">').append($('<h4 class="fs-6">').text(t('defects.closureReceipt', { time: date(receipt.closedAt) }, 'Closure receipt · {time}')),
@@ -443,8 +486,9 @@
         routeLink(t('defects.viewOriginalFail', null, 'View original FAIL'), 'runs', executionContext(item.failure)),
         routeLink(t('defects.viewAcceptedPass', null, 'View accepted PASS'), 'runs', executionContext(item.pass)).addClass('ms-2'));
       });
-      target.append(card);
+      closureHistory.append(card);
     });
+    if ((eligibility.history || []).length) target.append(disclosure('closure-history', t('defects.closureHistory', { count: eligibility.history.length }, 'Closure history ({count})'), closureHistory));
     target.append($('<div class="mt-3">').attr('id', 'defect-retest-editor'), $('<div class="mt-3" role="status">').attr('id', 'defect-operation-status'));
     renderRetestEditor(); renderOperationRecovery();
   }
@@ -474,7 +518,8 @@
       if (failure.source.runCase.snapshotPriority !== candidate.execution.runCase.snapshotPriority) card.append($('<p class="small text-secondary">').text(t('defects.priorityDifference', null, 'Priority differs; priority is not part of semantic compatibility.')));
       if (candidate.requiresImportConfirmation) card.append($('<p class="small text-secondary">').text(t('defects.importReviewRequired', null, 'Confirm that the external test actually ran after the failure. Upload time alone does not prove this.')));
       card.append($('<button type="button" class="btn btn-outline-primary btn-sm mt-2">').text(selected ? t('defects.alreadySelected', null, 'Currently selected') : t('defects.useThisPass', null, 'Use this PASS'))
-        .prop('disabled', mutating || !!retestPending || !candidate.eligible || selected).on('click', function () { if (!mutating && !retestPending && candidate.eligible && !selected) showRetestEditor(failure, candidate, 'LINK'); }));
+        .toggleClass('defect-retest-open', candidate.eligible && !selected)
+        .prop('disabled', mutating || !!retestPending || editorActive() || !candidate.eligible || selected).on('click', function () { if (!mutating && !retestPending && candidate.eligible && !selected) showRetestEditor(failure, candidate, 'LINK'); }));
       target.append(card);
     });
     if (state.nextCursor && !state.loading) target.append($('<button type="button" class="btn btn-outline-secondary btn-sm">').text(t('defects.moreCandidates', null, 'Load more PASS candidates')).prop('disabled', mutating).on('click', function () { if (!mutating) return loadCandidates(failure, state.nextCursor); }));
@@ -493,7 +538,9 @@
     retestEditor.confirmed = !!$('#defect-retest-confirm').prop('checked');
   }
   function showRetestEditor(failure, candidate, mode) {
+    if (editorActive()) return;
     retestEditor = { failure: failure, candidate: candidate, mode: mode, note: '', reason: '', confirmed: false };
+    renderActions(detail.defect);
     renderRetestEditor(); $('#defect-retest-' + (mode === 'REVOKE' ? 'reason' : 'note')).trigger('focus');
   }
   function renderRetestEditor() {
@@ -514,7 +561,7 @@
       $('<textarea class="form-control mb-3" rows="2" maxlength="2000">').attr('id', 'defect-retest-reason').val(editor.reason),
       $('<p class="small text-secondary">').text(t('defects.revocationHistory', null, 'The prior relationship stays in history. Revocation cannot erase it; a later selection creates a new relationship.')));
     form.append($('<button type="submit" class="btn btn-primary">').text(editor.mode === 'REVOKE' ? t('defects.confirmRevocation', null, 'Confirm revocation') : t('defects.confirmRetestLink', null, 'Confirm retest link')).prop('disabled', mutating || !!retestPending),
-      $('<button type="button" class="btn btn-outline-secondary ms-2">').text(t('common.cancel', null, 'Cancel')).prop('disabled', mutating).on('click', function () { retestEditor = null; renderRetestEditor(); focusHeading('#defect-closure-heading'); }));
+      $('<button type="button" class="btn btn-outline-secondary ms-2">').text(t('common.cancel', null, 'Cancel')).prop('disabled', mutating).on('click', function () { retestEditor = null; renderRetestEditor(); renderActions(detail.defect); focusHeading('#defect-closure-heading'); }));
     form.on('submit', async function (event) {
       event.preventDefault();
       if (!valid(token) || mutating || retestPending || retestEditor !== editor || !canManage()) return;
@@ -819,7 +866,7 @@
     else $('#defect-create-title').trigger('focus');
   }
   function showAction(mode) {
-    if (!detail || mutating) return;
+    if (!detail || mutating || editorActive()) return;
     pickerGeneration['defect-action']++;
     actionMode = mode;
     editBlocked = false;
@@ -837,6 +884,7 @@
     if (!['resolve', 'edit'].includes(mode)) loadRuns('defect-action');
     if (mode === 'resolve') $('#defect-resolution').trigger('focus');
     else focusHeading('#defect-action-title');
+    renderActions(detail.defect);
   }
   function actionLabels(mode) {
     $('#defect-action-title').text({ edit: t('defects.editDefect', null, 'Edit and reassign'), resolve: t("defects.resolveDefect", null, 'Resolve defect'), reopen: t("defects.reopenWithANewFAIL", null, 'Reopen with a new FAIL'), add: t("defects.addFailureEvidence", null, 'Add failure evidence') }[mode]);
@@ -882,6 +930,7 @@
     if (projectId && String(value.projectId) === projectId) launch = value;
   });
   $(document).on('veriqra:project', function (event) {
+    rememberList();
     const next = event.originalEvent.detail.project;
     if (!next || (projectId && String(next.id) !== projectId)) launch = null;
     reset(); projectId = next ? String(next.id) : null;
@@ -892,6 +941,7 @@
   });
   $(document).on('veriqra:view', function (event) {
     const payload = event.originalEvent.detail, next = payload.view;
+    rememberList();
     if (next !== view) { reset(); view = next; }
     if (!active()) return;
     consumeRoute(payload.context || (navigation() && navigation().read()));
@@ -929,8 +979,8 @@
     }
   });
   $('#defect-new').on('click', function () { if (navigation()) navigation().open('defects', { projectId: projectId, action: 'create' }); else showCreate(null); });
-  $('#defect-back, #defect-create-cancel').on('click', function () { if (navigation()) navigation().open('defects', { projectId: projectId }); else list(); });
-  $('#defect-action-cancel').on('click', function () { actionMode = null; pickerGeneration['defect-action']++; clearPickerFailures('defect-action'); $('#defect-action-form').addClass('d-none'); focusHeading('#defect-detail-title'); });
+  $('#defect-back, #defect-create-cancel, #defect-create-cancel-bottom').on('click', function () { if (navigation()) navigation().open('defects', { projectId: projectId }); else list(); });
+  $('#defect-action-cancel').on('click', function () { actionMode = null; pickerGeneration['defect-action']++; clearPickerFailures('defect-action'); $('#defect-action-form').addClass('d-none'); if (detail) renderActions(detail.defect); focusHeading('#defect-detail-title'); });
   ['defect-create', 'defect-action'].forEach(function (prefix) {
     $('#' + prefix + '-assignee-search').on('input', function () { renderMembers(prefix); });
     $('#' + prefix + '-assignee').on('change', function () { if (memberPickers[prefix]) memberPickers[prefix].selected = String($(this).val() || ''); updatePickerSubmit(prefix); });

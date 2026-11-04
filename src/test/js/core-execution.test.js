@@ -16,6 +16,7 @@ function browser(options = {}) {
   class Element {
     constructor(tag = 'div') { this.tag = tag; this.value = ''; this.content = ''; this.children = []; this.classes = new Set(); this.handlers = {}; this.attributes = {}; this.disabled = false; this.checked = false; }
     reportValidity() { return true; }
+    focus() { this.focused = true; }
     reset() { if (this.id === 'execution-attempt-form') formIds.forEach(id => { $( '#' + id).val(id === 'execution-outcome' ? 'PASS' : ''); }); }
   }
   const descendants = node => node.children.flatMap(child => child instanceof Element ? [child, ...descendants(child)] : []);
@@ -25,7 +26,7 @@ function browser(options = {}) {
     text(value) { if (value === undefined) return this[0]?.content; return this.each(function () { this.content = String(value); }); }
     val(value) { if (value === undefined) return this[0]?.value ?? ''; return this.each(function () { this.value = value == null ? '' : String(value); }); }
     empty() { return this.each(function () { this.children = []; this.content = ''; }); }
-    append(...items) { return this.each(function () { items.flatMap(item => item instanceof Collection ? [...item] : [item]).forEach(item => { this.children.push(item); if (item instanceof Element) { item.parent = this; if (this.tag === 'select' && this.children.length === 1) this.value = item.value; } }); }); }
+    append(...items) { return this.each(function () { items.flatMap(item => item instanceof Collection ? [...item] : [item]).forEach(item => { if (item instanceof Element && item.parent) item.parent.children = item.parent.children.filter(child => child !== item); this.children.push(item); if (item instanceof Element) { item.parent = this; if (this.tag === 'select' && this.children.length === 1) this.value = item.value; } }); }); }
     attr(name, value) { if (value === undefined) return this[0]?.attributes[name]; return this.each(function () { this.attributes[name] = String(value); if (name === 'id') { this.id = String(value); nodes.set('#' + value, this); } }); }
     prop(name, value) { if (value === undefined) return this[0]?.[name]; return this.each(function () { this[name] = value; }); }
     addClass(names) { return this.each(function () { names.split(' ').forEach(name => this.classes.add(name)); }); }
@@ -69,7 +70,7 @@ function browser(options = {}) {
     read: () => route,
     href(view, context) { const query = new URLSearchParams(context); return 'http://localhost/index.html?' + query + '#' + view; },
     select(view, context) { route = { view, ...context }; },
-    open(view, context) { if (options.beforeNavigate) options.beforeNavigate(view, context, guards.get('execution')); route = { view, ...context }; navigation.push(route); emit('veriqra:view', { view, projectId: route.projectId, context: route }); }
+    open(view, context) { if (options.beforeNavigate && options.beforeNavigate(view, context, guards.get('execution')) === false) return; route = { view, ...context }; navigation.push(route); emit('veriqra:view', { view, projectId: route.projectId, context: route }); }
   };
   function request(method, url, body) {
     let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -83,6 +84,13 @@ function browser(options = {}) {
   const window = { VeriqraApi: api, VeriqraQaNavigation: nav, VeriqraQaContext: { load: () => options.contextFailure ? Promise.reject({ status: 403, message: 'Permissions unavailable' }) : Promise.resolve(context) }, VeriqraDraftGuard: { register: (owner, config) => guards.set(owner, config) }, confirm: () => true, I18n: {
     t: (key, values, fallback) => ((locale === 'zh-CN' && chinese[key]) || fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''), enumLabel: value => value, formatNumber: String, formatDateTime: value => value || '—'
   } };
+  const scrollCalls = [], frames = [];
+  window.scrollY = 0;
+  window.scrollTo = (x, y) => { window.scrollY = y; scrollCalls.push(y); };
+  if (options.deferScroll) window.requestAnimationFrame = fn => frames.push(fn);
+  $('#execution-submit')[0].tag = 'button'; $('#execution-submit').attr('type', 'submit').addClass('btn btn-primary');
+  $('#execution-attempt-cancel-bottom')[0].tag = 'button'; $('#execution-attempt-cancel-bottom').attr('type', 'button').addClass('btn btn-outline-secondary');
+  $('#execution-attempt-form').append($('#execution-attempt-actions').addClass('form-footer').append($('#execution-submit'), $('#execution-attempt-cancel-bottom')));
   let sequence = 0;
   vm.runInNewContext(source, { window, document, jQuery: $, crypto: { randomUUID: () => 'key-' + ++sequence }, location: { hash: '' }, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } }, Map, Set, Number, String, Object, JSON });
   emit('veriqra:project', { project: { id: 12 } });
@@ -92,7 +100,7 @@ function browser(options = {}) {
   const open = async (view, context) => { nav.open(view, { projectId: '12', ...context }); await flush(); };
   const textOf = node => node.content + node.children.map(child => child instanceof Element ? textOf(child) : String(child)).join(' ');
   const find = (selector, text) => descendants($(selector)[0]).find(node => node.content === text);
-  return { $, nodes, calls, impactCalls, defectCalls, guards, emit, navigation, nav, click, submit, respond, open, textOf, find, context(value) { context = { ...context, ...value }; }, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
+  return { $, nodes, calls, impactCalls, defectCalls, guards, emit, navigation, nav, click, submit, respond, open, textOf, find, scrollCalls, frames, scroll(y) { window.scrollY = y; }, context(value) { context = { ...context, ...value }; }, locale(name) { locale = name; emit('veriqra:localechange', {}); } };
 }
 
 function run(outcomes = ['NOT_RUN', 'FAIL', 'PASS'], status = 'IN_PROGRESS') {
@@ -105,6 +113,143 @@ async function loadCase(ui, caseId = '50', history = [], value = run(), targetAt
   // Legacy positive submission tests explicitly choose an outcome as a user action. The separate R2 gate checks the unselected initial form.
   if (!ui.$('#execution-outcome').val()) ui.$('#execution-outcome').val('PASS');
 }
+
+test('plan list restores its own scroll position and recently viewed title after returning', async () => {
+  const ui = browser();
+  const row = { id: 31, keyNo: 31, name: 'Plan 31', status: 'READY', version: 2 };
+  await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), [row]); ui.scroll(420);
+  const title = ui.find('#execution-list', 'TP-031 · Plan 31');
+  assert.equal(title.tag, 'a');
+  assert.equal(await ui.click(title, { ctrlKey: true }), false);
+  assert.equal(ui.calls.length, 1);
+  await ui.click(title); await ui.respond(ui.calls.at(-1), planDetail());
+  await ui.respond(ui.calls.at(-1), [{ id: 20, status: 'READY', keyNo: 20, title: 'One' }, { id: 21, status: 'READY', keyNo: 21, title: 'Two' }]);
+  ui.scroll(900); await ui.click(ui.$('#execution-back')[0]); await ui.respond(ui.calls.at(-1), [row]);
+  assert.equal(ui.scrollCalls.at(-1), 420);
+  const restored = ui.find('#execution-list', 'TP-031 · Plan 31'); assert.equal(restored.focused, true);
+  assert.equal(restored.parent.parent.classes.has('is-recently-viewed'), true);
+  ui.nav.select('test-plans', { projectId: '13' }); ui.emit('veriqra:project', { project: { id: 13 } }); await flush();
+  await ui.respond(ui.calls.at(-1), [row]);
+  assert.equal(ui.scrollCalls.at(-1), 0);
+  assert.equal(ui.find('#execution-list', 'TP-031 · Plan 31').parent.parent.classes.has('is-recently-viewed'), false);
+});
+
+test('loading or failed list returns do not overwrite the saved project scroll position', async () => {
+  for (const response of ['pending', 'failed']) {
+    const ui = browser();
+    const row = { id: 31, keyNo: 31, name: 'Plan 31', status: 'READY', version: 2 };
+    await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), [row]); ui.scroll(420);
+    await ui.click(ui.find('#execution-list', 'TP-031 · Plan 31'));
+    await ui.respond(ui.calls.at(-1), planDetail(31, 1));
+    await ui.respond(ui.calls.at(-1), [{ id: 20, keyNo: 20, title: 'One', status: 'READY' }]);
+    await ui.click(ui.$('#execution-back')[0]); const returning = ui.calls.at(-1); ui.scroll(0);
+    if (response === 'failed') { returning.reject({ status: 500, message: 'List unavailable' }); await flush(); }
+    ui.nav.select('test-plans', { projectId: '13' }); ui.emit('veriqra:project', { project: { id: 13 } }); await flush();
+    const otherProject = ui.calls.at(-1);
+    if (response === 'pending') await ui.respond(returning, [row]);
+    await ui.respond(otherProject, [row]); assert.equal(ui.scrollCalls.at(-1), 0);
+    ui.nav.select('test-plans', { projectId: '12' }); ui.emit('veriqra:project', { project: { id: 12 } }); await flush();
+    await ui.respond(ui.calls.at(-1), [row]);
+    assert.equal(ui.scrollCalls.at(-1), 420, response);
+    assert.equal(ui.find('#execution-list', 'TP-031 · Plan 31').parent.parent.classes.has('is-recently-viewed'), true);
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  }
+});
+
+test('a deferred list restoration cannot scroll a newly opened run or another project', async () => {
+  const ui = browser({ deferScroll: true });
+  await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), [{ id: 31, keyNo: 31, name: 'Plan 31', status: 'READY' }]);
+  assert.equal(ui.frames.length, 1);
+  await ui.open('runs', { runId: '40' });
+  ui.frames.shift()(); assert.equal(ui.scrollCalls.length, 0);
+});
+
+test('plan next action has one primary control for empty, blocked, complete draft and ready plans', async () => {
+  const nodes = node => [node, ...node.children.filter(child => child && Array.isArray(child.children)).flatMap(nodes)];
+  for (const [status, members, cases, expected] of [
+    ['DRAFT', [], [{ id: 20, keyNo: 20, title: 'One', status: 'READY' }], 'Choose cases to add'],
+    ['READY', [20], [{ id: 20, keyNo: 20, title: 'One', status: 'DRAFT' }], 'Review TC-020 · One'],
+    ['DRAFT', [20], [{ id: 20, keyNo: 20, title: 'One', status: 'READY' }], 'Check and mark plan READY'],
+    ['READY', [20], [{ id: 20, keyNo: 20, title: 'One', status: 'READY' }], 'Create run from this plan']
+  ]) {
+    const ui = browser(); await ui.open('test-plans', { planId: '31' });
+    await ui.respond(ui.calls.at(-1), { plan: { id: 31, keyNo: 1, name: 'Plan', status, version: 2 }, testCaseIds: members });
+    await ui.respond(ui.calls.at(-1), cases);
+    const primary = nodes(ui.$('#execution-actions')[0]).filter(node => node.classes.has('btn-primary') && !node.disabled);
+    assert.equal(primary.length, 1, status + '/' + members.length); assert.equal(primary[0].content, expected);
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+    if (status === 'READY' && cases[0].status === 'DRAFT') {
+      await ui.click(primary[0]); assert.equal(ui.navigation.at(-1).testCaseId, '20'); assert.equal(ui.navigation.at(-1).sourcePlanId, '31');
+    }
+  }
+});
+
+test('run outcomes are shown once and completion impact only contains defect information', async () => {
+  const ui = browser({ manualImpact: true }); await ui.open('runs', { runId: '40' });
+  await ui.respond(ui.calls.at(-1), run(['PASS', 'FAIL', 'NOT_RUN']));
+  await ui.respond(ui.impactCalls[0], { outcomes: { PASS: 99, FAIL: 98, NOT_RUN: 97 }, openDefectCount: 3, pendingRetestDefectCount: 2 });
+  const text = ui.textOf(ui.$('#execution-progress')[0]);
+  assert.equal((text.match(/PASS: 1/g) || []).length, 1);
+  assert.doesNotMatch(ui.textOf(ui.$('#execution-completion-impact')[0]), /PASS|FAIL|NOT_RUN|99|98|97/);
+  assert.match(ui.textOf(ui.$('#execution-completion-impact')[0]), /Unclosed defects: 3/);
+});
+
+test('case result entry has one primary save action and secondary navigation in every run state', async () => {
+  const descendants = node => node.children.filter(child => child && Array.isArray(child.children)).flatMap(child => [child, ...descendants(child)]);
+  for (const [status, outcomes, history, canWrite] of [
+    ['NEW', ['NOT_RUN', 'NOT_RUN'], [], true],
+    ['IN_PROGRESS', ['NOT_RUN', 'PASS'], [], true],
+    ['IN_PROGRESS', ['PASS', 'NOT_RUN'], [attempt(60, 'PASS')], true],
+    ['IN_PROGRESS', ['PASS'], [attempt(60, 'PASS')], true],
+    ['COMPLETED', ['PASS'], [attempt(60, 'PASS')], true],
+    ['IN_PROGRESS', ['PASS', 'NOT_RUN'], [attempt(60, 'PASS')], false]
+  ]) {
+    const ui = browser({ context: { canWriteAssets: canWrite } });
+    await loadCase(ui, '50', history, run(outcomes, status));
+    const writable = status === 'IN_PROGRESS' && canWrite;
+    const controls = ['#execution-case-progress', '#execution-case-navigation'].flatMap(selector => descendants(ui.$(selector)[0]));
+    if (!ui.$('#execution-attempt-form').hasClass('d-none')) controls.push(...descendants(ui.$('#execution-attempt-form')[0]));
+    const primary = controls.filter(node => node.classes.has('btn-primary') && !node.disabled);
+    assert.deepEqual(primary.map(node => node.id), writable ? ['execution-submit'] : [], status + '/' + outcomes.join(',') + '/' + canWrite);
+    const nextCase = ui.find('#execution-case-progress', 'Next unrecorded case: Frozen 1');
+    const review = ui.find('#execution-case-progress', 'Review results and complete the run');
+    for (const navigation of [nextCase, review].filter(Boolean)) assert.equal(navigation.classes.has('btn-outline-primary'), true);
+    if (writable && history.length) assert.ok(outcomes.includes('NOT_RUN') ? nextCase : review);
+    const footer = ui.$('#execution-attempt-actions')[0];
+    assert.deepEqual(footer.children.map(node => node.id), writable && outcomes.length > 1
+      ? ['execution-submit', 'execution-record-next', 'execution-attempt-cancel-bottom']
+      : ['execution-submit', 'execution-attempt-cancel-bottom']);
+    if (writable && outcomes.length > 1) {
+      assert.equal(ui.$('#execution-record-next').hasClass('btn-outline-primary'), true);
+      assert.equal(ui.$('#execution-record-next').hasClass('ms-2'), false);
+    }
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  }
+});
+
+test('bottom result cancel uses guarded Back to run navigation and never records the unsaved result', async () => {
+  let allowLeave = false; const attemptedNavigation = [];
+  const ui = browser({ beforeNavigate(view, context, guard) {
+    const dirty = !!guard && guard.dirty(); attemptedNavigation.push({ view, context, dirty });
+    return !dirty || allowLeave;
+  } });
+  await loadCase(ui); ui.$('#execution-comment').val('Keep this unsaved result'); ui.$('#execution-outcome').val('BLOCKED');
+  const cancel = ui.$('#execution-attempt-cancel-bottom')[0];
+  assert.equal(cancel.attributes.type, 'button');
+  assert.equal(cancel.handlers.click[0], ui.$('#execution-case-back')[0].handlers.click[0]);
+  const requestsBeforeCancel = ui.calls.length; await ui.click(cancel);
+  assert.equal(attemptedNavigation.at(-1).dirty, true);
+  assert.equal(attemptedNavigation.at(-1).context.runCaseId, undefined);
+  assert.equal(ui.nav.read().runCaseId, '50', 'Declining the draft guard keeps the current case open');
+  assert.equal(ui.calls.length, requestsBeforeCancel);
+  assert.equal(ui.$('#execution-comment').val(), 'Keep this unsaved result');
+  allowLeave = true; await ui.click(cancel); await ui.respond(ui.calls.at(-1), run());
+  assert.equal(ui.nav.read().runId, '40'); assert.equal(ui.nav.read().runCaseId == null, true);
+  await loadCase(ui);
+  assert.equal(ui.$('#execution-comment').val(), 'Keep this unsaved result');
+  assert.equal(ui.$('#execution-outcome').val(), 'BLOCKED');
+  assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
+});
 
 test('run progress counts every recorded outcome and completion requires all cases', async () => {
   const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN', 'PASS', 'FAIL', 'BLOCKED', 'SKIPPED']));
@@ -560,7 +705,7 @@ async function respondRunCase(ui, current, history = []) {
 
 test('Continue execution and snapshot selection preserve retest identity in native hrefs, refresh and new-tab case recovery', async () => {
   const current = run(['NOT_RUN', 'NOT_RUN']), ui = browser(); await ui.open('runs', { runId: '40', ...retestIdentity }); await ui.respond(ui.calls.at(-1), current);
-  const continued = ui.find('#execution-actions', 'Continue execution'); const continuation = routeFromHref(continued.attributes.href);
+  const continued = ui.find('#execution-actions', 'Start execution'); const continuation = routeFromHref(continued.attributes.href);
   expectRetestIdentity(continuation); assert.equal(continuation.runCaseId, '50');
   const selected = ui.find('#execution-items', 'View snapshot and attempts'); expectRetestIdentity(routeFromHref(selected.attributes.href));
   assert.equal(await ui.click(continued, { ctrlKey: true }), false, 'New-tab gestures retain native navigation');
@@ -599,7 +744,7 @@ test('recorded PASS and record-and-next retain the original FAIL independently o
 
 test('plain Run navigation stays free of unrelated defect context', async () => {
   const ui = browser(); await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), run(['NOT_RUN']));
-  const plain = routeFromHref(ui.find('#execution-actions', 'Continue execution').attributes.href);
+  const plain = routeFromHref(ui.find('#execution-actions', 'Start execution').attributes.href);
   for (const key of Object.keys(retestIdentity)) assert.equal(key in plain, false);
 });
 

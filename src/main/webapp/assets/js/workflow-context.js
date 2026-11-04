@@ -62,7 +62,12 @@
     const fallback = new URL('index.html', document.baseURI);
     try {
       const input = new URL(candidate || '', document.baseURI);
-      if (input.origin !== fallback.origin || input.pathname !== fallback.pathname || input.username || input.password) return fallback.href;
+      if (input.origin !== fallback.origin || input.username || input.password) return fallback.href;
+      const adminPage = ['admin/users.html', 'admin/ai.html'].find(function (path) {
+        return input.pathname === new URL(path, document.baseURI).pathname;
+      });
+      if (adminPage) return new URL(adminPage, document.baseURI).href;
+      if (input.pathname !== fallback.pathname) return fallback.href;
       const views = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings'];
       const requestedView = input.hash.slice(1) || 'dashboard';
       const view = requestedView === 'collaboration' ? 'project-settings' : requestedView;
