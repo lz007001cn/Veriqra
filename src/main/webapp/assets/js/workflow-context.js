@@ -74,7 +74,7 @@
       if (!views.includes(view)) return fallback.href;
       const keys = ['projectId','requirementId','testCaseId','planId','runId','runCaseId','attemptId','defectId',
         'sourceRequirementId','sourceTestCaseId','sourcePlanId','failureAttemptId'];
-      if (view === 'release-acceptance') keys.push('acceptanceId');
+      if (view === 'release-acceptance') keys.push('acceptanceId', 'sourceRunId');
       keys.forEach(function (key) { const value = input.searchParams.get(key); if (validId(value)) fallback.searchParams.set(key, value); });
       if (['create', 'link'].includes(input.searchParams.get('action'))) fallback.searchParams.set('action', input.searchParams.get('action'));
       fallback.hash = view; return fallback.href;

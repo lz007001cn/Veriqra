@@ -106,6 +106,31 @@ function browser(options = {}) {
 function run(outcomes = ['NOT_RUN', 'FAIL', 'PASS'], status = 'IN_PROGRESS') {
   return { run: { id: 40, projectId: 12, testPlanId: 30, name: 'Release run', status, version: 2 }, cases: outcomes.map((outcome, index) => ({ runCaseId: 50 + index, testCaseId: 20 + index, snapshotTitle: 'Frozen ' + index, snapshotDescription: 'Captured description', snapshotPreconditions: 'Before', snapshotPriority: 'HIGH', capturedAt: '2026-10-01', steps: [{ stepOrder: 1, action: 'Frozen action', expectedResult: 'Frozen expected' }], currentOutcome: outcome, latestAttempt: outcome === 'NOT_RUN' ? null : { id: 60 + index, outcome } })) };
 }
+
+test('completed, versioned runs link to acceptance for actors who can save it', async () => {
+  for (const [status, buildVersion, canWriteAssets, visible] of [
+    ['COMPLETED', '1.4.1', true, true],
+    ['COMPLETED', ' ', true, false],
+    ['COMPLETED', '1.4.1', false, false],
+    ['IN_PROGRESS', '1.4.1', true, false],
+    ['CANCELLED', '1.4.1', true, false]
+  ]) {
+    const ui = browser({ context: { canWriteAssets } });
+    const value = run(['FAIL'], status);
+    value.run.buildVersion = buildVersion;
+    await ui.open('runs', { runId: '40' });
+    await ui.respond(ui.calls.at(-1), value);
+    const link = ui.find('#execution-actions', 'Go to release acceptance');
+    assert.equal(!!link, visible, `${status}, ${buildVersion}, ${canWriteAssets}`);
+    if (link) {
+      await ui.click(link);
+      assert.equal(ui.nav.read().view, 'release-acceptance');
+      assert.equal(ui.nav.read().projectId, '12');
+      assert.equal(ui.nav.read().sourceRunId, '40');
+      assert.equal(ui.calls.some(call => call.method === 'POST'), false);
+    }
+  }
+});
 const attempt = (id = 60, outcome = 'FAIL', key = 'prior-key', number = 1) => ({ id, runCaseId: 50, attemptNo: number, outcome, submissionKey: key, comment: 'Earlier result', failureMessage: outcome === 'FAIL' ? 'Failure detail' : null });
 const planDetail = (id = 31, count = 2, status = 'READY') => ({ plan: { id, keyNo: id, name: 'Plan ' + id, status }, testCaseIds: Array.from({ length: count }, (_, index) => 20 + index) });
 async function loadCase(ui, caseId = '50', history = [], value = run(), targetAttempt) {

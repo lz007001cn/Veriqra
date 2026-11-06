@@ -782,6 +782,10 @@
       filtered.push({ row: row, outcome: item.currentOutcome }); $('#execution-items').append(row);
     });
     permissionNote('#execution-actions');
+    if (run.status === 'COMPLETED' && canWrite() && typeof run.buildVersion === 'string' && run.buildVersion.trim()) {
+      $('#execution-actions').append(routeLink(t('execution.openReleaseAcceptance', null, 'Go to release acceptance'),
+        'release-acceptance', { sourceRunId: idText(run.id) }, routeContext().defectId ? 'btn btn-outline-primary' : 'btn btn-primary'));
+    }
     if (run.status === 'IN_PROGRESS' && canWrite()) {
       const next = current.cases.find(function (item) { return item.currentOutcome === 'NOT_RUN'; });
       if (next) $('#execution-actions').append(

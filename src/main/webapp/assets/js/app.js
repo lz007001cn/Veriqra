@@ -22,7 +22,7 @@
   let workflowRequest = 0;
   function mayLeave() { return !window.VeriqraDraftGuard || window.VeriqraDraftGuard.allowLeave(); }
   const routeIds = ['projectId', 'requirementId', 'testCaseId', 'planId', 'runId', 'runCaseId', 'attemptId', 'defectId',
-    'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId', 'importId', 'retestRunId', 'retestRunCaseId', 'retestPassAttemptId', 'acceptanceId'];
+    'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId', 'importId', 'retestRunId', 'retestRunCaseId', 'retestPassAttemptId', 'acceptanceId', 'sourceRunId'];
   const routeFields = {
     requirements: ['requirementId', 'sourceTestCaseId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId', 'defectId'],
     'test-cases': ['testCaseId', 'sourceRequirementId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId', 'defectId'],
@@ -30,7 +30,7 @@
     runs: ['runId', 'runCaseId', 'attemptId', 'sourcePlanId', 'sourceTestCaseId', 'defectId', 'failureAttemptId'],
     defects: ['defectId', 'runId', 'runCaseId', 'failureAttemptId', 'retestRunId', 'retestRunCaseId', 'retestPassAttemptId'],
     automation: ['importId', 'runId'],
-    'release-acceptance': ['acceptanceId']
+    'release-acceptance': ['acceptanceId', 'sourceRunId']
   };
   function routeUrl() {
     // The fallback keeps source-only previews and simple test harnesses usable.

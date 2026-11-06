@@ -11,7 +11,7 @@ const catalogs = Object.fromEntries(['en', 'zh-CN'].map(locale => [locale,
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function browser({ canWrite = true, acceptanceId, locale = 'en' } = {}) {
+function browser({ canWrite = true, acceptanceId, sourceRunId, locale = 'en' } = {}) {
   const nodes = new Map(), calls = [], listeners = new Map(), guards = new Map();
   class Element {
     constructor(tag = 'div', attrs = {}) {
@@ -59,7 +59,7 @@ function browser({ canWrite = true, acceptanceId, locale = 'en' } = {}) {
     calls.push({ method, url, body, resolve, reject });
     return pending;
   }
-  let route = { view: 'release-acceptance', projectId: '7', acceptanceId };
+  let route = { view: 'release-acceptance', projectId: '7', acceptanceId, sourceRunId };
   const navigation = {
     read: () => route,
     href: (view, values) => 'index.html?' + new URLSearchParams(values) + '#' + view,
@@ -117,6 +117,57 @@ async function review(ui, evidence = preview()) {
 async function decide(ui, value = 'REJECTED') {
   ui.$('#release-verdict').val(value); await ui.fire('#release-verdict', 'change');
 }
+
+test('a completed source run preselects its own build without starting an evidence review', async () => {
+  const ui = browser({ sourceRunId: '11' }); await flush();
+  ui.calls.find(call => call.url === 'projects/7/runs').resolve([run(12, '2.1'), run(11, '2.1'), run(13, '2.2')]);
+  await flush();
+  assert.equal(ui.$('#release-build').val(), '2.1');
+  const selected = () => ui.$('#release-run-list').find('input').filter(node => node.checked).map(node => node.attrs.id);
+  assert.deepEqual([...selected()], ['release-run-11']);
+  assert.equal(ui.$('#release-preview-trigger')[0].classes.has('d-none'), false);
+  assert.equal(ui.$('#release-decision')[0].classes.has('d-none'), true);
+  assert.equal(ui.calls.filter(call => call.method === 'POST').length, 0);
+  assert.equal(ui.guards.get('release-acceptance').dirty(), false);
+
+  await selectRun(ui, 11, false); await selectRun(ui, 12);
+  ui.emit('veriqra:view', { view: 'release-acceptance', context: ui.navigation.read() });
+  ui.emit('veriqra:project', { project: { id: 7, status: 'ACTIVE' } });
+  assert.deepEqual([...selected()], ['release-run-12']);
+  assert.equal(ui.guards.get('release-acceptance').dirty(), true);
+  await review(ui, preview([secondRun]));
+  assert.deepEqual(plain(ui.calls.at(-1).body), { buildVersion: '2.1', runIds: [12] });
+  assert.equal(ui.$('#release-save')[0].disabled, true);
+});
+
+test('ineligible source runs leave the build selection editable', async () => {
+  for (const ineligible of [
+    { ...run(11, '2.1'), status: 'IN_PROGRESS' },
+    { ...run(11, '2.1'), projectId: 8 },
+    run(11, ' ')
+  ]) {
+    const ui = browser({ sourceRunId: '11' }); await flush();
+    ui.calls.find(call => call.url === 'projects/7/runs').resolve([ineligible, run(12, '2.2')]);
+    await flush();
+    assert.equal(ui.$('#release-build').val(), '');
+    assert.equal(ui.$('#release-preview-trigger')[0].classes.has('d-none'), true);
+    assert.equal(ui.$('#release-build')[0].disabled, false);
+    assert.equal(ui.text('#release-write-feedback'),
+      catalogs.en['releaseAcceptance.sourceRunUnavailable'] || 'releaseAcceptance.sourceRunUnavailable');
+    ui.$('#release-build').val('2.2'); await ui.fire('#release-build', 'change');
+    assert.equal(ui.text('#release-write-feedback'), '');
+    await selectRun(ui, 12);
+    assert.equal(ui.$('#release-preview-trigger')[0].classes.has('d-none'), false);
+  }
+});
+
+test('a saved record takes precedence over a source run in the same route', async () => {
+  const ui = browser({ acceptanceId: '99', sourceRunId: '11' }); await flush();
+  assert.deepEqual(ui.calls.map(call => call.url), [endpoint, endpoint + '/99']);
+  ui.calls[1].resolve(detail()); await flush();
+  assert.equal(ui.$('#release-create')[0].classes.has('d-none'), true);
+  assert.match(ui.text('#release-record'), /Rejected/);
+});
 
 test('one build selects multiple runs and saves only the explicitly reviewed evidence and human verdict', async () => {
   const ui = await ready();

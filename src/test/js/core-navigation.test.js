@@ -277,6 +277,17 @@ test('href filters invalid or irrelevant IDs and does not mutate navigation stat
   assert.equal(ui.location.href, before); assert.equal(ui.events.length, count);
 });
 
+test('release acceptance run handoff survives a direct link and is scoped to its view', async () => {
+  const ui = browser();
+  await ui.boot();
+  const context = { projectId: '7', sourceRunId: '40' };
+  const reopened = browser(ui.nav.href('release-acceptance', context));
+  await reopened.boot();
+  assert.deepEqual(plain(reopened.nav.read()), { view: 'release-acceptance', ...context });
+  assert.equal(new URL(reopened.nav.href('runs', { ...context, runId: '40' })).searchParams.has('sourceRunId'), false);
+  assert.equal(new URL(ui.nav.href('release-acceptance', { ...context, sourceRunId: '0' })).searchParams.has('sourceRunId'), false);
+});
+
 test('terminal-failure retest context survives refresh, new-tab URL and Back/Forward without numeric entry', async () => {
   for (const base of ['http://127.0.0.1:9000/', 'http://127.0.0.1:9000/veriqra/']) {
     const ui = browser(base + 'index.html?projectId=7&defectId=90#defects'); await ui.boot();

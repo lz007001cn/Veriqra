@@ -274,6 +274,15 @@ test('safe return target admits only same-origin deployment index, approved view
   }
 });
 
+test('sign-in preserves the source run only on the release acceptance page', () => {
+  const base = 'https://example.test/veriqra/';
+  const ui = browser({ base });
+  const target = new URL(ui.recovery.safeReturnTarget(base + 'index.html?projectId=7&sourceRunId=40#release-acceptance'));
+  assert.equal(target.searchParams.get('sourceRunId'), '40');
+  const other = new URL(ui.recovery.safeReturnTarget(base + 'index.html?projectId=7&sourceRunId=40#runs'));
+  assert.equal(other.searchParams.has('sourceRunId'), false);
+});
+
 test('login return destinations preserve project settings and translate the retired collaboration bookmark', () => {
   for (const base of ['https://example.test/', 'https://example.test/veriqra/']) {
     const ui = browser({ base });

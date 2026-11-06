@@ -4,7 +4,7 @@
 
 主线：**需求 → AI 辅助生成用例 → 测试计划 → 执行结果 → 缺陷 → 复测关闭**。支持手工执行和 JUnit XML 结果导入。
 
-当前构建为小团队试用候选 `0.9.1-trial.1`。试用版增加运行分工、缺陷讨论和发版验收。期末展示发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)，历史线上更新见 [ECS 部署记录](docs/ECS-DEPLOYMENT.md)。
+当前构建为小团队试用候选 `0.9.1-trial.2`。试用版增加运行分工、缺陷讨论和发版验收。已完成且有构建号的运行可直接进入发版验收。期末展示发布包见 [v0.9.0](https://github.com/lz007001cn/Veriqra/releases/tag/v0.9.0)，历史线上更新见 [ECS 部署记录](docs/ECS-DEPLOYMENT.md)。
 
 ## 功能
 
@@ -35,7 +35,7 @@ mvn clean package
 node --test src/test/js/*.test.js
 ```
 
-输出 `target/veriqra-0.9.1-trial.1.war`，可在 Tomcat 10.1 运行。
+输出 `target/veriqra-0.9.1-trial.2.war`，可在 Tomcat 10.1 运行。
 
 1. 按[数据库说明](database/README.md)安装数据库或应用当前构建所需的迁移。
 2. 复制 `config/database.example.properties` 为 `config/database.local.properties`，填写本地数据库连接。部署时也可通过 `VERIQRA_DB_CONFIG` 指向外部配置文件。

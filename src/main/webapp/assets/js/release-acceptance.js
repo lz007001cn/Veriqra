@@ -35,7 +35,7 @@
   function resource(s) { return base(s) + '/release-acceptances'; }
   function draft() {
     return { build: '', selected: new Set(), verdict: '', notes: '', evidence: null, previewState: '',
-      request: 0, intent: null, saving: false, feedback: '' };
+      request: 0, intent: null, saving: false, feedback: '', prefilled: false };
   }
   function active(s) { return scope === s; }
   function currentDraft(s, form) { return active(s) && s.form === form && !s.recordId; }
@@ -126,6 +126,7 @@
           if (!currentDraft(s, form) || form.saving || form.intent) return;
           if (this.checked && form.selected.size < maxRuns) form.selected.add(id);
           else if (!this.checked) form.selected.delete(id);
+          form.prefilled = false;
           invalidateEvidence(form);
           form.feedback = '';
           renderComposer(s);
@@ -170,12 +171,26 @@
       }
       s.builds = builds;
       s.candidateState = 'ready';
+      prefillSourceRun(s);
       renderBuilds(s);
     } catch (_) {
       if (!active(s)) return;
       s.candidateState = 'optionsFailed';
     }
     renderComposer(s);
+  }
+
+  function prefillSourceRun(s) {
+    if (!s.sourceRunId) return;
+    for (const [build, runs] of s.builds) {
+      if (runs.some(run => String(run.id) === s.sourceRunId && run.status === 'COMPLETED')) {
+        s.form.build = build;
+        s.form.selected.add(s.sourceRunId);
+        s.form.prefilled = true;
+        return;
+      }
+    }
+    s.form.feedback = 'sourceRunUnavailable';
   }
 
   function invalidateEvidence(form) {
@@ -331,18 +346,21 @@
     if (view !== viewName || !project || !validId(project.id)) { scope = null; return; }
     const projectId = String(project.id);
     const recordId = validId(route.acceptanceId) ? String(route.acceptanceId) : null;
+    const sourceRunId = !recordId && validId(route.sourceRunId) ? String(route.sourceRunId) : null;
     if (!scope || scope.projectId !== projectId) {
       scope = { projectId, form: draft(), builds: new Map(), canWrite: false, accessState: '', accessRequest: 0, candidateState: '',
-        recordId, record: null, recordState: '', recordRequest: 0, history: [], historyState: '', more: false };
+        sourceRunId, recordId, record: null, recordState: '', recordRequest: 0, history: [], historyState: '', more: false };
       renderBuilds(scope);
       loadHistory(scope);
       loadAccess(scope);
       if (recordId) loadRecord(scope); else renderRecord(scope);
-    } else if (scope.recordId !== recordId) {
+    } else if (scope.recordId !== recordId || scope.sourceRunId !== sourceRunId) {
+      scope.sourceRunId = sourceRunId;
       scope.recordId = recordId;
       scope.recordRequest++;
       scope.form = draft();
       scope.record = String(scope.lastSaved?.id) === recordId ? scope.lastSaved : null;
+      if (scope.candidateState === 'ready') prefillSourceRun(scope);
       renderBuilds(scope);
       renderComposer(scope);
       if (!recordId && scope.canWrite && scope.candidateState !== 'ready') loadCandidates(scope);
@@ -388,7 +406,7 @@
   if (window.VeriqraDraftGuard) window.VeriqraDraftGuard.register(viewName, {
     dirty: function () {
       const form = scope?.form;
-      return !!form && !!(form.build || form.verdict || form.notes || form.intent || form.saving);
+      return !!form && !!((form.build && !form.prefilled) || form.verdict || form.notes || form.intent || form.saving);
     },
     clear: function () { scope = null; }
   });
