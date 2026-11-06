@@ -1107,3 +1107,45 @@ test('R2 followup: source archived during editing is detected before creating an
   assert.equal(ui.requests.length, 2); assert.equal(ui.requests.every(call => call.method === 'get'), true);
   assert.equal(ui.$('#asset-title').val(), 'Still a local draft'); assert.equal(ui.$('#asset-save').prop('disabled'), true); assert.equal(ui.$('#asset-source-retry').prop('disabled'), false);
 });
+
+test('AI acceptance adoption appends only to an unsaved requirement draft and keeps expectedVersion', async () => {
+  const ui = browser(); let assist;
+  ui.window.VeriqraRequirementAssist = { clear() {}, hasDraft: () => false, mount(value) { if (value) assist = value; }, open() {} };
+  const saved = { ...ui.requirement(), description: 'Original requirement content' };
+  ui.dispatchProject(); ui.requests[0].resolve(saved); await flush(); ui.requests[1].resolve([]); await flush();
+  assert.equal(ui.$('#requirement-review-open').text(), 'Check requirement');
+  const adoption = assist.onAdoptCriteria({ requirementId: 10, expectedVersion: 2, criteria: ['Switch with an empty cache'] }); await flush();
+  ui.requests[2].resolve(saved); await adoption;
+  assert.equal(ui.$('#asset-form').hasClass('d-none'), false);
+  assert.equal(ui.$('#asset-description').val(), 'Original requirement content\n\nAcceptance criteria (AI suggestions)\n- Switch with an empty cache');
+  assert.equal(ui.guards.get('test-assets').dirty(), true); assert.equal(ui.requests.every(row => row.method === 'get'), true);
+  const saving = ui.submit('#asset-form'); await flush();
+  assert.equal(ui.requests[3].method, 'put'); assert.equal(ui.requests[3].body.expectedVersion, 2);
+  ui.requests[3].resolve({ ...saved, version: 3 }); await flush(); ui.requests[4].resolve({ ...saved, version: 3 }); await flush(); ui.requests[5].resolve([]); await saving;
+});
+
+test('AI criterion adoption preserves manual form edits and refuses a changed saved requirement', async () => {
+  const ui = browser(); let assist;
+  ui.window.VeriqraRequirementAssist = { clear() {}, hasDraft: () => false, mount(value) { if (value) assist = value; }, open() {} };
+  const saved = { ...ui.requirement(), description: 'Original' };
+  ui.dispatchProject(); ui.requests[0].resolve(saved); await flush(); ui.requests[1].resolve([]); await flush();
+  await ui.click('#asset-edit'); ui.$('#asset-title').val('My title'); ui.$('#asset-description').val('My draft text');
+  let work = assist.onAdoptCriteria({ requirementId: 10, expectedVersion: 2, criteria: ['New criterion'] }); await flush(); ui.requests[2].resolve(saved); await work;
+  assert.equal(ui.$('#asset-title').val(), 'My title'); assert.match(ui.$('#asset-description').val(), /^My draft text\n\n/);
+  const before = ui.$('#asset-description').val();
+  work = assert.rejects(assist.onAdoptCriteria({ requirementId: 10, expectedVersion: 2, criteria: ['Outdated criterion'] }), error => error.status === 409);
+  await flush(); ui.requests[3].resolve({ ...saved, version: 3 }); await work;
+  assert.equal(ui.$('#asset-description').val(), before); assert.equal(ui.requests.every(row => row.method === 'get'), true);
+});
+
+test('same-actor session recovery remounts requirement assistance after the saved detail is rechecked', async () => {
+  const ui = browser(); let assist = null, opened = 0;
+  ui.window.VeriqraRequirementAssist = { clear() { assist = null; }, hasDraft: () => false, mount(value) { assist = value; }, open() { if (assist) opened++; } };
+  const saved = ui.requirement();
+  ui.dispatchProject(); ui.requests[0].resolve(saved); await flush(); ui.requests[1].resolve([]); await flush();
+  ui.reauth(); ui.window.VeriqraRequirementAssist.clear();
+  ui.requests[2].resolve(saved); await flush(); ui.requests[3].resolve([]); await flush();
+  assert.ok(assist); assert.equal(assist.actorId, 1);
+  await ui.click('#requirement-review-open'); assert.equal(opened, 1);
+  assert.equal(ui.requests.every(row => row.method === 'get'), true);
+});

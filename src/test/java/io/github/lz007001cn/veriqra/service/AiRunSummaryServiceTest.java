@@ -1,9 +1,11 @@
 package io.github.lz007001cn.veriqra.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.lz007001cn.veriqra.model.*;
 import io.github.lz007001cn.veriqra.service.ai.*;
 import io.github.lz007001cn.veriqra.service.exception.*;
 import io.github.lz007001cn.veriqra.service.support.*;
+import io.github.lz007001cn.veriqra.web.json.JsonMapperProvider;
 import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.*;
@@ -18,6 +20,9 @@ class AiRunSummaryServiceTest {
     final List<TestRunCase> cases = new ArrayList<>();
     final Map<Long, TestAttempt> attempts = new HashMap<>();
     final List<Long> defectIds = new ArrayList<>();
+    final Map<Long, List<Long>> exactDefectIds = new HashMap<>();
+    final List<Long> exactLinkReads = new ArrayList<>();
+    long foreignDefectId = -1;
     AiRunSummaryInput captured;
     AiRunSummaryAnalysis answer = new AiRunSummaryAnalysis("Overview", List.of("Finding"), List.of("Retest"));
     final ServiceTransaction tx = new ServiceTransaction() {
@@ -36,7 +41,11 @@ class AiRunSummaryServiceTest {
             case "runCases.listByRun" -> List.copyOf(cases);
             case "attempts.findLatestByRunCase" -> Optional.ofNullable(attempts.get(args[0]));
             case "attemptDefects.listDefectIdsByRun" -> { assertEquals(9L,args[0]); yield List.copyOf(defectIds); }
-            case "defects.findById" -> Optional.of(new Defect((Long)args[0],7L,(Long)args[0],"Linked bug",null,DefectSeverity.HIGH,Priority.HIGH,DefectStatus.CLOSED,1L,null,"Fixed",null,LocalDateTime.of(2026,10,30,4,0),0));
+            case "attemptDefects.listDefectsByAttempt" -> {
+                Long attempt = (Long) args[0]; exactLinkReads.add(attempt);
+                yield exactDefectIds.getOrDefault(attempt, List.of()).stream().map(id -> new TestAttemptDefect(attempt, id, 1L, null)).toList();
+            }
+            case "defects.findById" -> Optional.of(new Defect((Long)args[0],(Long)args[0] == foreignDefectId ? 8L : 7L,(Long)args[0],"Linked bug",null,DefectSeverity.HIGH,Priority.HIGH,DefectStatus.CLOSED,1L,null,"Fixed",null,LocalDateTime.of(2026,10,30,4,0),0));
             case "runCaseSteps.listByRunCase" -> List.of(new TestRunCaseStep((Long)args[0],1,"Action","Expected"));
             default -> throw new AssertionError("Unexpected read/write " + dao + "." + method);
         };
@@ -63,6 +72,11 @@ class AiRunSummaryServiceTest {
         cases.add(new TestRunCase(id,9L,id + 100,"Case " + id,"Description","Preconditions",Priority.HIGH,null));
         if (status != null) attempts.put(id,new TestAttempt(id + 1000,id,3,status,1L,null,null,null,null,null,"Actual",status == TestAttemptStatus.FAIL ? "Failure" : null,UUID.randomUUID()));
     }
+    void addImported(long id, TestAttemptStatus status) {
+        add(id, status);
+        attempts.put(id, new TestAttempt(id + 1000, id, 1, status, null, 17L, 27L, null, null, null,
+                "JUnit actual", status == TestAttemptStatus.FAIL ? "JUnit failure" : null, UUID.randomUUID()));
+    }
     @Test void latestResultsAreCountedByServerAndReadOnlyDeveloperCanSummarizeArchivedProject() {
         add(1,TestAttemptStatus.FAIL); add(2,TestAttemptStatus.BLOCKED); add(3,TestAttemptStatus.PASS); add(4,TestAttemptStatus.SKIPPED); add(5,null);
         defectIds.addAll(List.of(31L,31L));
@@ -76,6 +90,7 @@ class AiRunSummaryServiceTest {
         assertEquals(LocalDateTime.of(2026,10,20,3,0),preview.input().runEndedAt());
         assertEquals(LocalDateTime.of(2026,10,30,4,0),preview.input().defects().getFirst().updatedAt());
         assertEquals(LocalDateTime.of(2026,10,31,1,0),preview.generatedAt()); assertEquals(1,calls);
+        assertTrue(preview.failureActions().isEmpty()); assertTrue(exactLinkReads.isEmpty());
     }
     @Test void wrongProjectDisabledAndInactiveUsersCannotCallTheModel() {
         runProject = 8L; assertThrows(NotFoundException.class,()->service().generate(1L,7L,9L,"en"));
@@ -104,5 +119,56 @@ class AiRunSummaryServiceTest {
         assertThrows(ValidationException.class,()->service().generate(1L,7L,9L,null)); assertEquals(0,calls);
         answer = new AiRunSummaryAnalysis("",List.of(),List.of());
         assertEquals("AI_INVALID_RESPONSE",assertThrows(AiUnavailableException.class,()->service().generate(1L,7L,9L,"en")).code());
+    }
+    @Test void importedFailureActionsUseExactLatestAttemptsAndFindLinksBeyondNarrativeCap() {
+        addImported(1, TestAttemptStatus.FAIL); addImported(2, TestAttemptStatus.FAIL);
+        add(3, TestAttemptStatus.FAIL); addImported(4, TestAttemptStatus.SKIPPED); addImported(5, TestAttemptStatus.PASS);
+        addImported(6, TestAttemptStatus.FAIL);
+        attempts.put(6L, new TestAttempt(2006L, 6L, 2, TestAttemptStatus.PASS, 1L, null, null, null, null, null, "Later PASS", null, UUID.randomUUID()));
+        for (long id = 1; id <= 22; id++) defectIds.add(id);
+        exactDefectIds.put(1001L, List.of(21L)); exactDefectIds.put(1006L, List.of(22L));
+        answer = new AiRunSummaryAnalysis("Overview", List.of(), List.of(), List.of(
+                new AiRunSummaryAnalysis.FailureSuggestion(1L, "Unneeded new title", "Review existing evidence"),
+                new AiRunSummaryAnalysis.FailureSuggestion(2L, "Observed timeout", "Check the expected wait"),
+                new AiRunSummaryAnalysis.FailureSuggestion(3L, "Manual failure", "Ignored"),
+                new AiRunSummaryAnalysis.FailureSuggestion(6L, "Superseded failure", "Ignored")));
+        var preview = service().generate(1L, 7L, 9L, "en");
+        assertEquals(List.of(1L, 2L), preview.failureActions().stream().map(AiRunSummaryPreview.FailureAction::runCaseId).toList());
+        assertEquals(List.of(1001L, 1002L), exactLinkReads);
+        var linked = preview.failureActions().getFirst();
+        assertEquals(1001L, linked.attemptId()); assertEquals("Case 1", linked.title());
+        assertNull(linked.draftTitle()); assertEquals("Review existing evidence", linked.suggestion());
+        assertEquals(List.of(new AiRunSummaryPreview.LinkedDefect(21L, 21L, "Linked bug")), linked.linkedDefects());
+        assertTrue(preview.input().defects().stream().noneMatch(row -> row.defectId().equals(21L)));
+        assertEquals(20, preview.input().defects().size());
+        assertEquals(new AiRunSummaryInput.JunitFailureContext(1, 0), captured.cases().getFirst().junitFailure());
+        assertEquals("Observed timeout", preview.failureActions().getLast().draftTitle());
+        assertTrue(preview.failureActions().getLast().linkedDefects().isEmpty());
+    }
+    @Test void absentUnknownAndAmbiguousModelSuggestionsLeaveServerActionsAvailable() throws Exception {
+        addImported(1, TestAttemptStatus.FAIL); addImported(2, TestAttemptStatus.FAIL); addImported(3, TestAttemptStatus.FAIL);
+        answer = new AiRunSummaryAnalysis("Overview", List.of(), List.of(), List.of(
+                new AiRunSummaryAnalysis.FailureSuggestion(1L, "First title", null),
+                new AiRunSummaryAnalysis.FailureSuggestion(1L, "Conflicting title", null),
+                new AiRunSummaryAnalysis.FailureSuggestion(2L, " ", "Inspect timeout"),
+                new AiRunSummaryAnalysis.FailureSuggestion(99L, "Unknown case", "Ignored")));
+        var preview = service().generate(1L, 7L, 9L, "en");
+        assertEquals(3, preview.failureActions().size());
+        assertNull(preview.failureActions().getFirst().draftTitle());
+        assertNull(preview.failureActions().get(1).draftTitle()); assertEquals("Inspect timeout", preview.failureActions().get(1).suggestion());
+        assertNull(preview.failureActions().getLast().suggestion());
+        var json = new ObjectMapper().readTree(JsonMapperProvider.writer().writeValueAsBytes(preview));
+        assertFalse(json.path("analysis").has("failureSuggestions"));
+        assertEquals(1002L, json.path("failureActions").get(1).path("attemptId").asLong());
+        assertEquals("Inspect timeout", json.path("failureActions").get(1).path("suggestion").asText());
+    }
+    @Test void importedFailureActionsAreBoundedAndRejectCrossProjectLinkedDefects() {
+        for (long id = 1; id <= 42; id++) addImported(id, TestAttemptStatus.FAIL);
+        var preview = service().generate(1L, 7L, 9L, "en");
+        assertEquals(42, preview.input().counts().failed()); assertEquals(40, preview.failureActions().size());
+        assertEquals(1040L, exactLinkReads.getLast()); assertEquals(40, exactLinkReads.size());
+        exactDefectIds.put(1001L, List.of(88L)); foreignDefectId = 88L;
+        assertThrows(ConflictException.class, () -> service().generate(1L, 7L, 9L, "en"));
+        assertEquals(1, calls, "Wrong-project evidence must fail before the model call");
     }
 }

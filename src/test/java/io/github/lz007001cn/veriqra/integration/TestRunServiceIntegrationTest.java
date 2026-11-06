@@ -11,6 +11,27 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TestRunServiceIntegrationTest extends ServiceFixture {
+    @Test void assignsOnlyAnActiveProjectTesterAndKeepsAssignmentInRunHistory() {
+        User admin = actor("admin-run-owner", SystemRole.ADMIN, UserStatus.ACTIVE);
+        User tester = actor("tester-run-owner", SystemRole.USER, UserStatus.ACTIVE);
+        User outsider = actor("outside-run-owner", SystemRole.USER, UserStatus.ACTIVE);
+        Project project = createProject(admin, "RUNOWNER", tester, ProjectRole.TESTER);
+        TestCase testCase = readyCase(tester, project, "Owner regression", 1);
+        assertThrows(ConflictException.class, () -> testRuns.createAdHoc(tester.id(), new CreateAdHocRunCommand(
+                project.id(), "Foreign assignee", null, null, List.of(testCase.id()), outsider.id())));
+        TestRun run = testRuns.createAdHoc(tester.id(), new CreateAdHocRunCommand(
+                project.id(), "Assigned run", null, null, List.of(testCase.id()), tester.id()));
+        assertEquals(tester.id(), testRuns.getDetails(tester.id(), project.id(), run.id()).run().assigneeId());
+        assertThrows(ValidationException.class, () -> testRuns.assign(admin.id(), project.id(), run.id(), -1, null));
+        TestRun unassigned = testRuns.assign(admin.id(), project.id(), run.id(), run.lockVersion(), null);
+        assertNull(unassigned.assigneeId());
+        assertThrows(ConflictException.class, () -> testRuns.assign(admin.id(), project.id(), run.id(), run.lockVersion(), tester.id()));
+        TestRun reassigned = testRuns.assign(admin.id(), project.id(), run.id(), unassigned.lockVersion(), tester.id());
+        TestRun cancelled = testRuns.cancel(tester.id(), project.id(), run.id(), reassigned.lockVersion());
+        assertEquals(tester.id(), cancelled.assigneeId());
+        assertThrows(ConflictException.class, () -> testRuns.assign(admin.id(), project.id(), run.id(), cancelled.lockVersion(), null));
+    }
+
     @Test void planRunFreezesScopeCaseAndStepsAgainstLaterEdits() {
         User admin = actor("admin-run-plan", SystemRole.ADMIN, UserStatus.ACTIVE);
         User tester = actor("tester-run-plan", SystemRole.USER, UserStatus.ACTIVE);

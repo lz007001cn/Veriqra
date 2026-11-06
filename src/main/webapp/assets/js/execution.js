@@ -29,6 +29,9 @@
   let qaContext = null;
   let caseFilter = '';
   let runFilter = 'ALL';
+  const caseQueueViews = new Map();
+  let renderedQueueScope = null;
+  const resultOutcomes = ['PASS', 'FAIL', 'BLOCKED', 'SKIPPED'];
   let formBaseline = null;
   let currentFormDraftKey = null;
   const formIntents = new Map();
@@ -38,10 +41,10 @@
   const submissions = new Map();
   const listPositions = new Map();
   let renderedListScope = null;
-  const listScope = function () { return projectId + '/' + view; };
+  const listScope = function () { return projectId + '/' + view + '/' + (qaContext ? qaContext.actorId : 'unknown'); };
   function listPosition() {
     const scope = listScope();
-    if (!listPositions.has(scope)) listPositions.set(scope, { scroll: 0, selectedId: null });
+    if (!listPositions.has(scope)) listPositions.set(scope, { scroll: 0, selectedId: null, search: '', status: '', sort: 'updated' });
     return listPositions.get(scope);
   }
   function preserveListPosition() {
@@ -152,6 +155,19 @@
     return Object.assign({ projectId: projectId }, retained, context);
   }
   function selectRoute(context) { if (nav()) nav().select(view, view === 'runs' ? runDestination(context) : Object.assign({ projectId: projectId }, context)); }
+  function retestDestination(runId, item, latestAttempt) {
+    const source = routeContext();
+    if (!canWrite() || !source.defectId || !source.failureAttemptId || !sameId(source.sourceTestCaseId, item.testCaseId)) return null;
+    if (!latestAttempt || latestAttempt.outcome !== 'PASS' || !latestAttempt.id || sameId(source.failureAttemptId, latestAttempt.id)) return null;
+    if (selectedAttemptId && !sameId(selectedAttemptId, latestAttempt.id)) return null;
+    return {
+      defectId: source.defectId,
+      failureAttemptId: source.failureAttemptId,
+      retestRunId: idText(runId),
+      retestRunCaseId: idText(item.runCaseId),
+      retestPassAttemptId: idText(latestAttempt.id)
+    };
+  }
   function routeLink(title, targetView, context, className) {
     const destination = targetView === 'runs' ? runDestination(context) : Object.assign({ projectId: projectId }, context);
     const link = $('<a>').addClass(className || 'btn btn-outline-primary btn-sm')
@@ -192,7 +208,7 @@
   }
   function capturePlanDraft() {
     const values = {};
-    ['name', 'description', 'status', 'origin', 'plan', 'environment', 'build'].forEach(function (id) { values[id] = $('#execution-' + id).val(); });
+    ['name', 'description', 'status', 'origin', 'plan', 'environment', 'build', 'assignee'].forEach(function (id) { values[id] = $('#execution-' + id).val(); });
     return { values: values, cases: selectedCases().map(String), casesLoaded: formCasesLoaded, plansLoaded: formPlansLoaded };
   }
   function restorePlanDraft(draft, selectorsOnly) {
@@ -313,6 +329,7 @@
     formContext = {}; existingPlans = []; selectedAttemptId = null; recordedMessage = null;
     renderedAttemptOwner = null; localeAttemptDraft = null; formLoading = false; formWriting = false; formCasesLoaded = false; formPlansLoaded = false; sourceCaseMissing = false; planPreview = null; planPreviewGeneration++;
     completionImpact = null; completionImpactGeneration++; finishBusy = false;
+    clearCaseQueue();
     $('#execution-list, #execution-detail, #execution-actions, #execution-items, #execution-case-selector, #execution-snapshot, #execution-history').empty();
     $('#execution-context, #execution-progress, #execution-case-context, #execution-case-progress, #execution-case-navigation, #execution-form-context').empty();
     $('#execution-plan-preview').empty();
@@ -352,6 +369,101 @@
     return $('#execution-case-selector input:checked').map(function () { return Number(this.value); }).get();
   }
 
+  function testedContext(run) {
+    return $('<dl class="workflow-context-strip">').append(
+      field(t('zentaoExecution.testedBuild', null, 'Tested build'), run.buildVersion),
+      field(t('zentaoExecution.environment', null, 'Environment'), run.environment));
+  }
+  function listToolbar(rows, position, token) {
+    const plans = view === 'test-plans';
+    const statuses = plans ? ['DRAFT', 'READY', 'ARCHIVED'] : ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
+    const quickStatuses = plans ? ['', 'DRAFT', 'READY'] : ['', 'IN_PROGRESS', 'COMPLETED'];
+    const target = $('#execution-list').empty();
+    const toolbar = $('<div class="workflow-list-toolbar">').toggleClass('d-none', !rows.length);
+    const quick = $('<div class="workflow-list-quickviews">').attr('role', 'group')
+      .attr('aria-label', t('zentaoExecution.quickViews', null, 'Quick views'));
+    const filters = $('<div class="workflow-list-filters">');
+    const searchLabel = t('zentaoExecution.search', null, 'Search title, number or content');
+    const search = $('<input type="search" class="form-control">').attr('id', 'execution-list-search').val(position.search)
+      .attr('placeholder', searchLabel);
+    const status = $('<select class="form-select">').attr('id', 'execution-list-filter');
+    status.append($('<option>').val('').text(t('zentaoExecution.allStatuses', null, 'All statuses')));
+    statuses.forEach(function (value) { status.append($('<option>').val(value).text(label(value))); });
+    status.val(position.status);
+    const sort = $('<select class="form-select">').attr('id', 'execution-list-sort');
+    sort.append($('<option>').val('updated').text(t('zentaoExecution.latestFirst', null, 'Latest first')),
+      $('<option>').val('name').text(t('zentaoExecution.titleOrder', null, 'Title A–Z'))).val(position.sort);
+    [[search, searchLabel], [status, t('zentaoExecution.status', null, 'Status')], [sort, t('zentaoExecution.sort', null, 'Sort')]].forEach(function (entry) {
+      filters.append($('<div class="workflow-list-filter">').append($('<label class="form-label">').attr('for', entry[0].attr('id')).text(entry[1]), entry[0]));
+    });
+    const reset = $('<button type="button" class="btn btn-outline-secondary">').attr('id', 'execution-list-clear')
+      .text(t('zentaoExecution.clearFilters', null, 'Clear filters'));
+    filters.append(reset);
+    const count = $('<p class="workflow-list-count">').attr('id', 'execution-list-count').attr('role', 'status').attr('aria-live', 'polite');
+    const result = $('<div>').attr('id', 'execution-list-results');
+    const quickButtons = [];
+    quickStatuses.forEach(function (value) {
+      const total = rows.filter(function (row) { return !value || row.status === value; }).length;
+      const button = $('<button type="button" class="btn btn-outline-secondary btn-sm">')
+        .attr('data-list-status', value).text((value ? label(value) : t('zentaoExecution.all', null, 'All')) + ' · ' + window.I18n.formatNumber(total));
+      button.on('click', function () {
+        if (!valid(token)) return;
+        position.status = value; position.scroll = 0; status.val(value); renderRows();
+      });
+      quickButtons.push({ button: button, value: value }); quick.append(button);
+    });
+    toolbar.append(quick, filters, count); target.append(toolbar, result);
+    function renderRows() {
+      if (!valid(token)) return null;
+      const query = position.search.trim().toLocaleLowerCase();
+      const shown = rows.filter(function (row) {
+        const title = plans ? planKey(row) : String(row.id);
+        const text = [title, row.name, row.description, row.environment, row.buildVersion].filter(function (value) { return value != null; }).join(' ').toLocaleLowerCase();
+        return (!position.status || row.status === position.status) && (!query || text.includes(query));
+      }).sort(function (left, right) {
+        if (position.sort === 'name') return String(left.name || '').localeCompare(String(right.name || '')) || Number(left.id) - Number(right.id);
+        return String(right.updatedAt || right.createdAt || '').localeCompare(String(left.updatedAt || left.createdAt || '')) || Number(right.id) - Number(left.id);
+      });
+      result.empty(); permissionNote(result);
+      quickButtons.forEach(function (entry) { entry.button.attr('aria-pressed', position.status === entry.value ? 'true' : 'false'); });
+      reset.prop('disabled', !position.search && !position.status && position.sort === 'updated');
+      count.text(t('zentaoExecution.showingLoaded', { shown: window.I18n.formatNumber(shown.length), total: window.I18n.formatNumber(rows.length) }, 'Showing {shown} of {total} loaded items.'));
+      let recentLink = null;
+      shown.forEach(function (row) {
+        const title = plans ? planKey(row) + ' · ' + row.name : row.name;
+        const meta = $('<div class="asset-list-meta">').append(badge(row.status),
+          $('<span>').text(plans ? t('zentaoExecution.recordRevision', { version: row.version == null ? '—' : row.version }, 'Record revision {version}')
+            : row.testPlanId == null ? t('execution.adHoc', null, 'Ad-hoc') : t('execution.planBased', null, 'Plan-based')),
+          $('<small>').text(date(row.updatedAt || row.createdAt)));
+        const context = plans ? { planId: idText(row.id) } : { runId: idText(row.id) };
+        const titleLink = routeLink(title, view, context, 'asset-title-link').attr('data-execution-title', row.id);
+        titleLink.on('click', function (event) {
+          if (event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          position.selectedId = idText(row.id);
+        });
+        if (sameId(position.selectedId, row.id)) recentLink = titleLink;
+        const summary = $('<div class="asset-list-summary">').append(titleLink);
+        if (plans) summary.append($('<p class="mb-1 text-secondary">').text(row.description || t('common.noDescription', null, 'No description')));
+        else summary.append(testedContext(row));
+        result.append($('<div class="asset-list-row workflow-list-row">').attr('data-execution-id', row.id)
+          .toggleClass('is-recently-viewed', sameId(position.selectedId, row.id)).append(summary, meta,
+            $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('common.view', null, 'View'))
+              .attr('aria-label', t('execution.viewItem', { title: title }, 'View {title}')).on('click', function () { openDetail(row.id); })));
+      });
+      if (!shown.length && rows.length) result.append($('<p class="text-secondary">')
+        .text(t('zentaoExecution.noMatches', null, 'No items match these filters. Clear filters to see the loaded list.')));
+      return recentLink;
+    }
+    search.on('input', function () { position.search = this.value; position.scroll = 0; renderRows(); });
+    status.on('change', function () { position.status = this.value; position.scroll = 0; renderRows(); });
+    sort.on('change', function () { position.sort = this.value; position.scroll = 0; renderRows(); });
+    reset.on('click', function () {
+      position.search = ''; position.status = ''; position.sort = 'updated'; position.scroll = 0;
+      search.val(''); status.val(''); sort.val('updated'); renderRows();
+    });
+    return renderRows();
+  }
+
   async function list() {
     if (!projectId || !active()) return;
     preserveListPosition();
@@ -366,30 +478,12 @@
     $('#execution-list').empty(); $('#execution-list-status').text(t("common.loading", null, 'Loading…'));
     try {
       const context = await loadContext(false); if (!valid(token)) return; qaContext = context;
-      $('#execution-new').prop('disabled', !canWrite()); permissionNote('#execution-list');
+      $('#execution-new').prop('disabled', !canWrite());
       const rows = await api.get(base(view === 'test-plans' ? 'test-plans' : 'runs'));
       if (!valid(token)) return;
-      $('#execution-list-status').text(rows.length ? t('execution.itemCount', { count: window.I18n.formatNumber(rows.length) }, '{count} item(s)') : t("execution.noItemsYet", null, 'No items yet.'));
-      const position = listPosition(); let recentLink = null;
-      rows.forEach(function (row) {
-        const title = view === 'test-plans' ? planKey(row) + ' · ' + row.name : row.name;
-        const meta = $('<div class="asset-list-meta">').append(badge(row.status),
-          $('<span>').text(view === 'runs' ? (row.testPlanId == null ? t("execution.adHoc", null, 'Ad-hoc') : t("execution.planBased", null, 'Plan-based')) : 'v' + row.version),
-          $('<small>').text(date(row.createdAt)));
-        const context = view === 'test-plans' ? { planId: idText(row.id) } : { runId: idText(row.id) };
-        const titleLink = routeLink(title, view, context, 'asset-title-link').attr('data-execution-title', row.id);
-        titleLink.on('click', function (event) {
-          if (event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-          position.selectedId = idText(row.id);
-        });
-        if (sameId(position.selectedId, row.id)) recentLink = titleLink;
-        $('#execution-list').append($('<div class="asset-list-row">').attr('data-execution-id', row.id).toggleClass('is-recently-viewed', sameId(position.selectedId, row.id)).append(
-          $('<div class="asset-list-summary">').append(titleLink,
-            $('<p class="mb-1 text-secondary">').text(view === 'test-plans' ? (row.description || t("common.noDescription", null, 'No description')) : (row.environment || t("execution.noEnvironment", null, 'No environment')))),
-          meta, $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('common.view', null, 'View'))
-            .attr('aria-label', t('execution.viewItem', { title: title }, 'View {title}'))
-            .on('click', function () { openDetail(row.id); })));
-      });
+      $('#execution-list-status').text(rows.length ? '' : t("execution.noItemsYet", null, 'No items yet.'));
+      const position = listPosition();
+      const recentLink = listToolbar(rows, position, token);
       restoreListPosition(token, position, recentLink);
     } catch (failure) { if (valid(token)) { $('#execution-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(failure.message, true); retry('#execution-list', list); } }
   }
@@ -432,7 +526,7 @@
     $('#execution-detail-title').text(planKey(plan) + ' · ' + plan.name);
     $('#execution-detail').append($('<dl class="asset-fields">').append(
       field(t("common.description", null, 'Description'), plan.description, true),
-      field(t("common.version", null, 'Version'), plan.version), field(t("common.created", null, 'Created'), date(plan.createdAt)), field(t("common.updated", null, 'Updated'), date(plan.updatedAt))));
+      field(t('zentaoExecution.revision', null, 'Record revision'), plan.version), field(t("common.created", null, 'Created'), date(plan.createdAt)), field(t("common.updated", null, 'Updated'), date(plan.updatedAt))));
     $('#execution-items-title').text(t('execution.includedCases', { count: window.I18n.formatNumber(current.testCaseIds.length) }, 'Included test cases ({count})'));
     $('#execution-items-status').text(t('execution.loadingCaseLabels', null, 'Loading current case labels…'));
     const cases = await api.get(base('test-cases'));
@@ -601,12 +695,61 @@
         $('#execution-context').append(routeLink(t('imports.source', null, 'View import source'), 'automation', { runId: idText(run.id) }));
     } catch (_) { /* Missing provenance must not turn a manual run into an imported run. */ }
   }
+  function testerOptions(select, assigneeId, preserveUnavailable) {
+    select.empty().append($('<option>').val('').text(t('execution.runUnassigned')));
+    const testers = (qaContext.members || []).filter(function (row) {
+      return row.projectRole === 'TESTER' && row.status === 'ACTIVE' && row.userStatus === 'ACTIVE';
+    });
+    testers.forEach(function (row) {
+      select.append($('<option>').val(String(row.userId)).text(row.displayName + ' (@' + row.username + ')'));
+    });
+    if (preserveUnavailable && assigneeId != null && !testers.some(function (row) { return sameId(row.userId, assigneeId); }))
+      select.append($('<option>').val(String(assigneeId)).text(t('execution.runOwnerUnavailable')));
+    select.val(assigneeId == null ? '' : String(assigneeId));
+    if (select.val() == null) select.val('');
+  }
+  function renderRunAssignee(run) {
+    const name = (qaContext.members || []).find(function (row) { return sameId(row.userId, run.assigneeId); });
+    const display = run.assigneeId == null ? t('execution.runUnassigned') : name ? name.displayName : t('execution.runOwnerUnavailable');
+    const summary = $('<dl class="asset-fields">').append(field(t('execution.runAssignee'), display));
+    $('#execution-detail').append(summary);
+    if (!canWrite() || run.status !== 'IN_PROGRESS') return;
+    const token = generation;
+    const select = $('<select id="execution-reassign-owner" class="form-select asset-link-select">');
+    testerOptions(select, run.assigneeId, true);
+    const initialValue = select.val();
+    const feedback = $('<p class="small mb-0" role="status">');
+    const save = $('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('execution.saveRunAssignee')).prop('disabled', true);
+    select.on('change', function () { save.prop('disabled', select.val() === initialValue); });
+    save.on('click', async function () {
+      if (!valid(token) || save.prop('disabled')) return;
+      const assigneeId = select.val() ? Number(select.val()) : null;
+      save.prop('disabled', true); select.prop('disabled', true); feedback.text('');
+      try {
+        if (!await requireWrite(token)) return;
+        await api.put(path(run.id) + '/assignee', { expectedVersion: run.version, assigneeId: assigneeId });
+        if (!valid(token)) return;
+        await openDetail(run.id);
+        if (valid(token + 1) && detail && detail.run && sameId(detail.run.id, run.id)) notice(t('execution.runAssigneeSaved'));
+      } catch (failure) {
+        if (!valid(token)) return;
+        feedback.text(conflict(failure)).addClass('text-danger');
+        if (failure && failure.status === 409) reloadConflict(feedback, failure, function () { openDetail(run.id); });
+      } finally {
+        if (valid(token)) { select.prop('disabled', false); save.prop('disabled', select.val() === initialValue); }
+      }
+    });
+    $('#execution-detail').append($('<details class="workflow-details mb-3">').append(
+      $('<summary>').text(t('execution.changeRunAssignee')),
+      $('<label class="visually-hidden" for="execution-reassign-owner">').text(t('execution.runAssignee')),
+      $('<div class="d-flex flex-wrap gap-2 my-2">').append(select, save), feedback));
+  }
   function renderRun(current) {
     const run = current.run;
     $('#execution-actions').addClass('workflow-next-actions');
     if (window.VeriqraAiRunSummary) {
       const token = generation;
-      window.VeriqraAiRunSummary.mount({ projectId: projectId, run: run,
+      window.VeriqraAiRunSummary.mount({ projectId: projectId, run: run, canWrite: canWrite,
         isCurrent: function () { return valid(token) && view === 'runs' && detail === current && runCaseId == null; } });
     }
     if (run.testPlanId == null) loadImportSource(run, generation);
@@ -617,10 +760,11 @@
     loadCompletionImpact(current);
     if (routeContext().defectId) $('#execution-context').append(routeLink(t('execution.backToDefect', null, 'Back to defect and link the retest PASS'), 'defects', { defectId: routeContext().defectId }));
     $('#execution-detail-title').text(run.name);
+    $('#execution-context').append(testedContext(run));
     $('#execution-detail').append($('<dl class="asset-fields">').append(
       field(t("execution.source", null, 'Source'), run.testPlanId == null ? t("execution.adHoc", null, 'Ad-hoc') : t('execution.planNumber', { number: run.testPlanId }, 'Plan #{number}')),
-      field(t("execution.environment", null, 'Environment'), run.environment), field(t("execution.build", null, 'Build'), run.buildVersion),
       field(t("common.created", null, 'Created'), date(run.createdAt)), field(t("execution.ended", null, 'Ended'), date(run.endedAt))));
+    renderRunAssignee(run);
     $('#execution-items-title').text(t('execution.runCaseSnapshots', { count: window.I18n.formatNumber(current.cases.length) }, 'Run case snapshots ({count})'));
     const filter = $('<select class="form-select mb-2">').attr('aria-label', t('r2Exec.filterResults', null, 'Filter frozen run cases'));
     ['ALL', 'NOT_RUN', 'FAIL', 'BLOCKED', 'PASS', 'SKIPPED'].forEach(function (value) { filter.append($('<option>').val(value).text(value === 'ALL' ? t('r2Exec.allOutcomes', null, 'All outcomes') : label(value))); });
@@ -739,10 +883,138 @@
       retry(target, function () { if (current()) return loadAttemptDefects(target, runId, caseId, attempt, token); });
     }
   }
+  function caseQueueScope(runId) {
+    return projectId + '/' + (qaContext ? qaContext.actorId : 'unknown') + '/' + runId;
+  }
+  function clearCaseQueue() {
+    renderedQueueScope = null;
+    $('#execution-case-queue').empty();
+  }
+  function renderCaseQueue(current, selectedId) {
+    const scope = caseQueueScope(current.run.id);
+    const previousList = $('#execution-queue-cases')[0];
+    const scroll = renderedQueueScope === scope && previousList ? previousList.scrollTop : 0;
+    const target = $('#execution-case-queue').empty();
+    const heading = $('<div class="execution-queue-heading">').append($('<h3 id="execution-case-queue-title">')
+      .text(t('executionQueue.heading', null, 'Cases in this run')));
+    const pending = current.cases.find(function (row) { return row.currentOutcome === 'NOT_RUN'; });
+    if (pending) heading.append(routeLink(t('executionQueue.firstUnrecorded', null, 'First unrecorded case'), 'runs',
+      { runId: idText(current.run.id), runCaseId: idText(pending.runCaseId) }, 'btn btn-outline-primary btn-sm')
+      .attr('id', 'execution-queue-first-pending').attr('aria-label', t('executionQueue.firstUnrecordedLabel',
+        { title: pending.snapshotTitle }, 'First unrecorded case: {title}')));
+    const filters = $('<div class="execution-queue-filters" role="group">')
+      .attr('aria-label', t('executionQueue.filters', null, 'Filter cases by outcome'));
+    const list = $('<ol class="execution-queue-list" id="execution-queue-cases">');
+    let activeFilter = caseQueueViews.get(scope) || 'ALL';
+    const filterButtons = [];
+    const rows = current.cases.map(function (row, index) {
+      const active = sameId(row.runCaseId, selectedId);
+      const outcome = row.currentOutcome || 'NOT_RUN';
+      const link = routeLink(row.snapshotTitle, 'runs',
+        { runId: idText(current.run.id), runCaseId: idText(row.runCaseId) }, 'execution-queue-case')
+        .attr('data-queue-case-id', row.runCaseId).empty().append(
+          $('<span class="execution-queue-number" aria-hidden="true">').text(window.I18n.formatNumber(index + 1)),
+          $('<span class="execution-queue-case-title">').text(row.snapshotTitle), badge(outcome));
+      if (active) link.attr('aria-current', 'true');
+      return { outcome: outcome, item: $('<li>').append(link) };
+    });
+    const empty = $('<p class="execution-queue-empty text-secondary">').text(t('executionQueue.noMatches', null, 'No cases match this outcome.'));
+    function applyFilter() {
+      let visible = 0;
+      rows.forEach(function (row) {
+        const matches = activeFilter === 'ALL' || row.outcome === activeFilter;
+        row.item.toggleClass('d-none', !matches);
+        if (matches) visible++;
+      });
+      filterButtons.forEach(function (entry) { entry.button.attr('aria-pressed', String(entry.value === activeFilter)); });
+      empty.toggleClass('d-none', visible > 0);
+    }
+    ['ALL', 'NOT_RUN', 'FAIL', 'BLOCKED', 'PASS', 'SKIPPED'].forEach(function (value) {
+      const count = rows.filter(function (row) { return value === 'ALL' || row.outcome === value; }).length;
+      const name = value === 'ALL' ? t('r2Exec.allOutcomes', null, 'All outcomes') : label(value);
+      const button = $('<button type="button" class="btn btn-outline-secondary btn-sm">')
+        .attr('data-queue-outcome', value).text(name + ' · ' + window.I18n.formatNumber(count))
+        .on('click', function () {
+          // A case load advances the request generation while this same queue is still in use.
+          if (view !== 'runs' || renderedQueueScope !== scope || caseQueueScope(current.run.id) !== scope
+            || $('#execution-case-panel').hasClass('d-none') || $('#execution-queue-cases')[0] !== list[0]) return;
+          activeFilter = value; caseQueueViews.set(scope, value); applyFilter();
+          list[0].scrollTop = 0;
+        });
+      filters.append(button); filterButtons.push({ value: value, button: button });
+    });
+    rows.forEach(function (row) { list.append(row.item); });
+    target.append(heading, filters, list, empty);
+    applyFilter(); list[0].scrollTop = scroll || 0;
+    renderedQueueScope = scope;
+  }
+  function renderAttemptHistory(history, runId, id, token) {
+    const target = $('#execution-history').empty();
+    const latest = history.at(-1);
+    const referenced = selectedAttemptId && history.find(function (attempt) { return sameId(attempt.id, selectedAttemptId); });
+    const deferred = [];
+    function card(attempt, fold) {
+      const isLatest = attempt === latest, isReferenced = attempt === referenced;
+      const element = $('<div class="execution-attempt">').attr('id', 'execution-attempt-' + attempt.id).attr('tabindex', '-1')
+        .attr('data-attempt-latest', String(isLatest)).toggleClass('border border-primary', isReferenced).append(
+          $('<div class="asset-panel-heading mb-1">').append($('<strong>').text(t(isLatest ? 'execution.latestAttempt' : 'execution.attemptNumber',
+            { number: attempt.attemptNo }, isLatest ? 'Attempt #{number} · latest' : 'Attempt #{number}')), badge(attempt.outcome)),
+          $('<dl class="asset-fields mb-0">').append(field(t("execution.executed", null, 'Executed'), date(attempt.executedAt)), field(t("execution.actorID", null, 'Actor ID'), attempt.executedBy),
+            field(t("execution.durationMs", null, 'Duration (ms)'), attempt.durationMs), field(t("execution.actualResultComment", null, 'Actual result / comment'), attempt.comment, true), field(t("execution.failureMessage", null, 'Failure message'), attempt.failureMessage, true)));
+      if (isReferenced) element.attr('aria-current', 'true').append($('<p class="text-primary">').text(t('execution.referencedAttempt', { number: attempt.attemptNo }, 'Referenced attempt #{number}')));
+      if (attempt.outcome === 'FAIL') {
+        const context = { runId: idText(runId), runCaseId: idText(id), attemptId: idText(attempt.id), failureAttemptId: idText(attempt.id) };
+        if (canWrite()) element.append(
+          routeLink(t('execution.createDefectFromThisFAIL', null, 'Create defect from this FAIL'), 'defects', Object.assign({ action: 'create' }, context), 'btn btn-outline-danger btn-sm mt-2'),
+          routeLink(t('execution.linkExistingDefect', null, 'Link to existing defect'), 'defects', Object.assign({ action: 'link' }, context), 'btn btn-outline-danger btn-sm mt-2'));
+        const associations = $('<div class="mt-2">'); element.append(associations);
+        const load = function () { return loadAttemptDefects(associations, runId, id, attempt, token); };
+        if (fold) deferred.push(load); else load();
+      }
+      return element;
+    }
+    if (latest) target.append(card(latest, false));
+    if (referenced && referenced !== latest) target.append(card(referenced, false));
+    const older = history.filter(function (attempt) { return attempt !== latest && attempt !== referenced; }).reverse();
+    if (older.length) {
+      const list = $('<div class="execution-earlier-attempts-list">');
+      older.forEach(function (attempt) { list.append(card(attempt, true)); });
+      target.append($('<details id="execution-earlier-attempts" class="workflow-details execution-earlier-attempts">').append(
+        $('<summary>').text(t('executionQueue.earlierAttempts', { count: window.I18n.formatNumber(older.length) }, 'Earlier attempts ({count})')), list)
+        .on('toggle', function () {
+          if (this.open && valid(token)) deferred.splice(0).forEach(function (load) { load(); });
+        }));
+    }
+    return !!referenced;
+  }
+  function renderOutcomeChoices() {
+    const group = $('#execution-outcome-choices');
+    const fallback = $('#execution-outcome-select-wrap');
+    if (!group.length || !fallback.length) return;
+    const select = $('#execution-outcome');
+    const choices = $('<div class="execution-outcome-options">');
+    resultOutcomes.forEach(function (value) {
+      const id = 'execution-outcome-option-' + value.toLowerCase();
+      const input = $('<input type="radio" name="execution-outcome-choice">').attr('id', id)
+        .attr('data-result-outcome', value).val(value).prop('required', true).prop('checked', select.val() === value)
+        .on('change', function () { if (this.checked) select.val(value).trigger('change'); });
+      choices.append($('<label class="execution-outcome-option">').attr('for', id).attr('data-outcome', value)
+        .append(input, $('<span>').text(label(value))));
+    });
+    group.empty().append($('<legend class="form-label">').text(t('shell.outcome', null, 'Outcome')), choices).removeClass('d-none');
+    select.prop('required', false);
+    fallback.addClass('d-none');
+  }
+  function focusResultOutcome() {
+    const radios = Array.from($('#execution-outcome-choices').find('[data-result-outcome]'));
+    const input = radios.find(function (radio) { return radio.checked; }) || radios[0];
+    if (input) $(input).trigger('focus'); else $('#execution-outcome').trigger('focus');
+  }
   async function openCase(id, attemptId, loaded) {
     if (!detail || view !== 'runs') return;
     preserveDraft();
     const runId = detail.run.id;
+    if (renderedQueueScope !== caseQueueScope(runId)) clearCaseQueue();
     let owner = submissionContext(runId, id);
     if (localeAttemptDraft && localeAttemptDraft.owner !== owner) localeAttemptDraft = null;
     const token = ++generation;
@@ -758,6 +1030,7 @@
     lockAttemptForm();
     try {
       const context = await loadContext(false); if (!valid(token)) return; qaContext = context;
+      if (renderedQueueScope !== caseQueueScope(runId)) clearCaseQueue();
       owner = submissionContext(runId, id); pendingAttempt = submissions.get(owner) || null;
       if (localeAttemptDraft && localeAttemptDraft.owner !== owner) localeAttemptDraft = null;
       if (!localeAttemptDraft && retainedAttemptDrafts.has(owner)) localeAttemptDraft = retainedAttemptDrafts.get(owner);
@@ -773,12 +1046,17 @@
       }
       detail = current;
       if (history.length) { item.latestAttempt = history[history.length - 1]; item.currentOutcome = item.latestAttempt.outcome; }
+      renderCaseQueue(current, id);
       $('#execution-case-title').text(t('execution.snapshotTitle', { title: item.snapshotTitle }, 'Snapshot · {title}'));
       $('#execution-case-context').append($('<p class="mb-2">').text(current.run.name),
         routeLink(t('execution.viewTestCase', null, 'View current test case'), 'test-cases', { testCaseId: idText(item.testCaseId), runId: idText(runId), runCaseId: idText(id), attemptId: selectedAttemptId }));
       if (current.run.testPlanId != null) $('#execution-case-context').append(routeLink(t('execution.viewSourcePlan', null, 'View source plan'), 'test-plans', { planId: idText(current.run.testPlanId) }));
+      $('#execution-case-context').append(testedContext(current.run));
       progress(current, '#execution-case-progress');
       const latestAttempt = history.length ? history[history.length - 1] : null;
+      const retest = retestDestination(runId, item, latestAttempt);
+      if (retest) $('#execution-case-progress').append(routeLink(t('execution.linkThisRetestPass', null, 'Link this retest PASS'), 'defects', retest, 'btn btn-primary mb-2')
+        .attr('id', 'execution-link-retest-pass'));
       if (latestAttempt && latestAttempt.outcome === 'FAIL' && canWrite()) $('#execution-case-progress').append(
         routeLink(t('execution.createDefectFromThisFAIL', null, 'Create defect from this FAIL'), 'defects',
           { action: 'create', runId: idText(runId), runCaseId: idText(id), attemptId: idText(latestAttempt.id), failureAttemptId: idText(latestAttempt.id) }, 'btn btn-danger btn-sm mb-2')
@@ -796,7 +1074,7 @@
             { runId: idText(runId) }, 'btn btn-outline-primary btn-sm mb-2'));
         }
         $('#execution-case-navigation').append($('<button type="button" class="btn btn-outline-primary btn-sm">').text(t('execution.goToRecordResult', null, 'Record a result'))
-          .on('click', function () { $('#execution-outcome').trigger('focus'); }));
+          .on('click', focusResultOutcome));
       }
       $('#execution-case-navigation').append($('<span class="align-self-center">').text(t('execution.casePosition',
         { position: window.I18n.formatNumber(position + 1), total: window.I18n.formatNumber(current.cases.length) }, 'Case {position} of {total}')));
@@ -806,26 +1084,10 @@
         else $('#execution-case-navigation').append($('<button type="button" class="btn btn-outline-primary btn-sm" disabled>').text(t(entry[0], null, entry[1])));
       });
       snapshot(item);
-      const target = $('#execution-history').empty();
       if (routeContext().defectId) $('#execution-case-navigation').append(routeLink(t('execution.backToDefect', null, 'Back to defect and link the retest PASS'), 'defects', { defectId: routeContext().defectId }));
       $('#execution-history-status').text(history.length ? t('execution.attemptCount', { count: window.I18n.formatNumber(history.length) }, '{count} recorded attempt(s)') : t("execution.noAttemptsYet", null, 'No attempts yet.'));
-      history.forEach(function (attempt, index) {
-        const referenced = sameId(attempt.id, selectedAttemptId);
-        const card = $('<div class="execution-attempt">').attr('id', 'execution-attempt-' + attempt.id).attr('tabindex', '-1')
-          .toggleClass('border border-primary', referenced).append(
-          $('<div class="asset-panel-heading mb-1">').append($('<strong>').text(t(index === history.length - 1 ? 'execution.latestAttempt' : 'execution.attemptNumber',
-            { number: attempt.attemptNo }, index === history.length - 1 ? 'Attempt #{number} · latest' : 'Attempt #{number}')), badge(attempt.outcome)),
-          $('<dl class="asset-fields mb-0">').append(field(t("execution.executed", null, 'Executed'), date(attempt.executedAt)), field(t("execution.actorID", null, 'Actor ID'), attempt.executedBy),
-            field(t("execution.durationMs", null, 'Duration (ms)'), attempt.durationMs), field(t("execution.actualResultComment", null, 'Actual result / comment'), attempt.comment, true), field(t("execution.failureMessage", null, 'Failure message'), attempt.failureMessage, true)));
-        target.append(card);
-        if (referenced) card.attr('aria-current', 'true').append($('<p class="text-primary">').text(t('execution.referencedAttempt', { number: attempt.attemptNo }, 'Referenced attempt #{number}')));
-        if (attempt.outcome === 'FAIL' && canWrite()) card.append(routeLink(t("execution.createDefectFromThisFAIL", null, 'Create defect from this FAIL'), 'defects',
-          { action: 'create', runId: idText(runId), runCaseId: idText(id), attemptId: idText(attempt.id), failureAttemptId: idText(attempt.id) }, 'btn btn-outline-danger btn-sm mt-2'));
-        if (attempt.outcome === 'FAIL' && canWrite()) card.append(routeLink(t('execution.linkExistingDefect', null, 'Link to existing defect'), 'defects',
-          { action: 'link', runId: idText(runId), runCaseId: idText(id), attemptId: idText(attempt.id), failureAttemptId: idText(attempt.id) }, 'btn btn-outline-danger btn-sm mt-2'));
-        if (attempt.outcome === 'FAIL') { const associations = $('<div class="mt-2">'); card.append(associations); loadAttemptDefects(associations, runId, id, attempt, token); }
-      });
-      if (selectedAttemptId && !history.some(function (attempt) { return sameId(attempt.id, selectedAttemptId); })) notice(t('execution.sourceAttemptUnavailable', null, 'The referenced attempt is unavailable in this run case.'), true);
+      const referenceVisible = renderAttemptHistory(history, runId, id, token);
+      if (selectedAttemptId && !referenceVisible) notice(t('execution.sourceAttemptUnavailable', null, 'The referenced attempt is unavailable in this run case.'), true);
       $('#execution-attempt-form')[0].reset();
       $('#execution-outcome').val('');
       renderedAttemptOwner = current.run.status === 'IN_PROGRESS' && canWrite() ? submissionContext(runId, id) : null;
@@ -851,10 +1113,11 @@
         retainedAttemptDrafts.delete(owner);
       }
       $('#execution-attempt-form').toggleClass('d-none', !renderedAttemptOwner).find('input,select,textarea').prop('disabled', !renderedAttemptOwner);
+      if (renderedAttemptOwner) renderOutcomeChoices();
       if (recordedMessage && recordedMessage.owner === submissionContext(runId, id)) { notice(recordedMessage.message); recordedMessage = null; }
-      focusHeading(selectedAttemptId && history.some(function (attempt) { return sameId(attempt.id, selectedAttemptId); }) ? '#execution-attempt-' + selectedAttemptId : '#execution-case-title');
+      focusHeading(referenceVisible ? '#execution-attempt-' + selectedAttemptId : '#execution-case-title');
       return token;
-    } catch (failure) { if (valid(token)) { $('#execution-case-title, #execution-history-status').text(t('common.unavailable', null, 'Unavailable')); notice(failure.message, true); retry('#execution-case-navigation', function () { openCase(id, attemptId); }); } }
+    } catch (failure) { if (valid(token)) { clearCaseQueue(); $('#execution-case-title, #execution-history-status').text(t('common.unavailable', null, 'Unavailable')); notice(failure.message, true); retry('#execution-case-navigation', function () { openCase(id, attemptId); }); } }
   }
 
   async function showForm(update, context, draft) {
@@ -889,6 +1152,7 @@
       const contextValue = await loadContext(false); if (!valid(token)) return; qaContext = contextValue;
       permissionNote('#execution-form-context');
       if (!canWrite()) { formLoading = false; refreshFormSave(); return; }
+      if (view === 'runs') testerOptions($('#execution-assignee'), draft && draft.values.assignee);
       currentFormDraftKey = draftKey(update && detail ? detail.plan.id : null, formContext);
       const retained = retainedDrafts.get(currentFormDraftKey);
       if (!draft && retained) { draft = retained; restorePlanDraft(draft); $('#execution-form-context').append($('<p class="small text-secondary">').text(t('r2Exec.draftRestored', null, 'Your unsaved inputs for this project and source were restored from this tab’s memory. They are not saved to the server.'))); }
@@ -992,7 +1256,11 @@
     if (request.projectId && !sameId(request.projectId, projectId)) return list();
     if (request.action === 'create') return showForm(false, request);
     if (view === 'test-plans' && request.planId) return openDetail(request.planId);
-    if (view === 'runs' && request.runId) return openDetail(request.runId, request.runCaseId, request.attemptId);
+    if (view === 'runs' && request.runId) {
+      if (request.runCaseId && detail && detail.run && sameId(detail.run.id, request.runId) && !$('#execution-case-panel').hasClass('d-none'))
+        return openCase(request.runCaseId, request.attemptId);
+      return openDetail(request.runId, request.runCaseId, request.attemptId);
+    }
     return list();
   }
   $(document).on('veriqra:project', function (event) {
@@ -1050,16 +1318,20 @@
     $('#execution-save, #execution-submit, #execution-record-next, #execution-new').prop('disabled', true);
     try {
       const value = await loadContext(true); if (!valid(token)) return;
-      if (actorId != null && !sameId(value.actorId, actorId)) return;
+      if (actorId != null && !sameId(value.actorId, actorId)) { clearCaseQueue(); return; }
       qaContext = value; refreshFormSave();
       $('#execution-new').prop('disabled', !canWrite());
       $('#execution-submit, #execution-record-next').prop('disabled', !renderedAttemptOwner || !canWrite() || !!(pendingAttempt && pendingAttempt.busy));
       if (!canWrite()) notice(t('r2Exec.readOnly', null, 'This action requires an active project and ADMIN or active TESTER permission. Contact your project PM or ADMIN.'), true);
-    } catch (failure) { if (valid(token)) { qaContext = null; notice(conflict(failure), true); } }
+    } catch (failure) { if (valid(token)) { qaContext = null; clearCaseQueue(); notice(conflict(failure), true); } }
   });
   $('#execution-origin').on('change', updateRunOrigin);
   $('#execution-plan').on('change', updatePlanPreview);
-  $('#execution-outcome').on('change', function () { $('#execution-failure-wrap').toggleClass('d-none', this.value !== 'FAIL'); });
+  $('#execution-outcome').on('change', function () {
+    const outcome = this.value;
+    $('#execution-failure-wrap').toggleClass('d-none', outcome !== 'FAIL');
+    $('#execution-outcome-choices').find('[data-result-outcome]').each(function () { this.checked = this.value === outcome; });
+  });
   $('#execution-back').on('click', function () { if (nav()) nav().open(view, { projectId: projectId }); else list(); });
   $('#execution-case-back, #execution-attempt-cancel-bottom').on('click', function () { if (detail) { if (nav()) nav().open('runs', runDestination({ runId: idText(detail.run.id) })); else openDetail(detail.run.id); } });
   $('#execution-new').on('click', function () { showForm(false); });
@@ -1091,6 +1363,8 @@
     } else {
       body = { name: name, environment: $('#execution-environment').val().trim() || null,
         buildVersion: $('#execution-build').val().trim() || null };
+      const assignee = $('#execution-assignee').val();
+      if (assignee) body.assigneeId = Number(assignee);
       if ($('#execution-origin').val() === 'plan') {
         if (!$('#execution-plan').val()) { formError(t("execution.selectAREADYPlan", null, 'Select a READY plan.')); formWriting = false; refreshFormSave(); $('#execution-add-existing').prop('disabled', false); return; }
         body.testPlanId = Number($('#execution-plan').val());
@@ -1146,7 +1420,7 @@
     const previous = submissions.get(owner);
     if (previous && previous.busy) { attemptError(t('execution.attemptInProgress', null, 'This attempt is being recorded. Please wait before submitting it again.')); return; }
     const body = attemptBody();
-    if (!['PASS', 'FAIL', 'BLOCKED', 'SKIPPED'].includes(body.outcome)) { attemptError(t('r2Exec.chooseOutcome', null, 'Choose the actual outcome before recording this attempt.')); return; }
+    if (!resultOutcomes.includes(body.outcome)) { attemptError(t('r2Exec.chooseOutcome', null, 'Choose the actual outcome before recording this attempt.')); return; }
     if (body.durationMs != null && (!Number.isSafeInteger(body.durationMs) || body.durationMs < 0)) { attemptError(t("execution.durationMustBeANonNegativeWholeNumber", null, 'Duration must be a non-negative whole number.')); return; }
     const signature = JSON.stringify(body);
     if (previous && previous.resultUnknown && previous.signature !== signature) {

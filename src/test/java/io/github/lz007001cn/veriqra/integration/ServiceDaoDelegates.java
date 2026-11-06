@@ -125,6 +125,8 @@ final class ServiceDaoDelegates {
         public List<TestRun> listByProject(Long id) { return target.listByProject(id); }
         public List<TestRun> listByProjectForUpdate(Long id) { return target.listByProjectForUpdate(id); }
         public List<TestRun> listByPlan(Long id) { return target.listByPlan(id); }
+        public boolean hasActiveAssignment(Long project, Long user) { return target.hasActiveAssignment(project, user); }
+        public TestRun updateAssignee(Long id, Integer version, Long user) { return target.updateAssignee(id, version, user); }
         public TestRun insert(TestRun value) { return target.insert(value); }
         public TestRun update(TestRun value) { return target.update(value); }
     }

@@ -10,6 +10,7 @@ public interface TestRunService {
     io.github.lz007001cn.veriqra.service.query.RunDetails getDetails(Long actorUserId, Long projectId, Long testRunId);
     TestRun complete(Long actorUserId, Long projectId, Long testRunId, Integer lockVersion);
     TestRun cancel(Long actorUserId, Long projectId, Long testRunId, Integer lockVersion);
+    TestRun assign(Long actorUserId, Long projectId, Long testRunId, Integer lockVersion, Long assigneeId);
     TestRun createFromPlan(Long actorUserId, CreatePlanRunCommand command);
     TestRun createAdHoc(Long actorUserId, CreateAdHocRunCommand command);
     TestRun get(Long actorUserId, Long testRunId);

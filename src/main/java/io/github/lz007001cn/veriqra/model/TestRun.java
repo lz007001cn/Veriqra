@@ -15,4 +15,12 @@ public record TestRun(
         Long createdBy,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        Integer lockVersion) { }
+        Integer lockVersion,
+        Long assigneeId) {
+    public TestRun(Long id, Long projectId, Long testPlanId, String name, String environment, String buildVersion,
+                   TestRunStatus status, LocalDateTime endedAt, Long createdBy, LocalDateTime createdAt,
+                   LocalDateTime updatedAt, Integer lockVersion) {
+        this(id, projectId, testPlanId, name, environment, buildVersion, status, endedAt, createdBy, createdAt,
+                updatedAt, lockVersion, null);
+    }
+}

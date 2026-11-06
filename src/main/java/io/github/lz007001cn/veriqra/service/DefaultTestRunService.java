@@ -35,6 +35,7 @@ public final class DefaultTestRunService implements TestRunService {
         return transactions.execute(connection -> {
             ServiceDaos daos = daoFactory.create(connection);
             Project project = writableProject(daos, actorUserId, command.projectId());
+            validateAssignee(daos, project.id(), command.assigneeId());
             TestPlan preliminary = daos.testPlans().findById(command.testPlanId())
                     .orElseThrow(() -> new NotFoundException("Test plan does not exist"));
             ensureSameProject(preliminary.projectId(), project.id(), "Test plan");
@@ -50,7 +51,7 @@ public final class DefaultTestRunService implements TestRunService {
             if (!expectedCaseIds.equals(lockedPlanCaseIds(daos, plan.id()))) {
                 throw new ConflictException("Test plan scope changed during run creation");
             }
-            return createRunAndSnapshots(daos, project.id(), plan.id(), actorUserId, text, cases);
+            return createRunAndSnapshots(daos, project.id(), plan.id(), actorUserId, text, cases, command.assigneeId());
         });
     }
 
@@ -62,9 +63,42 @@ public final class DefaultTestRunService implements TestRunService {
         return transactions.execute(connection -> {
             ServiceDaos daos = daoFactory.create(connection);
             Project project = writableProject(daos, actorUserId, command.projectId());
+            validateAssignee(daos, project.id(), command.assigneeId());
             List<TestCase> cases = lockReadyCases(daos, project.id(), caseIds);
-            return createRunAndSnapshots(daos, project.id(), null, actorUserId, text, cases);
+            return createRunAndSnapshots(daos, project.id(), null, actorUserId, text, cases, command.assigneeId());
         });
+    }
+
+    @Override public TestRun assign(Long actorUserId, Long projectId, Long testRunId, Integer lockVersion, Long assigneeId) {
+        ServiceValidation.required(projectId, "projectId");
+        ServiceValidation.required(testRunId, "testRunId");
+        ServiceValidation.required(lockVersion, "lockVersion");
+        if (lockVersion < 0 || lockVersion == Integer.MAX_VALUE)
+            throw new ValidationException("lockVersion must be within [0, Integer.MAX_VALUE)");
+        return transactions.execute(connection -> {
+            ServiceDaos daos = daoFactory.create(connection);
+            Project project = writableProject(daos, actorUserId, projectId);
+            TestRun existing = daos.testRuns().findById(testRunId)
+                    .orElseThrow(() -> new NotFoundException("Test run does not exist"));
+            ensureSameProject(existing.projectId(), project.id(), "Test run");
+            validateAssignee(daos, project.id(), assigneeId);
+            TestRun run = daos.testRuns().findByIdForUpdate(testRunId)
+                    .orElseThrow(() -> new NotFoundException("Test run does not exist"));
+            if (run.status() != TestRunStatus.IN_PROGRESS)
+                throw new ConflictException("Only an in-progress test run can be reassigned");
+            try { return daos.testRuns().updateAssignee(testRunId, lockVersion, assigneeId); }
+            catch (OptimisticLockException failure) { throw ServiceFailures.stale("Test run", failure); }
+        });
+    }
+
+    private static void validateAssignee(ServiceDaos daos, Long projectId, Long assigneeId) {
+        if (assigneeId == null) return;
+        if (assigneeId <= 0) throw new ValidationException("assigneeId must be positive");
+        boolean active = daos.users().findByIdForShare(assigneeId)
+                .filter(user -> user.status() == UserStatus.ACTIVE).isPresent();
+        if (!active || daos.members().findForShare(projectId, assigneeId)
+                .filter(member -> member.status() == MembershipStatus.ACTIVE && member.projectRole() == ProjectRole.TESTER).isEmpty())
+            throw new ConflictException("Run assignee must be an active project TESTER");
     }
 
     @Override public List<TestRun> listByProject(Long actorUserId, Long projectId) {
@@ -162,7 +196,7 @@ public final class DefaultTestRunService implements TestRunService {
             try {
                 return daos.testRuns().update(new TestRun(run.id(), run.projectId(), run.testPlanId(), run.name(),
                         run.environment(), run.buildVersion(), terminalStatus, LocalDateTime.now(clock), run.createdBy(),
-                        run.createdAt(), run.updatedAt(), lockVersion));
+                        run.createdAt(), run.updatedAt(), lockVersion, run.assigneeId()));
             } catch (OptimisticLockException failure) { throw ServiceFailures.stale("Test run", failure); }
         });
     }
@@ -181,9 +215,9 @@ public final class DefaultTestRunService implements TestRunService {
     }
 
     private static TestRun createRunAndSnapshots(ServiceDaos daos, Long projectId, Long planId,
-                                                  Long actorUserId, RunText text, List<TestCase> cases) {
+                                                  Long actorUserId, RunText text, List<TestCase> cases, Long assigneeId) {
         TestRun run = daos.testRuns().insert(new TestRun(null, projectId, planId, text.name(), text.environment(),
-                text.buildVersion(), TestRunStatus.IN_PROGRESS, null, actorUserId, null, null, null));
+                text.buildVersion(), TestRunStatus.IN_PROGRESS, null, actorUserId, null, null, null, assigneeId));
         for (TestCase testCase : cases) {
             List<TestStep> steps = daos.steps().listByTestCaseForShare(testCase.id());
             validateSnapshotSteps(testCase.id(), steps);

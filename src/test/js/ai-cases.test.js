@@ -91,7 +91,7 @@ function browser() {
     }
   };
   const window = {
-    I18n: { t: (key, values, fallback) => catalogs[locale][key] || fallback || key, enumLabel: String },
+    I18n: { t: (key, values, fallback) => (catalogs[locale][key] || fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''), enumLabel: String },
     VeriqraApi: { post(url, body) {
       let resolve, reject;
       const result = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -106,7 +106,7 @@ function browser() {
   vm.runInNewContext(source, { window, document, jQuery: $, CustomEvent: class {
     constructor(type, options) { this.type = type; this.detail = options.detail; }
   } });
-  const mount = (projectId = 7, id = 10, fields = {}) => window.VeriqraAiCases.mount({ projectId,
+  const mount = (projectId = 7, id = 10, fields = {}, actorId = 1) => window.VeriqraAiCases.mount({ projectId, actorId,
     requirement: { id, version: 2, keyNo: 3, title: 'Empty hot-update cache server switch', description: 'Allow switching with an empty cache.', ...fields }, writable: true });
   async function fire(node, type = 'click', fields = {}) {
     const event = { button: 0, preventDefault() { this.defaultPrevented = true; }, ...fields };
@@ -143,7 +143,7 @@ test('AI saving exposes saved-case review and plan navigation without opening an
   assert.equal(ui.$('.ai-saved').hasClass('d-none'), false); assert.equal(ui.$('.ai-candidates').children().length, 0);
   assert.equal(ui.$('.ai-status').text(), '', 'The success panel owns the saved message and next step.');
   assert.match(ui.$('.ai-saved').text(), /TC-004 · Edited empty cache/);
-  assert.match(ui.$('.ai-saved').text(), /mark it Ready/); assert.match(ui.$('.ai-saved').text(), /links still need review/);
+  assert.match(ui.$('.ai-saved').text(), /Saved as drafts\. Requirement links await review\./);
   const links = ui.$('.ai-saved').find('a'); assert.equal(links.length, 3);
   assert.match(links[0].attributes.href, /testCaseId=20/); assert.doesNotMatch(links[0].attributes.href, /action=create/);
   await ui.fire(links[0]); assert.deepEqual(ui.navigation[0], { view: 'test-cases', projectId: '7', testCaseId: '20', sourceRequirementId: '10' });
@@ -154,8 +154,8 @@ test('AI saving exposes saved-case review and plan navigation without opening an
 test('generation basis identifies the selected saved requirement and optional instructions remain optional', async () => {
   const ui = browser();
   assert.equal(ui.$('.ai-basis-requirement').text(), 'REQ-003 · Empty hot-update cache server switch');
-  assert.match(ui.$('.ai-basis').text(), /description, including acceptance criteria/);
-  assert.match(ui.$('.ai-basis').text(), /additional instructions below/);
+  assert.match(ui.$('.ai-basis').text(), /acceptance criteria/);
+  assert.match(ui.$('.ai-basis').text(), /instructions/);
   ui.mount(7, 11, { keyNo: 4, title: 'Title only', description: '' });
   ui.window.VeriqraAiCases.open();
   assert.equal(ui.$('.ai-basis-requirement').text(), 'REQ-004 · Title only');
@@ -292,4 +292,64 @@ test('collapse stays available while generating and a completed response does no
     'Clearing an editor releases only the requirement that owned it.');
   ui.window.VeriqraAiCases.open();
   assert.deepEqual(ui.visibility.at(-1), { projectId: 8, requirementId: 11, open: true });
+});
+
+test('coverage imports reuse editable preview and the existing accept endpoint after explicit save', async () => {
+  const ui = browser(); let checks = 0;
+  assert.equal(ui.window.VeriqraAiCases.importPreview({ requirementId: 10, expectedVersion: 2, candidates: [candidate('Gap case')] },
+    { projectId: 7, requirementId: 10, actorId: 1, validateFresh: async () => { checks++; } }), true);
+  assert.equal(ui.requests.length, 0); ui.$('.ai-title').val('Edited gap case');
+  const work = ui.fire(ui.$('.ai-save')[0]); await flush();
+  assert.equal(checks, 1); assert.equal(ui.requests[0].url, 'projects/7/requirements/10/ai-cases/accept');
+  assert.equal(ui.requests[0].body.candidates[0].title, 'Edited gap case'); ui.requests[0].resolve([]); await work;
+});
+
+test('coverage import never silently replaces another draft and rejects wrong owner or malformed data', async () => {
+  const ui = browser(); await generate(ui); ui.$('.ai-title').val('Keep my case edit');
+  const value = { requirementId: 10, expectedVersion: 2, candidates: [candidate('Gap')] };
+  const owner = { projectId: 7, requirementId: 10, actorId: 1, validateFresh: async () => {} };
+  ui.window.confirm = () => false;
+  assert.equal(ui.window.VeriqraAiCases.importPreview(value, owner), false);
+  assert.equal(ui.$('.ai-title').val(), 'Keep my case edit');
+  assert.equal(ui.window.VeriqraAiCases.importPreview(value, { ...owner, actorId: 2 }), false);
+  assert.equal(ui.window.VeriqraAiCases.importPreview({ ...value, candidates: [{ title: 'Invalid' }] }, owner), false);
+  assert.equal(ui.requests.length, 1);
+});
+
+test('stale coverage validator blocks accept and preserves edited candidate input', async () => {
+  const ui = browser();
+  ui.window.VeriqraAiCases.importPreview({ requirementId: 10, expectedVersion: 2, candidates: [candidate('Gap')] },
+    { projectId: 7, requirementId: 10, actorId: 1, validateFresh: async () => { throw { status: 409 }; } });
+  ui.$('.ai-title').val('Retain this draft'); await ui.fire(ui.$('.ai-save')[0]);
+  assert.equal(ui.requests.length, 0); assert.equal(ui.$('.ai-title').val(), 'Retain this draft'); assert.equal(ui.guards.get('ai-cases').dirty(), true);
+});
+
+test('imported coverage basis identifies linked-case scope and normal generation restores its own basis and guard', async () => {
+  const ui = browser(); let importedChecks = 0;
+  ui.window.VeriqraAiCases.importPreview({ requirementId: 10, expectedVersion: 2, candidates: [candidate('Gap')], sourceCaseCount: 5 },
+    { projectId: 7, requirementId: 10, actorId: 1, validateFresh: async () => { importedChecks++; } });
+  assert.equal(ui.$('.ai-basis-description').text(), catalogs.en['ai.coverageBasisDescription'] || 'Coverage review of this requirement and its linked cases');
+  assert.equal(ui.$('.ai-basis-source-count').hasClass('d-none'), false);
+  assert.match(ui.$('.ai-basis-source-count').text(), /5/);
+  ui.locale('zh-CN');
+  assert.equal(ui.$('.ai-basis-description').text(), catalogs['zh-CN']['ai.coverageBasisDescription'] || 'Coverage review of this requirement and its linked cases');
+  assert.match(ui.$('.ai-basis-source-count').text(), /5/);
+  ui.locale('en');
+  const generating = ui.fire(ui.$('.ai-generate')[0]); ui.requests[0].resolve({ expectedVersion: 2, candidates: [candidate('Normal preview')] }); await generating;
+  assert.equal(ui.$('.ai-basis-description').text(), catalogs.en['ai.basisDescription'] || 'Requirement, acceptance criteria and instructions');
+  assert.equal(ui.$('.ai-basis-source-count').hasClass('d-none'), true);
+  const saving = ui.fire(ui.$('.ai-save')[0]); await flush();
+  assert.equal(importedChecks, 0, 'A successful normal preview no longer uses the imported coverage freshness guard.');
+  ui.requests[1].resolve([]); await saving;
+});
+
+test('failed normal regeneration retains the imported draft basis and freshness guard', async () => {
+  const ui = browser(); let importedChecks = 0;
+  ui.window.VeriqraAiCases.importPreview({ requirementId: 10, expectedVersion: 2, candidates: [candidate('Gap')], sourceCaseCount: 0 },
+    { projectId: 7, requirementId: 10, actorId: 1, validateFresh: async () => { importedChecks++; } });
+  const generating = ui.fire(ui.$('.ai-generate')[0]); ui.requests[0].reject({ status: 502 }); await generating;
+  assert.equal(ui.$('.ai-basis-description').attr('data-ai-text'), 'coverageBasisDescription');
+  assert.match(ui.$('.ai-basis-source-count').text(), /0/);
+  const saving = ui.fire(ui.$('.ai-save')[0]); await flush(); assert.equal(importedChecks, 1);
+  ui.requests[1].resolve([]); await saving;
 });

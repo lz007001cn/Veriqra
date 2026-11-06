@@ -2,6 +2,8 @@
   'use strict';
   const tr = function (key, fallback) { return window.I18n.t('ai.' + key, null, fallback); };
   let context = null, preview = null, busy = false, uncertain = false, epoch = 0, statusKey = null, returnFocus = null;
+  let previewValidator = null;
+  let importedCoverage = false, coverageSourceCount = null;
   const panel = $('<section id="ai-cases-panel" class="asset-panel mt-3 d-none" aria-labelledby="ai-cases-title">');
   $('#asset-primary-actions').after(panel);
   function text(tag, key, fallback) { return $(tag).attr('data-ai-text', key).attr('data-ai-fallback', fallback || '').text(tr(key, fallback)); }
@@ -12,7 +14,7 @@
   }
   function clear() {
     const owner = context;
-    ++epoch; context = null; preview = null; busy = false; uncertain = false; statusKey = null; returnFocus = null;
+    ++epoch; context = null; preview = null; previewValidator = null; importedCoverage = false; coverageSourceCount = null; busy = false; uncertain = false; statusKey = null; returnFocus = null;
     panel.empty().addClass('d-none'); visibility(false, owner);
   }
   function open() {
@@ -61,7 +63,7 @@
         if (steps.children().length < 30) steps.append(stepEditor({}));
       }));
       card.append(details, text('<button type="button" class="btn btn-outline-danger btn-sm mt-2">', 'reject').on('click', function () {
-        card.remove(); if (!target.children().length) { preview = null; panel.find('.ai-save,.ai-discard').addClass('d-none'); }
+        card.remove(); if (!target.children().length) { preview = null; previewValidator = null; importedCoverage = false; coverageSourceCount = null; renderBasis(); panel.find('.ai-save,.ai-discard').addClass('d-none'); }
         controls();
       }));
       target.append(card);
@@ -90,7 +92,7 @@
   function renderSaved(saved) {
     const target = panel.find('.ai-saved').empty().removeClass('d-none');
     target.append(text('<h4 class="fs-6">', 'savedHeading', 'Saved test cases'),
-      text('<p class="small mb-2">', 'savedNext', 'Open each case, review its content and mark it Ready before adding it to a test plan. Requirement links still need review.'));
+      text('<p class="small mb-2">', 'savedNext', 'Saved as drafts. Requirement links await review.'));
     const list = $('<ul class="list-unstyled mb-2">');
     saved.forEach(function (row) {
       const destination = { projectId: String(context.projectId), testCaseId: String(row.id), sourceRequirementId: String(context.requirement.id) };
@@ -109,8 +111,8 @@
       const value = await api.post(path('preview'), { instruction: panel.find('.ai-instruction').val() });
       if (token !== epoch) return;
       panel.find('.ai-saved').empty().addClass('d-none');
-      preview = value; renderCandidates(); message('review');
-    } catch (error) { if (token === epoch) message(error.code && /^AI_/.test(error.code) ? error.code : 'failed', true); }
+      preview = value; previewValidator = null; importedCoverage = false; coverageSourceCount = null; renderBasis(); renderCandidates(); message('review');
+    } catch (error) { if (token === epoch) { if (error.status === 401 || error.status === 403) clear(); else message(error.code && /^AI_/.test(error.code) ? error.code : 'failed', true); } }
     finally { if (token === epoch) { busy = false; controls(); } }
   }
   async function save() {
@@ -119,14 +121,17 @@
     if (!validCandidates(rows)) { message('incomplete', true); return; }
     const token = epoch; busy = true; controls(); message('saving');
     try {
+      if (previewValidator) await previewValidator();
+      if (token !== epoch) return;
       const saved = await api.post(path('accept'), { expectedVersion: preview.expectedVersion, candidates: rows });
       if (token !== epoch) return;
-      preview = null; panel.find('.ai-candidates').empty(); panel.find('.ai-save,.ai-discard').addClass('d-none');
+      preview = null; previewValidator = null; panel.find('.ai-candidates').empty(); panel.find('.ai-save,.ai-discard').addClass('d-none');
       message(null);
       renderSaved(saved);
       document.dispatchEvent(new CustomEvent('veriqra:ai-saved', { detail: { projectId: context.projectId, requirementId: context.requirement.id } }));
     } catch (error) {
       if (token !== epoch) return;
+      if (error.status === 401 || error.status === 403) { clear(); return; }
       if (!error.status || error.status >= 500) { uncertain = true; message('unknownSave', true); }
       else if (error.status === 409) message('stale', true);
       else message('saveFailed', true);
@@ -134,13 +139,14 @@
   }
   function mount(next) {
     if (!next || !next.writable) { clear(); return; }
-    if (context && String(context.projectId) === String(next.projectId) && context.requirement.id === next.requirement.id && context.requirement.version === next.requirement.version) return;
+    if (context && String(context.projectId) === String(next.projectId) && String(context.actorId) === String(next.actorId) && context.requirement.id === next.requirement.id && context.requirement.version === next.requirement.version) return;
     clear(); context = next;
     const requirement = context.requirement;
     const identity = (requirement.keyNo == null ? '' : 'REQ-' + String(requirement.keyNo).padStart(3, '0') + ' · ') + (requirement.title || '');
     const basis = $('<div class="ai-basis small border-start ps-3 mb-3">').append(
       text('<strong>', 'basisLabel', 'Generation basis'), $('<p class="ai-basis-requirement mb-1">').text(identity),
-      text('<p class="mb-0 text-secondary">', 'basisDescription', 'Generate 3–5 candidates from this requirement’s description, including acceptance criteria, and the additional instructions below.'));
+      $('<p class="ai-basis-description mb-0 text-secondary">'),
+      $('<p class="ai-basis-source-count mb-0 text-secondary d-none">'));
     panel.append($('<div class="asset-panel-heading">').append(
       text('<h3 id="ai-cases-title" class="fs-5">', 'heading'),
       text('<button type="button" class="ai-collapse btn btn-outline-secondary btn-sm">', 'collapse', 'Collapse').on('click', collapse)), basis,
@@ -148,8 +154,31 @@
       $('<p class="ai-status mt-2" role="status" aria-live="polite">'), $('<div class="ai-candidates">'),
       text('<button type="button" class="ai-save btn btn-primary d-none me-2">', 'save').on('click', save),
       text('<button type="button" class="ai-discard btn btn-outline-secondary d-none">', 'discard').on('click', function () {
-        preview = null; panel.find('.ai-candidates').empty(); panel.find('.ai-save,.ai-discard').addClass('d-none'); message('discarded');
+        preview = null; previewValidator = null; importedCoverage = false; coverageSourceCount = null; renderBasis(); panel.find('.ai-candidates').empty(); panel.find('.ai-save,.ai-discard').addClass('d-none'); message('discarded');
       }), $('<div class="ai-saved alert alert-success mt-3 d-none" role="status" aria-live="polite">'));
+    renderBasis();
+  }
+  function importPreview(value, owner) {
+    if (!context || context.actorId == null || busy || uncertain || !owner || typeof owner.validateFresh !== 'function' || String(owner.projectId) !== String(context.projectId)
+      || String(owner.requirementId) !== String(context.requirement.id) || String(owner.actorId) !== String(context.actorId)
+      || !value || String(value.requirementId) !== String(context.requirement.id) || value.expectedVersion !== context.requirement.version
+      || !Array.isArray(value.candidates) || value.candidates.length < 1 || value.candidates.length > 5
+      || !value.candidates.every(function (row) { return row && typeof row.title === 'string' && row.title.length <= 240 && ['LOW', 'MEDIUM', 'HIGH'].includes(row.priority)
+        && (row.description == null || typeof row.description === 'string') && (row.preconditions == null || typeof row.preconditions === 'string')
+        && Array.isArray(row.steps) && row.steps.length <= 30 && row.steps.every(function (step) { return step && typeof step.action === 'string' && typeof step.expectedResult === 'string'; }); })
+      || !validCandidates(value.candidates)) return false;
+    if (preview && !window.confirm(tr('replace'))) return false;
+    preview = { expectedVersion: value.expectedVersion, candidates: JSON.parse(JSON.stringify(value.candidates)) };
+    previewValidator = owner.validateFresh;
+    importedCoverage = true; coverageSourceCount = Number.isSafeInteger(value.sourceCaseCount) && value.sourceCaseCount >= 0 ? value.sourceCaseCount : null;
+    renderBasis(); panel.find('.ai-saved').empty().addClass('d-none'); renderCandidates(); message('review'); open(); return true;
+  }
+  function renderBasis() {
+    const key = importedCoverage ? 'coverageBasisDescription' : 'basisDescription';
+    const fallback = importedCoverage ? 'Coverage review of this requirement and its linked cases' : 'Requirement, acceptance criteria and instructions';
+    panel.find('.ai-basis-description').attr('data-ai-text', key).attr('data-ai-fallback', fallback).text(tr(key, fallback));
+    panel.find('.ai-basis-source-count').toggleClass('d-none', !importedCoverage || coverageSourceCount == null)
+      .text(importedCoverage && coverageSourceCount != null ? window.I18n.t('ai.coverageBasisCount', { count: coverageSourceCount }, 'Linked cases in source scope: {count}') : '');
   }
   panel.on('change', '.ai-select', controls);
   document.addEventListener('veriqra:localechange', function () {
@@ -161,7 +190,8 @@
     });
     panel.find('.ai-priority option').each(function () { $(this).text(window.I18n.enumLabel(this.value)); });
     if (statusKey) panel.find('.ai-status').text(tr(statusKey));
+    renderBasis();
   });
-  window.VeriqraAiCases = Object.freeze({ mount: mount, open: open, clear: clear, hasDraft: hasDraft, validCandidates: validCandidates });
+  window.VeriqraAiCases = Object.freeze({ mount: mount, open: open, clear: clear, hasDraft: hasDraft, validCandidates: validCandidates, importPreview: importPreview, loadPreview: importPreview });
   if (window.VeriqraDraftGuard) window.VeriqraDraftGuard.register('ai-cases', { dirty: hasDraft, clear: clear });
 })(jQuery, window.VeriqraApi);

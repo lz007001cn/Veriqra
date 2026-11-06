@@ -85,6 +85,7 @@ public final class ApiServlet extends HttpServlet {
             }
             switch (parts[3]) {
                 case "runs" -> TestRunHandler.handle(request, response, services, actor, projectId, parts);
+                    case "release-acceptances" -> ReleaseAcceptanceHandler.handle(request, response, actor, projectId, parts);
                 case "defects" -> DefectHandler.handle(request, response, services, actor, projectId, parts);
                 case "requirements" -> RequirementHandler.handle(request, response, services, actor, projectId, parts);
                 case "test-cases" -> TestCaseHandler.handle(request, response, services, actor, projectId, parts);

@@ -8,6 +8,7 @@ import java.io.IOException;
 public final class TestRunHandler {
     private TestRunHandler() { }
     public record AiSummaryRequest(String language) { }
+    public record RunAssigneeRequest(Integer expectedVersion, Long assigneeId) { }
     public static void handle(HttpServletRequest req, HttpServletResponse res, WebServices s,
                               Long actor, Long project, String[] path) throws IOException {
         String method = req.getMethod();
@@ -27,8 +28,8 @@ public final class TestRunHandler {
             } else {
                 var b = JsonHttp.read(req, CreateRunRequest.class);
                 var value = b.testPlanId() != null
-                        ? s.testRuns().createFromPlan(actor, new CreatePlanRunCommand(project, b.testPlanId(), b.name(), b.environment(), b.buildVersion()))
-                        : s.testRuns().createAdHoc(actor, new CreateAdHocRunCommand(project, b.name(), b.environment(), b.buildVersion(), b.testCaseIds()));
+                        ? s.testRuns().createFromPlan(actor, new CreatePlanRunCommand(project, b.testPlanId(), b.name(), b.environment(), b.buildVersion(), b.assigneeId()))
+                        : s.testRuns().createAdHoc(actor, new CreateAdHocRunCommand(project, b.name(), b.environment(), b.buildVersion(), b.testCaseIds(), b.assigneeId()));
                 res.setHeader("Location", req.getContextPath() + "/api/projects/" + project + "/runs/" + value.id());
                 JsonHttp.write(res, 201, RunResponse.from(value));
             }
@@ -38,6 +39,13 @@ public final class TestRunHandler {
             Long run = JsonHttp.positiveId(path[4]);
             JsonHttp.method(res, method, "GET");
             JsonHttp.write(res, 200, RunDetailResponse.from(s.testRuns().getDetails(actor, project, run)));
+            return;
+        }
+        if (path.length == 6 && path[5].equals("assignee")) {
+            JsonHttp.method(res, method, "PUT");
+            var body = JsonHttp.read(req, RunAssigneeRequest.class);
+            JsonHttp.write(res, 200, RunResponse.from(s.testRuns().assign(actor, project, JsonHttp.positiveId(path[4]),
+                    body.expectedVersion(), body.assigneeId())));
             return;
         }
         if (path.length == 6 && (path[5].equals("complete") || path[5].equals("cancel"))) {

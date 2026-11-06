@@ -63,17 +63,18 @@
     try {
       const input = new URL(candidate || '', document.baseURI);
       if (input.origin !== fallback.origin || input.username || input.password) return fallback.href;
-      const adminPage = ['admin/users.html', 'admin/ai.html'].find(function (path) {
+      const adminPage = ['admin/users.html', 'admin/ai.html', 'admin/system.html'].find(function (path) {
         return input.pathname === new URL(path, document.baseURI).pathname;
       });
       if (adminPage) return new URL(adminPage, document.baseURI).href;
       if (input.pathname !== fallback.pathname) return fallback.href;
-      const views = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings'];
+      const views = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings', 'release-acceptance'];
       const requestedView = input.hash.slice(1) || 'dashboard';
       const view = requestedView === 'collaboration' ? 'project-settings' : requestedView;
       if (!views.includes(view)) return fallback.href;
       const keys = ['projectId','requirementId','testCaseId','planId','runId','runCaseId','attemptId','defectId',
         'sourceRequirementId','sourceTestCaseId','sourcePlanId','failureAttemptId'];
+      if (view === 'release-acceptance') keys.push('acceptanceId');
       keys.forEach(function (key) { const value = input.searchParams.get(key); if (validId(value)) fallback.searchParams.set(key, value); });
       if (['create', 'link'].includes(input.searchParams.get('action'))) fallback.searchParams.set('action', input.searchParams.get('action'));
       fallback.hash = view; return fallback.href;

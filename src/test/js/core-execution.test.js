@@ -114,6 +114,180 @@ async function loadCase(ui, caseId = '50', history = [], value = run(), targetAt
   if (!ui.$('#execution-outcome').val()) ui.$('#execution-outcome').val('PASS');
 }
 
+test('plan list combines search and status, clears an empty result, and filters without API writes', async () => {
+  const ui = browser();
+  const rows = [
+    { id: 31, keyNo: 31, name: 'Cache regression', description: 'Empty cache', status: 'READY', version: 3 },
+    { id: 32, keyNo: 32, name: 'Startup smoke', description: 'Empty cache', status: 'DRAFT', version: 2 },
+    { id: 33, keyNo: 33, name: 'Old cache', status: 'ARCHIVED', version: 1 }
+  ];
+  await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), rows);
+  const requestCount = ui.calls.length;
+  ui.$('#execution-list-search').val('Empty cache').trigger('input');
+  assert.equal(ui.$('#execution-list-count').text(), 'Showing 2 of 3 loaded items.');
+  await ui.click(ui.find('#execution-list', 'READY · 1'));
+  assert.equal(ui.$('#execution-list-filter').val(), 'READY');
+  assert.equal(ui.$('#execution-list-count').text(), 'Showing 1 of 3 loaded items.');
+  assert.ok(ui.find('#execution-list-results', 'TP-031 · Cache regression'));
+  assert.equal(ui.find('#execution-list-results', 'TP-032 · Startup smoke'), undefined);
+  ui.$('#execution-list-search').val('missing title').trigger('input');
+  assert.equal(ui.$('#execution-list-count').text(), 'Showing 0 of 3 loaded items.');
+  assert.match(ui.textOf(ui.$('#execution-list-results')[0]), /No items match these filters/);
+  await ui.click(ui.$('#execution-list-clear')[0]);
+  assert.equal(ui.$('#execution-list-count').text(), 'Showing 3 of 3 loaded items.');
+  assert.equal(ui.$('#execution-list-search').val(), '');
+  assert.equal(ui.$('#execution-list-filter').val(), '');
+  assert.equal(ui.calls.length, requestCount);
+  assert.ok(ui.calls.every(call => call.method === 'GET'));
+});
+
+test('run search includes tested build and environment, and explicit title sorting orders matching rows', async () => {
+  const ui = browser();
+  const rows = [
+    { id: 40, name: 'Zulu regression', status: 'IN_PROGRESS', buildVersion: '1.4.1', environment: 'Windows 11', createdAt: '2026-10-04' },
+    { id: 41, name: 'Alpha regression', status: 'COMPLETED', buildVersion: '1.4.1', environment: 'Windows 11', createdAt: '2026-10-03' },
+    { id: 42, name: 'Beta smoke', status: 'CANCELLED', buildVersion: '1.4.0', environment: 'Windows 10', createdAt: '2026-10-02' }
+  ];
+  await ui.open('runs', {}); await ui.respond(ui.calls.at(-1), rows);
+  ui.$('#execution-list-search').val('1.4.1').trigger('input');
+  ui.$('#execution-list-sort').val('name').trigger('change');
+  assert.equal(ui.$('#execution-list-count').text(), 'Showing 2 of 3 loaded items.');
+  const names = ui.$('#execution-list-results')[0].children.filter(node => node.attributes?.['data-execution-id']).map(node => node.children[0].children[0].content);
+  assert.deepEqual(names, ['Alpha regression', 'Zulu regression']);
+  ui.$('#execution-list-search').val('Windows 10').trigger('input');
+  assert.equal(ui.$('#execution-list-count').text(), 'Showing 1 of 3 loaded items.');
+  assert.ok(ui.find('#execution-list-results', 'Beta smoke'));
+  assert.equal(ui.calls.length, 1);
+});
+
+test('plan filters and viewed position survive return but stay separate from runs, projects and actors', async () => {
+  const ui = browser();
+  const rows = [{ id: 31, keyNo: 31, name: 'Cache regression', status: 'READY', version: 3 }];
+  await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), rows);
+  ui.$('#execution-list-search').val('cache').trigger('input');
+  ui.$('#execution-list-filter').val('READY').trigger('change'); ui.scroll(320);
+  await ui.click(ui.find('#execution-list', 'TP-031 · Cache regression'));
+  await ui.respond(ui.calls.at(-1), planDetail(31, 1)); await ui.respond(ui.calls.at(-1), [{ id: 20, title: 'Cache', status: 'READY' }]);
+  await ui.click(ui.$('#execution-back')[0]); await ui.respond(ui.calls.at(-1), rows);
+  assert.equal(ui.$('#execution-list-search').val(), 'cache');
+  assert.equal(ui.$('#execution-list-filter').val(), 'READY');
+  assert.equal(ui.scrollCalls.at(-1), 320);
+  assert.equal(ui.find('#execution-list', 'TP-031 · Cache regression').parent.parent.classes.has('is-recently-viewed'), true);
+  await ui.open('runs', {}); await ui.respond(ui.calls.at(-1), []);
+  assert.equal(ui.$('#execution-list-search').val(), '');
+  await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), rows);
+  assert.equal(ui.$('#execution-list-search').val(), 'cache');
+  ui.nav.select('test-plans', { projectId: '13' }); ui.emit('veriqra:project', { project: { id: 13 } }); await flush();
+  await ui.respond(ui.calls.at(-1), rows); assert.equal(ui.$('#execution-list-search').val(), '');
+  ui.nav.select('test-plans', { projectId: '12' }); ui.emit('veriqra:project', { project: { id: 12 } }); await flush();
+  await ui.respond(ui.calls.at(-1), rows); assert.equal(ui.$('#execution-list-search').val(), 'cache');
+  ui.context({ actorId: 99 }); await ui.open('test-plans', {}); await ui.respond(ui.calls.at(-1), rows);
+  assert.equal(ui.$('#execution-list-search').val(), '');
+  assert.equal(ui.$('#execution-list-filter').val(), '');
+  assert.equal(ui.find('#execution-list', 'TP-031 · Cache regression').parent.parent.classes.has('is-recently-viewed'), false);
+});
+
+test('run and frozen case headers retain tested build and environment independently of record revision', async () => {
+  const ui = browser();
+  const value = run(); value.run.buildVersion = 'ZZZSwitch 1.4.1'; value.run.environment = 'Windows 11 · Chrome'; value.run.version = 17;
+  await ui.open('runs', { runId: '40' }); await ui.respond(ui.calls.at(-1), value);
+  const header = ui.textOf(ui.$('#execution-context')[0]);
+  assert.match(header, /Tested build.*ZZZSwitch 1\.4\.1/);
+  assert.match(header, /Environment.*Windows 11 · Chrome/);
+  assert.equal(ui.textOf(ui.$('#execution-detail')[0]).includes('ZZZSwitch 1.4.1'), false);
+  await loadCase(ui, '50', [], value);
+  const caseHeader = ui.textOf(ui.$('#execution-case-context')[0]);
+  assert.match(caseHeader, /Tested build.*ZZZSwitch 1\.4\.1/);
+  assert.match(caseHeader, /Environment.*Windows 11 · Chrome/);
+  assert.equal(caseHeader.includes('17'), false);
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('case queue filters, keeps its position while a case loads and routes through the existing draft guard', async () => {
+  let allowJump = false;
+  const ui = browser({ beforeNavigate(view, context, guard) {
+    if (context.runCaseId === '51' && guard.dirty()) return allowJump;
+  } });
+  const value = run(['PASS', 'FAIL', 'NOT_RUN', 'BLOCKED', 'NOT_RUN']);
+  await ui.open('runs', { runId: '40', runCaseId: '50', defectId: '9', failureAttemptId: '99' });
+  await ui.respond(ui.calls.at(-1), value); await ui.respond(ui.calls.at(-1), [attempt(60, 'PASS')]);
+  const queueLink = index => ui.find('#execution-case-queue', 'Frozen ' + index).parent;
+  const failureFilter = () => ui.find('#execution-case-queue', 'FAIL · 1');
+  assert.equal(queueLink(0).attributes['aria-current'], 'true');
+  assert.match(ui.$('#execution-queue-first-pending').attr('href'), /runCaseId=52/);
+  await ui.click(failureFilter());
+  assert.equal(failureFilter().attributes['aria-pressed'], 'true');
+  assert.equal(queueLink(0).parent.classes.has('d-none'), true);
+  assert.equal(queueLink(1).parent.classes.has('d-none'), false);
+  assert.match(queueLink(1).attributes.href, /failureAttemptId=99/);
+  ui.$('#execution-comment').val('Keep this draft if navigation is cancelled');
+  const before = ui.calls.length;
+  await ui.click(queueLink(1));
+  assert.equal(ui.calls.length, before); assert.equal(ui.nav.read().runCaseId, '50');
+  assert.match(ui.$('#execution-comment').val(), /Keep this draft/);
+  allowJump = true; ui.$('#execution-queue-cases')[0].scrollTop = 52;
+  await ui.click(queueLink(1));
+  assert.equal(ui.calls.at(-1).url, 'projects/12/runs/40');
+  assert.equal(ui.$('#execution-case-panel').hasClass('d-none'), false);
+  assert.equal(ui.$('#execution-attempt-form').hasClass('d-none'), true);
+  assert.equal(failureFilter().attributes['aria-pressed'], 'true');
+  assert.equal(ui.$('#execution-queue-cases')[0].scrollTop, 52);
+  const staleFilter = failureFilter();
+  const allFilter = () => ui.find('#execution-case-queue', 'All outcomes · 5');
+  await ui.click(allFilter());
+  assert.equal(allFilter().attributes['aria-pressed'], 'true');
+  assert.equal(queueLink(0).parent.classes.has('d-none'), false);
+  ui.$('#execution-queue-cases')[0].scrollTop = 31;
+  await ui.respond(ui.calls.at(-1), value); await ui.respond(ui.calls.at(-1), [attempt(61, 'FAIL')]);
+  assert.equal(queueLink(1).attributes['aria-current'], 'true');
+  assert.equal(allFilter().attributes['aria-pressed'], 'true');
+  assert.equal(ui.$('#execution-queue-cases')[0].scrollTop, 31);
+  await ui.click(staleFilter);
+  assert.equal(allFilter().attributes['aria-pressed'], 'true');
+  await ui.click(ui.$('#execution-queue-first-pending')[0]);
+  assert.equal(ui.nav.read().runCaseId, '52'); assert.equal(ui.nav.read().failureAttemptId, '99');
+  assert.ok(ui.calls.every(call => call.method === 'GET'));
+});
+
+test('latest and exact linked attempts stay visible while other history and its reads remain folded', async () => {
+  const ui = browser();
+  const history = [attempt(60, 'FAIL', 'a', 1), attempt(61, 'PASS', 'b', 2), attempt(62, 'FAIL', 'c', 3), attempt(63, 'PASS', 'd', 4)];
+  await loadCase(ui, '50', history, run(['PASS']), '60');
+  const visible = ui.$('#execution-history')[0].children;
+  assert.deepEqual(visible.map(node => node.id), ['execution-attempt-63', 'execution-attempt-60', 'execution-earlier-attempts']);
+  assert.equal(ui.$('#execution-attempt-60').attr('aria-current'), 'true');
+  assert.equal(ui.$('#execution-attempt-60')[0].focused, true);
+  assert.notEqual(ui.$('#execution-earlier-attempts').prop('open'), true);
+  assert.ok(ui.find('#execution-earlier-attempts', 'Earlier attempts (2)'));
+  assert.deepEqual(ui.defectCalls.map(call => call.url), ['projects/12/runs/40/cases/50/attempts/60/defects']);
+  ui.$('#execution-earlier-attempts').prop('open', true).trigger('toggle'); await flush();
+  assert.equal(ui.defectCalls.at(-1).url, 'projects/12/runs/40/cases/50/attempts/62/defects');
+  ui.$('#execution-earlier-attempts').prop('open', false).trigger('toggle').prop('open', true).trigger('toggle'); await flush();
+  assert.equal(ui.defectCalls.length, 2);
+});
+
+test('radio outcome choices preserve explicit selection, failure input and the canonical submit payload', async () => {
+  const ui = browser(), value = run(['NOT_RUN']);
+  await ui.open('runs', { runId: '40', runCaseId: '50' });
+  await ui.respond(ui.calls.at(-1), value); await ui.respond(ui.calls.at(-1), []);
+  assert.equal(ui.$('#execution-outcome').val(), '');
+  assert.equal(ui.$('#execution-outcome-select-wrap').hasClass('d-none'), true);
+  assert.equal(ui.$('#execution-outcome').prop('required'), false);
+  assert.equal(ui.$('#execution-outcome-option-fail').prop('required'), true);
+  assert.equal(ui.$('#execution-outcome-option-pass').prop('checked'), false);
+  ui.$('#execution-outcome-option-fail').prop('checked', true).trigger('change');
+  assert.equal(ui.$('#execution-outcome').val(), 'FAIL');
+  assert.equal(ui.$('#execution-failure-wrap').hasClass('d-none'), false);
+  ui.$('#execution-failure').val('Observed issue');
+  ui.locale('zh-CN'); await flush();
+  await ui.respond(ui.calls.at(-1), value); await ui.respond(ui.calls.at(-1), []);
+  assert.equal(ui.$('#execution-outcome-option-fail').prop('checked'), true);
+  assert.equal(ui.$('#execution-failure').val(), 'Observed issue');
+  await ui.submit();
+  const posted = ui.calls.at(-1); assert.equal(posted.method, 'POST');
+  assert.equal(posted.body.outcome, 'FAIL'); assert.equal(posted.body.failureMessage, 'Observed issue');
+});
+
 test('plan list restores its own scroll position and recently viewed title after returning', async () => {
   const ui = browser();
   const row = { id: 31, keyNo: 31, name: 'Plan 31', status: 'READY', version: 2 };
@@ -507,10 +681,11 @@ test('locale refresh does not restore hidden previous-case input into a case sti
   assert.equal(ui.$('#execution-comment').val(), ''); assert.equal(ui.nav.read().runCaseId, '51'); assert.match(ui.$('#execution-case-title').text(), /Frozen 1/);
 });
 
-test('locale during a pending previous-case detail retains the selected route and rejects the obsolete run response', async () => {
+test('locale during a pending previous-case load keeps the queue, preserves the route and rejects the obsolete response', async () => {
   const ui = browser(); await loadCase(ui, '51'); ui.$('#execution-comment').val('Draft belongs to case B');
   await ui.click(ui.find('#execution-case-navigation', 'Previous case')); const obsolete = ui.calls.at(-1);
-  assert.equal(obsolete.url, 'projects/12/runs/40'); assert.equal(ui.$('#execution-case-panel').hasClass('d-none'), true);
+  assert.equal(obsolete.url, 'projects/12/runs/40'); assert.equal(ui.$('#execution-case-panel').hasClass('d-none'), false);
+  assert.ok(ui.find('#execution-case-queue', 'Frozen 1')); assert.equal(ui.$('#execution-attempt-form').hasClass('d-none'), true);
   ui.locale('zh-CN'); await flush(); const refresh = ui.calls.at(-1);
   assert.notEqual(refresh, obsolete); assert.equal(refresh.url, 'projects/12/runs/40');
   assert.equal(ui.nav.read().runId, '40'); assert.equal(ui.nav.read().runCaseId, '50');
@@ -736,9 +911,24 @@ test('recorded PASS and record-and-next retain the original FAIL independently o
     await respondRunCase(ui, latest, advance ? [] : [saved]); expectRetestIdentity(ui.nav.read());
     assert.equal(ui.nav.read().failureAttemptId, '6'); assert.notEqual(ui.nav.read().failureAttemptId, String(saved.id));
     assert.equal(ui.nav.read().runCaseId, advance ? '51' : '50');
-    if (!advance) assert.equal(ui.nav.read().attemptId, '81');
+    if (!advance) {
+      assert.equal(ui.nav.read().attemptId, '81');
+      const handoff = ui.find('#execution-case-progress', 'Link this retest PASS');
+      assert.ok(handoff && handoff.classes.has('btn-primary'));
+      assert.deepEqual(routeFromHref(handoff.attributes.href), { view: 'defects', projectId: '12', defectId: '9', failureAttemptId: '6', retestRunId: '40', retestRunCaseId: '50', retestPassAttemptId: '81' });
+    } else assert.equal(ui.find('#execution-case-progress', 'Link this retest PASS'), undefined);
     assert.ok(ui.find('#execution-case-navigation', 'Back to defect and link the retest PASS'));
     assert.equal(ui.calls.filter(call => call.method === 'POST').length, 1, 'Context restoration cannot append a duplicate attempt');
+  }
+});
+
+test('historical, non-PASS and other-case results keep the defect return without proposing a retest link', async () => {
+  for (const [selected, sourceCaseId, outcome] of [['80', '20', 'PASS'], ['81', '20', 'FAIL'], ['81', '21', 'PASS']]) {
+    const ui = browser();
+    await ui.open('runs', { runId: '40', runCaseId: '50', attemptId: selected, ...retestIdentity, sourceTestCaseId: sourceCaseId });
+    await respondRunCase(ui, run([outcome]), [attempt(80, 'PASS', 'prior', 1), attempt(81, outcome, 'latest', 2)]);
+    assert.equal(ui.find('#execution-case-progress', 'Link this retest PASS'), undefined);
+    assert.ok(ui.find('#execution-case-navigation', 'Back to defect and link the retest PASS'));
   }
 });
 

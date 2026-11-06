@@ -12,6 +12,9 @@ public interface TestRunDao {
     /** Current R1 discovery, sorted physical IDs; caller first locks relevant TestCases. */
     List<TestRun> listByProjectForUpdate(Long projectId);
     List<TestRun> listByPlan(Long testPlanId);
+    /** Current read while the project/member lock excludes new assignments to this member. */
+    boolean hasActiveAssignment(Long projectId, Long userId);
+    TestRun updateAssignee(Long id, Integer lockVersion, Long assigneeId);
     /** Ignores generated fields; insert and readback belong in an outer transaction. */
     TestRun insert(TestRun value);
     /** Uses id + lockVersion; ownership, origin, business key and creation metadata stay unchanged. */

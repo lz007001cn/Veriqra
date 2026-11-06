@@ -142,6 +142,42 @@ test('run summary is explicit, read-only and renders server counts with snapshot
   assert.equal(ui.guards.size, 0, 'Summary generation adds no write or unsaved-draft flow.');
 });
 
+test('JUnit failure actions open the exact source draft or an existing defect without a write', async () => {
+  const ui = browser(), drafts = [];
+  let discarded = false;
+  ui.window.VeriqraDefects = { stageAiDraft(draft) { drafts.push(draft); return () => { discarded = true; }; } };
+  ui.mount(7, 10, { canWrite: () => true });
+  assert.equal(ui.$('.ai-summary-create-defect').length, 0);
+  await generate(ui, { ...response(), failureActions: [
+    { runCaseId: 11, attemptId: 15, title: 'Empty cache', draftTitle: 'Cache prevented switching', suggestion: 'Verify the failure against a clean cache.', linkedDefects: [] },
+    { runCaseId: 12, attemptId: 16, title: 'Already tracked', linkedDefects: [{ id: 13, keyNo: 2 }] }
+  ] });
+  assert.match(ui.$('.ai-summary-failure-actions').text(), /Empty cache.*Verify the failure.*Create defect draft.*View existing defect BUG-002/);
+  await ui.fire(ui.$('.ai-summary-create-defect')[0]);
+  assert.equal(drafts[0].draftTitle, 'Cache prevented switching');
+  assert.equal(drafts[0].attemptId, 15);
+  assert.equal(discarded, true);
+  await ui.fire(ui.$('.ai-summary-failure-actions').find('a')[0]);
+  assert.deepEqual(ui.navigation, [
+    { view: 'defects', projectId: 7, runId: 10, runCaseId: 11, attemptId: 15, action: 'create', failureAttemptId: 15 },
+    { view: 'defects', projectId: 7, defectId: 13 }
+  ]);
+  assert.equal(ui.requests.length, 1, 'Opening a form or a linked defect only navigates');
+});
+
+test('a read-only or stale run summary cannot open a defect draft', async () => {
+  const ui = browser();
+  const value = { ...response(), failureActions: [{ runCaseId: 11, attemptId: 15, title: 'Empty cache', linkedDefects: [] }] };
+  await generate(ui, value);
+  assert.equal(ui.$('.ai-summary-create-defect').length, 0);
+  ui.mount(7, 10, { canWrite: () => true });
+  await generate(ui, value);
+  const button = ui.$('.ai-summary-create-defect')[0];
+  ui.mount(8, 20);
+  await ui.fire(button);
+  assert.equal(ui.navigation.length, 0);
+});
+
 test('duplicate clicks do not launch another generation; regeneration failure preserves the previous summary', async () => {
   const ui = browser(); await generate(ui);
   const before = ui.$('.ai-summary-result').text(), work = ui.fire(ui.$('.ai-summary-generate')[0]);

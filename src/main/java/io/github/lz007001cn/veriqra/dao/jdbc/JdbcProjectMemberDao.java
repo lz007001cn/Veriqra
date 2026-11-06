@@ -32,6 +32,10 @@ public final class JdbcProjectMemberDao implements ProjectMemberDao {
         requireTransaction();
         return query(SELECT + " WHERE project_id=? AND user_id=? FOR SHARE", projectId, userId).stream().findFirst();
     }
+    @Override public Optional<ProjectMember> findForUpdate(Long projectId, Long userId) {
+        requireTransaction();
+        return query(SELECT + " WHERE project_id=? AND user_id=? FOR UPDATE", projectId, userId).stream().findFirst();
+    }
     @Override public boolean existsRecord(Long projectId, Long userId) { return find(projectId, userId).isPresent(); }
     @Override public List<ProjectMember> listByProject(Long projectId) {
         return query(SELECT + " WHERE project_id=? ORDER BY user_id", projectId);

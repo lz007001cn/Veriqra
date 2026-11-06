@@ -3,6 +3,7 @@ package io.github.lz007001cn.veriqra.web;
 import io.github.lz007001cn.veriqra.model.*;
 import io.github.lz007001cn.veriqra.service.*;
 import io.github.lz007001cn.veriqra.service.auth.AuthenticatedUser;
+import io.github.lz007001cn.veriqra.service.exception.MembershipConflictException;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import java.net.URI;
@@ -31,8 +32,16 @@ class ProjectSettingsWebTest {
         ProjectSettingsService settings=WebFoundationTest.proxy(ProjectSettingsService.class,(o,m,a) -> {
             invoked=m.getName(); arguments=a;
             return switch(m.getName()) {
-                case "listProjectMembers" -> List.of(new ProjectSettingsService.MemberView(2L,"tester","Tester",ProjectRole.TESTER,MembershipStatus.ACTIVE,UserStatus.ACTIVE));
-                case "addProjectMember" -> new ProjectSettingsService.MemberView(3L,(String)a[2],"Developer",(ProjectRole)a[3],MembershipStatus.ACTIVE,UserStatus.ACTIVE);
+                case "listProjectMembers" -> List.of(new ProjectSettingsService.MemberView(2L,"tester","Tester",ProjectRole.TESTER,MembershipStatus.ACTIVE,UserStatus.ACTIVE,2));
+                case "addProjectMember" -> new ProjectSettingsService.MemberView(3L,(String)a[2],"Developer",(ProjectRole)a[3],MembershipStatus.ACTIVE,UserStatus.ACTIVE,0);
+                case "updateProjectMember" -> {
+                    var change = (ProjectSettingsService.MemberChange) a[3];
+                    if (change.replacementAssigneeId() == null) {
+                        throw new MembershipConflictException("MEMBER_DEFECT_HANDOFF_REQUIRED", "Choose a replacement developer");
+                    }
+                    yield new ProjectSettingsService.MemberView((Long) a[2], "tester", "Tester", change.projectRole(),
+                            change.status(), UserStatus.ACTIVE, change.expectedVersion() + 1);
+                }
                 case "listManagers" -> List.of(new ProjectManager(7L,2L,1L,MembershipStatus.ACTIVE,null,null));
                 case "appointManager" -> new ProjectManager(7L,(Long)a[2],1L,MembershipStatus.ACTIVE,null,null);
                 case "revokeManager" -> null;
@@ -61,7 +70,9 @@ class ProjectSettingsWebTest {
         return client.send(request.method(method,body==null?HttpRequest.BodyPublishers.noBody():HttpRequest.BodyPublishers.ofString(body)).build(),HttpResponse.BodyHandlers.ofString());
     }
     @Test void membersAndManagersKeepScopedReadWriteAndRemovalContracts() throws Exception {
-        assertEquals(200,call("GET","/projects/7/members",null).statusCode());
+        var members = call("GET", "/projects/7/members", null);
+        assertEquals(200, members.statusCode());
+        assertTrue(members.body().contains("\"version\":2"));
         assertEquals("listProjectMembers",invoked); assertArrayEquals(new Object[]{1L,7L},arguments);
         assertEquals(201,call("POST","/projects/7/members","{\"username\":\"developer\",\"projectRole\":\"DEVELOPER\"}").statusCode());
         assertEquals("addProjectMember",invoked); assertArrayEquals(new Object[]{1L,7L,"developer",ProjectRole.DEVELOPER},arguments);
@@ -69,6 +80,21 @@ class ProjectSettingsWebTest {
         assertEquals(201,call("POST","/projects/7/managers","{\"userId\":2}").statusCode()); assertArrayEquals(new Object[]{1L,7L,2L},arguments);
         assertEquals(204,call("DELETE","/projects/7/managers/2",null).statusCode()); assertEquals("revokeManager",invoked);
         assertArrayEquals(new Object[]{1L,7L,2L},arguments);
+    }
+    @Test void scopedMembershipPutUsesRevisionAndReturnsActionableHandoffConflict() throws Exception {
+        var request = """
+                {"projectRole":"DEVELOPER","status":"INACTIVE","replacementAssigneeId":4,"expectedVersion":2}
+                """;
+        var response = call("PUT", "/projects/7/members/2", request);
+        assertEquals(200, response.statusCode());
+        assertEquals("updateProjectMember", invoked);
+        assertArrayEquals(new Object[]{1L, 7L, 2L, new ProjectSettingsService.MemberChange(
+                ProjectRole.DEVELOPER, MembershipStatus.INACTIVE, 4L, 2)}, arguments);
+        assertTrue(response.body().contains("\"version\":3"));
+        var conflict = call("PUT", "/projects/7/members/2", request.replace("\"replacementAssigneeId\":4", "\"replacementAssigneeId\":null"));
+        assertEquals(409, conflict.statusCode());
+        assertTrue(conflict.body().contains("MEMBER_DEFECT_HANDOFF_REQUIRED"));
+        assertEquals(405, call("DELETE", "/projects/7/members/2", null).statusCode());
     }
     @Test void retiredWorkflowEndpointsNoLongerDispatch() throws Exception {
         for(String path:List.of("/projects/7/teams","/projects/7/tasks","/projects/7/handoffs","/projects/7/contributions","/projects/7/credit-transfers","/credits/me"))

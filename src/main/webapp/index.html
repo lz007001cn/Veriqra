@@ -18,12 +18,16 @@
   <script defer src="assets/js/project-picker.js"></script>
   <script defer src="assets/js/test-assets.js"></script>
   <script defer src="assets/js/ai-cases.js"></script>
+  <script defer src="assets/js/ai-requirement-assist.js"></script>
   <script defer src="assets/js/ai-run-summary.js"></script>
   <script defer src="assets/js/execution.js"></script>
+  <script defer src="assets/js/ai-defect-analysis.js"></script>
+  <script defer src="assets/js/defect-comments.js"></script>
   <script defer src="assets/js/defects.js"></script>
   <script defer src="assets/js/automation-imports.js"></script>
   <script defer src="assets/js/import-history.js"></script>
   <script defer src="assets/js/project-settings.js"></script>
+  <script defer src="assets/js/release-acceptance.js"></script>
   <script defer src="assets/js/shell.js"></script>
 </head>
 <body class="app-page">
@@ -51,6 +55,7 @@
         <a class="nav-item" href="#test-plans" data-view="test-plans"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2h10v12H3zM5 5h6M5 8h6M5 11h6"/></svg><span data-i18n="common.testPlans">Test plans</span></a>
         <a class="nav-item" href="#runs" data-view="runs"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l9 6-9 6z"/></svg><span data-i18n="common.runs">Runs</span></a>
         <a class="nav-item" href="#defects" data-view="defects"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2 2M11 11l2 2"/></svg><span data-i18n="common.defects">Defects</span></a>
+        <a class="nav-item" href="#release-acceptance" data-view="release-acceptance"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2h8v12H4zM6 8l1.5 1.5L10 7"/></svg><span data-i18n="releaseAcceptance.title">Release acceptance</span></a>
         <a class="nav-item" href="#automation" data-view="automation"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3"/></svg><span data-i18n="common.automationImports">Automation &amp; imports</span></a>
         <a class="nav-item" href="#project-settings" data-view="project-settings"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2"/><path d="M2 14v-2a4 4 0 018 0v2M11 3a2 2 0 010 4M13 14v-2a4 4 0 00-2-3"/></svg><span data-i18n="projectSettings.navigation">Project settings</span></a>
         <a class="nav-item d-none" id="admin-entry" href="admin/users.html"><svg class="vq-nav-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l6 3v4c0 4-6 7-6 7S2 12 2 8V4z"/></svg><span data-i18n="common.administration">Administration</span></a>
@@ -79,6 +84,10 @@
             <span id="project-status" class="status-pill"></span>
           </div>
           <details class="dashboard-project-description"><summary data-i18n="dashboard.projectDescription">Project description</summary><p id="project-description" class="small text-secondary mt-2 mb-0"></p></details>
+          <section id="dashboard-my-work" class="asset-panel mb-3 d-none" aria-labelledby="dashboard-my-work-title">
+            <h2 id="dashboard-my-work-title" data-i18n="dashboard.myWork">My work</h2>
+            <div id="dashboard-my-work-items" aria-live="polite"></div>
+          </section>
           <div class="dashboard-run-toolbar"><label for="dashboard-run-select" class="form-label mb-0" data-i18n="dashboard.currentRun">Current test run</label><select id="dashboard-run-select" class="form-select" disabled><option value="" data-i18n="common.loading">Loading…</option></select></div>
           <div class="dashboard-feedback"><p id="dashboard-summary-status" class="small text-secondary mb-0 d-none" role="status" aria-live="polite"></p><button id="dashboard-summary-retry" type="button" class="btn btn-outline-secondary btn-sm d-none" data-i18n="common.retry">Retry</button></div>
           <div id="dashboard-summary" class="row g-3 mb-3">
@@ -149,26 +158,35 @@
               <div class="mb-3"><label for="execution-origin" class="form-label" data-i18n="shell.runSource">Run source</label><select id="execution-origin" class="form-select"><option value="plan" data-i18n="shell.readyTestPlan">Ready test plan</option><option value="adhoc" data-i18n="shell.adHocReadyCases">Ad-hoc ready cases</option></select></div>
               <div id="execution-plan-wrap" class="mb-3"><label for="execution-plan" class="form-label" data-i18n="shell.readyPlan">Ready plan</label><select id="execution-plan" class="form-select"></select><div id="execution-plan-preview" class="text-secondary small mt-2" role="status" aria-live="polite"></div></div>
               <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-environment" class="form-label" data-i18n="shell.environment">Environment</label><input id="execution-environment" class="form-control" maxlength="160"></div><div class="col-sm-6"><label for="execution-build" class="form-label" data-i18n="shell.buildVersion">Build version</label><input id="execution-build" class="form-control" maxlength="80"></div></div>
+              <div class="mb-3"><label for="execution-assignee" class="form-label" data-i18n="execution.runAssignee">Run owner</label><select id="execution-assignee" class="form-select"></select></div>
             </div>
             <fieldset id="execution-cases-fieldset" class="mb-3"><legend class="fs-6" data-i18n="common.testCases">Test cases</legend><p class="text-secondary small" data-i18n="shell.onlyCasesInTheCurrentProjectAreListedRunCreationRequiresREADYCases">Only cases in the current project are listed. Run creation requires READY cases.</p><div id="execution-case-selector" class="execution-selector"></div></fieldset>
             <div class="form-footer"><button id="execution-save" class="btn btn-primary" type="submit" data-i18n="common.save">Save</button><button id="execution-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
           </form>
           <section id="execution-case-panel" class="asset-panel d-none" aria-label="Run case snapshot and attempts" data-i18n-aria-label="shell.runCaseSnapshotAndAttempts">
             <div class="asset-panel-heading"><h2 id="execution-case-title"></h2><button id="execution-case-back" class="btn btn-outline-secondary" type="button" data-i18n="shell.backToRun">Back to run</button></div>
-            <div id="execution-case-context" class="step-actions mb-2"></div><div id="execution-case-progress" role="status" aria-live="polite"></div><div id="execution-case-navigation" class="step-actions mb-3"></div>
-            <p class="text-secondary small" data-i18n="shell.snapshotCapturedWhenThisRunWasCreatedLaterEditsToTheTestCaseDoNotChangeIt">Use the case definition captured when this run was created.</p>
-            <div id="execution-snapshot"></div>
-            <form id="execution-attempt-form" class="mt-4 d-none" novalidate>
-              <h3 class="fs-5" data-i18n="shell.recordANewAttempt">Record test result</h3><p class="text-secondary small" data-i18n="shell.retestingAppendsANewAttemptEarlierResultsRemainVisible">Retests keep earlier results in the history below.</p>
-              <div id="execution-attempt-error" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
-              <div class="row g-3 mb-3"><div class="col-sm-6"><label for="execution-outcome" class="form-label" data-i18n="shell.outcome">Outcome</label><select id="execution-outcome" class="form-select" required><option value="" data-i18n="r2Exec.chooseOutcome">Choose the actual result</option><option value="PASS" data-i18n="status.pass">PASS</option><option value="FAIL" data-i18n="status.fail">FAIL</option><option value="BLOCKED" data-i18n="status.blocked">BLOCKED</option><option value="SKIPPED" data-i18n="status.skipped">SKIPPED</option></select></div><div class="col-sm-6"><label for="execution-duration" class="form-label" data-i18n="shell.durationMsOptional">Duration (ms, optional)</label><input id="execution-duration" class="form-control" type="number" min="0" step="1"></div></div>
-              <div class="mb-3"><label for="execution-comment" class="form-label" data-i18n="shell.actualResultComment">Actual result / comment</label><textarea id="execution-comment" class="form-control" rows="3"></textarea></div>
-              <div id="execution-failure-wrap" class="mb-3 d-none"><label for="execution-failure" class="form-label" data-i18n="shell.failureMessage">Failure message</label><textarea id="execution-failure" class="form-control" rows="2"></textarea></div>
-              <div id="execution-attempt-actions" class="form-footer"><button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Save test result</button><button id="execution-attempt-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
-            </form>
-            <h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Execution history</h3>
-            <p id="execution-history-status" role="status" aria-live="polite"></p><div id="execution-history"></div>
-
+            <div class="execution-case-workspace">
+              <aside id="execution-case-queue" class="execution-case-queue" aria-labelledby="execution-case-queue-title"></aside>
+              <div class="execution-case-main">
+                <div id="execution-case-context" class="step-actions mb-2"></div><div id="execution-case-progress" role="status" aria-live="polite"></div><div id="execution-case-navigation" class="step-actions mb-3"></div>
+                <p class="text-secondary small" data-i18n="shell.snapshotCapturedWhenThisRunWasCreatedLaterEditsToTheTestCaseDoNotChangeIt">Use the case definition captured when this run was created.</p>
+                <div id="execution-snapshot"></div>
+                <form id="execution-attempt-form" class="mt-4 d-none" novalidate>
+                  <h3 class="fs-5" data-i18n="shell.recordANewAttempt">Record test result</h3><p class="text-secondary small" data-i18n="shell.retestingAppendsANewAttemptEarlierResultsRemainVisible">Retests keep earlier results in the history below.</p>
+                  <div id="execution-attempt-error" class="alert alert-danger d-none" role="alert" aria-live="assertive"></div>
+                  <div class="row g-3 mb-3">
+                    <fieldset id="execution-outcome-choices" class="col-12 execution-outcome-choices d-none"></fieldset>
+                    <div id="execution-outcome-select-wrap" class="col-sm-6"><label for="execution-outcome" class="form-label" data-i18n="shell.outcome">Outcome</label><select id="execution-outcome" class="form-select" required><option value="" data-i18n="r2Exec.chooseOutcome">Choose the actual result</option><option value="PASS" data-i18n="status.pass">PASS</option><option value="FAIL" data-i18n="status.fail">FAIL</option><option value="BLOCKED" data-i18n="status.blocked">BLOCKED</option><option value="SKIPPED" data-i18n="status.skipped">SKIPPED</option></select></div>
+                    <div class="col-sm-6"><label for="execution-duration" class="form-label" data-i18n="shell.durationMsOptional">Duration (ms, optional)</label><input id="execution-duration" class="form-control" type="number" min="0" step="1"></div>
+                  </div>
+                  <div class="mb-3"><label for="execution-comment" class="form-label" data-i18n="shell.actualResultComment">Actual result / comment</label><textarea id="execution-comment" class="form-control" rows="3"></textarea></div>
+                  <div id="execution-failure-wrap" class="mb-3 d-none"><label for="execution-failure" class="form-label" data-i18n="shell.failureMessage">Failure message</label><textarea id="execution-failure" class="form-control" rows="2"></textarea></div>
+                  <div id="execution-attempt-actions" class="form-footer"><button id="execution-submit" class="btn btn-primary" type="submit" data-i18n="shell.recordNewAttempt">Save test result</button><button id="execution-attempt-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
+                </form>
+                <h3 class="fs-5 mt-4" data-i18n="shell.attemptHistory">Execution history</h3>
+                <p id="execution-history-status" role="status" aria-live="polite"></p><div id="execution-history"></div>
+              </div>
+            </div>
           </section>
         </section>
         <section id="defect-workspace" class="d-none" aria-label="Defects" data-i18n-aria-label="common.defects">
@@ -221,6 +239,32 @@
             </div>
             <div class="form-footer"><button id="defect-create-submit" class="btn btn-primary" type="submit" data-i18n="shell.createDefect">Create defect</button><button id="defect-create-cancel-bottom" class="btn btn-outline-secondary" type="button" data-i18n="common.cancel">Cancel</button></div>
           </form>
+        </section>
+        <section id="release-acceptance-workspace" class="d-none" aria-label="Release acceptance" data-i18n-aria-label="releaseAcceptance.title">
+          <div id="release-access-status" role="status" class="text-secondary mb-3 d-none"></div>
+          <section id="release-create" class="asset-panel d-none" aria-labelledby="release-create-title">
+            <div class="asset-panel-heading"><h2 id="release-create-title" data-i18n="releaseAcceptance.newRecord">New acceptance</h2></div>
+            <form id="release-form">
+              <div class="mb-3"><label for="release-build" class="form-label" data-i18n="releaseAcceptance.build">Build</label><select id="release-build" class="form-select"></select></div>
+              <div id="release-options-status" role="status" class="mb-3"></div>
+              <fieldset id="release-run-options" class="mb-3 d-none"><legend class="fs-6" data-i18n="common.runs">Runs</legend><div id="release-run-list"></div></fieldset>
+              <button id="release-preview-trigger" class="btn btn-outline-primary mb-3 d-none" type="button" data-i18n="releaseAcceptance.preview">Review evidence</button>
+              <div id="release-preview" class="d-none mb-3" aria-live="polite"></div>
+              <div id="release-decision" class="d-none">
+                <div class="mb-3"><label for="release-verdict" class="form-label" data-i18n="releaseAcceptance.verdict">Acceptance decision</label><select id="release-verdict" class="form-select" required></select></div>
+                <div class="mb-3"><label for="release-notes" class="form-label" data-i18n="releaseAcceptance.notes">Notes (optional)</label><textarea id="release-notes" class="form-control" rows="3" maxlength="2000"></textarea></div>
+                <p class="small text-secondary" data-i18n="releaseAcceptance.captureNotice">Saving locks the reviewed evidence and decision.</p>
+                <button id="release-save" class="btn btn-primary" type="submit" data-i18n="releaseAcceptance.save">Save acceptance</button>
+              </div>
+              <div id="release-write-feedback" class="mt-3" role="status" aria-live="polite"></div>
+            </form>
+          </section>
+          <section id="release-record" class="asset-panel d-none" aria-label="Saved acceptance" data-i18n-aria-label="releaseAcceptance.savedRecord"></section>
+          <section id="release-history" class="asset-panel" aria-labelledby="release-history-title">
+            <div class="asset-panel-heading"><h2 id="release-history-title" data-i18n="releaseAcceptance.history">Acceptance records</h2></div>
+            <div id="release-history-list"></div>
+            <div id="release-history-feedback" role="status" aria-live="polite"></div>
+          </section>
         </section>
         <section id="project-settings-workspace" class="d-none" aria-label="Project settings" data-i18n-aria-label="projectSettings.navigation"></section>
         <section id="automation-workspace" class="d-none" aria-label="Automation and JUnit imports" data-i18n-aria-label="shell.automationAndJUnitImports">

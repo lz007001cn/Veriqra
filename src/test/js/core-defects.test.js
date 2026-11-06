@@ -61,6 +61,7 @@ function browser(context = { view: 'defects', projectId: '1' }, options = {}) {
     hasClass(name) { return this[0]?.classes.has(name) || false; }
     find(selector) { return new Collection(this.values.flatMap(node => node.all().filter(child => matches(child, selector)))); }
     after(item) { return this.each(node => { item.values.forEach(child => { child.parent = node.parent; node.parent.children.splice(node.parent.children.indexOf(node) + 1, 0, child); }); }); }
+    before(item) { return this.each(node => { item.values.forEach(child => { child.parent = node.parent; node.parent.children.splice(node.parent.children.indexOf(node), 0, child); }); }); }
     remove() { return this.each(node => { if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1); if (node.attrs.id) nodes.delete(node.attrs.id); }); }
     trigger(name) { if (name === 'focus' && this[0]) document.activeElement = this[0]; return this; }
   }
@@ -88,7 +89,7 @@ function browser(context = { view: 'defects', projectId: '1' }, options = {}) {
     return node;
   }
   ['defect-list-panel', 'defect-detail-panel', 'defect-create-form'].forEach(id => add(id, id.endsWith('form') ? 'form' : 'div'));
-  ['defect-notice', 'defect-list-status', 'defect-list', 'defect-new'].forEach(id => add(id));
+  ['defect-notice', 'defect-list-status', 'defect-list', 'defect-new'].forEach(id => add(id, 'div', 'defect-list-panel'));
   add('defect-list-heading', 'h2', 'defect-list-panel');
   ['defect-detail-title', 'defect-detail', 'defect-evidence', 'defect-evidence-status', 'defect-actions', 'defect-back', 'defect-action-status', 'defect-closure', 'defect-closure-heading'].forEach(id => add(id, id === 'defect-back' ? 'button' : 'div', 'defect-detail-panel'));
   add('defect-action-form', 'form', 'defect-detail-panel');
@@ -109,7 +110,7 @@ function browser(context = { view: 'defects', projectId: '1' }, options = {}) {
     let resolve, reject;
     const promise = new Promise((ok, error) => { resolve = ok; reject = error; });
     const call = { method, url, body: body && plain(body), resolve, reject };
-    if (url === 'auth/me') { actorCalls.push(call); resolve(options.actor || { id: 1, systemRole: 'ADMIN', status: 'ACTIVE' }); }
+    if (url === 'auth/me') { actorCalls.push(call); if (!options.manualActor) resolve(options.actor || { id: 1, systemRole: 'ADMIN', status: 'ACTIVE' }); }
     else if (/^projects\/[1-9][0-9]*$/.test(url)) { projectCalls.push(call); resolve(options.project || { id: Number(url.split('/')[1]), status: 'ACTIVE' }); }
     else if (url.endsWith('/closure-eligibility')) {
       closureCalls.push(call);
@@ -133,6 +134,7 @@ function browser(context = { view: 'defects', projectId: '1' }, options = {}) {
     enumLabel: value => value, formatDateTime: value => value || '—', formatNumber: value => String(value)
   } };
   class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } }
+  if (options.ai) window.VeriqraAiDefectAnalysis = options.ai;
   let sequence = 0;
   vm.runInNewContext(source, { window, document, jQuery: $, CustomEvent, location: { hash: '#defects' }, crypto: { randomUUID: () => '00000000-0000-4000-8000-' + String(++sequence).padStart(12, '0') } });
   const emit = (type, detail) => document.dispatchEvent({ type, detail });
@@ -200,10 +202,10 @@ test('route creation prefills numeric API identities and reports the verified as
   const ui = browser({ view: 'defects', projectId: '1', action: 'create', runId: '4', runCaseId: '5', attemptId: '6' });
   await loadPrefill(ui);
   assert.equal(ui.$('#defect-create-attempt').val(), '6'); assert.equal(ui.$('#defect-create-submit').prop('disabled'), false);
-  ui.$('#defect-create-title').val('Failure'); ui.$('#defect-create-severity').val('HIGH'); ui.$('#defect-create-priority').val('HIGH');
+  ui.$('#defect-create-title').val('Failure'); ui.$('#defect-create-description').val('Failure details'); ui.$('#defect-create-severity').val('HIGH'); ui.$('#defect-create-priority').val('HIGH');
   const pending = ui.fire(ui.nodes.get('defect-create-form'), 'submit'); await flush();
   const creation = ui.calls.find(call => call.method === 'POST');
-  assert.deepEqual(creation.body, { failureAttemptId: 6, title: 'Failure', description: null, severity: 'HIGH', priority: 'HIGH', assigneeId: null });
+  assert.deepEqual(creation.body, { failureAttemptId: 6, title: 'Failure', description: 'Failure details', severity: 'HIGH', priority: 'HIGH', assigneeId: null });
   creation.resolve(defect()); await flush();
   assert.deepEqual(plain(ui.emitted.find(event => event.type === 'veriqra:defect-linked').detail), { projectId: '1', defectId: '9', runId: '4', runCaseId: '5', attemptId: '6' });
   assert.equal(ui.route().defectId, '9'); assert.equal(ui.route().action, undefined);
@@ -546,6 +548,56 @@ async function chooseCandidate(ui, value = { execution: executionEvidence(17, 'P
   ui.calls.at(-1).resolve({ failureAttemptId: 6, candidates: [value], nextCursor: null }); await loading;
   await ui.fire(button(ui, 'defect-closure', 'Use this PASS'));
 }
+
+const retestHandoffRoute = { view: 'defects', projectId: '1', defectId: '9', failureAttemptId: '6', retestRunId: '8', retestRunCaseId: '12', retestPassAttemptId: '17' };
+const handoffCandidate = () => ({ execution: executionEvidence(17, 'PASS'), reasons: [], eligible: true, requiresImportConfirmation: false });
+
+test('a retest handoff opens the exact saved PASS confirmation and keeps imported timing attestation explicit', async () => {
+  const ui = browser(retestHandoffRoute, { manualEligibility: true });
+  await openClosure(ui);
+  assert.equal(ui.route().retestPassAttemptId, undefined, 'Handoff fields are consumed before an async read.');
+  assert.equal(ui.route().failureAttemptId, '6');
+  const lookup = ui.calls.at(-1);
+  assert.equal(lookup.url, 'projects/1/defects/9/retest-candidates?failureAttemptId=6&pageSize=1&cursor=18');
+  const candidate = handoffCandidate(); candidate.requiresImportConfirmation = true; candidate.execution.attempt.importId = 42;
+  lookup.resolve({ failureAttemptId: 6, candidates: [candidate], nextCursor: 16 }); await flush();
+  assert.match(ui.$('#defect-retest-form').text(), /Original release[\s\S]+Actual retest[\s\S]+Confirm that the external test/);
+  assert.equal(ui.$('#defect-retest-note').val(), ''); assert.equal(ui.$('#defect-retest-confirm').prop('checked'), false);
+  await ui.fire(ui.nodes.get('defect-retest-form'), 'submit');
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  await ui.fire(button(ui, 'defect-retest-form', 'Cancel')); ui.locale('zh-CN'); await flush();
+  assert.equal(ui.nodes.get('defect-retest-editor').all().some(node => node.attrs.id === 'defect-retest-form'), false);
+  assert.equal(ui.calls.filter(call => call.url.includes('/retest-candidates?')).length, 1);
+});
+
+test('an unavailable or incompatible handoff leaves manual retest lookup available', async () => {
+  for (const outcome of ['wrong-attempt', 'ineligible', 'unavailable']) {
+    const ui = browser(retestHandoffRoute, { manualEligibility: true }); await openClosure(ui);
+    const request = ui.calls.at(-1), candidate = handoffCandidate();
+    if (outcome === 'wrong-attempt') candidate.execution.attempt.id = 16;
+    if (outcome === 'ineligible') { candidate.eligible = false; candidate.reasons = ['DEFINITION_MISMATCH']; }
+    if (outcome === 'unavailable') request.reject({ status: 503 });
+    else request.resolve({ failureAttemptId: 6, candidates: [candidate], nextCursor: null });
+    await flush();
+    assert.match(ui.$('#defect-action-status').text(), /This retest PASS could not be used/);
+    assert.equal(ui.nodes.get('defect-retest-editor').all().some(node => node.attrs.id === 'defect-retest-form'), false);
+    assert.ok(button(ui, 'defect-closure', 'Find retest PASS'));
+    assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+  }
+});
+
+test('already accepted evidence and stale candidate responses cannot re-open a retest editor', async () => {
+  const already = browser(retestHandoffRoute, { manualEligibility: true }), value = eligibility({ canClose: true });
+  value.failures[0].selectedPass = executionEvidence(17, 'PASS'); value.failures[0].eligible = true;
+  await openClosure(already, value);
+  assert.match(already.$('#defect-action-status').text(), /already selected or satisfies/);
+  assert.equal(already.calls.some(call => call.url.includes('/retest-candidates?')), false);
+  const late = browser(retestHandoffRoute, { manualEligibility: true }); await openClosure(late);
+  const old = late.calls.at(-1); late.nav.open('defects', { projectId: '1', defectId: '10' });
+  old.resolve({ failureAttemptId: 6, candidates: [handoffCandidate()], nextCursor: null }); await flush();
+  assert.equal(late.$('#defect-retest-form').length, 0);
+  assert.equal(late.calls.every(call => call.method === 'GET'), true);
+});
 
 test('unresolved defects lead with processing and hold retest details until the fix is recorded', async () => {
   for (const [state, label, hint] of [['OPEN', 'Start work', /start work/], ['IN_PROGRESS', 'Resolve', /enter the fix details/]]) {
@@ -987,4 +1039,201 @@ test('defect editors stay exclusive and keep entered values until their existing
   await ui.fire(button(ui, 'defect-closure', 'Use this PASS'));
   assert.ok(ui.nodes.get('defect-closure').all().some(node => node.attrs.id === 'defect-retest-form'));
   assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('failure draft uses frozen steps, source build and actual failure without reading a mutable case or writing', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', action: 'create', runId: '4', runCaseId: '5', attemptId: '6' });
+  ui.calls[0].resolve([{ id: 4, name: 'Regression' }]); await flush();
+  const frozen = { run: { ...run.run, buildVersion: 'ZZZSwitch v1.4.1', environment: 'Windows 11' }, cases: [{
+    ...run.cases[0], snapshotPreconditions: 'An empty hot-update cache',
+    steps: [{ stepOrder: 1, action: 'Switch to Asia', expectedResult: 'Server switching succeeds' }]
+  }] };
+  ui.calls[1].resolve(frozen); await flush();
+  ui.calls[2].resolve([{ ...fail(6), failureMessage: 'Empty cache rejected', comment: 'The switch button stays disabled' }]); await flush();
+  assert.equal(ui.$('#defect-create-title').val(), 'Frozen login — Empty cache rejected');
+  const description = ui.$('#defect-create-description').val();
+  for (const expected of ['ZZZSwitch v1.4.1', 'Windows 11', 'An empty hot-update cache', '1. Switch to Asia', 'Expected: Server switching succeeds', 'Empty cache rejected', 'The switch button stays disabled']) assert.ok(description.includes(expected), expected);
+  assert.match(ui.$('#defect-create-context').text(), /Tested buildZZZSwitch v1.4.1EnvironmentWindows 11/);
+  assert.deepEqual(ui.calls.map(call => call.url), ['projects/1/runs', 'projects/1/runs/4', 'projects/1/runs/4/cases/5/attempts']);
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('typed and intentionally cleared failure draft fields survive late loading, FAIL changes and locale changes', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', action: 'create', runId: '4', runCaseId: '5', attemptId: '6' });
+  ui.$('#defect-create-title').val('My investigated problem'); await ui.fire(ui.nodes.get('defect-create-title'), 'input');
+  ui.$('#defect-create-description').val(''); await ui.fire(ui.nodes.get('defect-create-description'), 'input');
+  ui.calls[0].resolve([{ id: 4, name: 'Regression' }]); await flush();
+  ui.calls[1].resolve(run); await flush();
+  ui.calls[2].resolve([fail(6), { ...fail(7), failureMessage: 'Another failure' }]); await flush();
+  ui.$('#defect-create-attempt').val('7'); await ui.fire(ui.nodes.get('defect-create-attempt'), 'change');
+  ui.locale('zh-CN');
+  assert.equal(ui.$('#defect-create-title').val(), 'My investigated problem');
+  assert.equal(ui.$('#defect-create-description').val(), '');
+  assert.equal(ui.$('#defect-create-attempt').val(), '7');
+  ui.$('#defect-create-title').val(''); await ui.fire(ui.nodes.get('defect-create-title'), 'input');
+  ui.$('#defect-create-attempt').val('6'); await ui.fire(ui.nodes.get('defect-create-attempt'), 'change');
+  ui.locale('en');
+  assert.equal(ui.$('#defect-create-title').val(), '');
+  assert.equal(ui.$('#defect-create-description').val(), '');
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('untouched draft follows the selected FAIL while generated fields respect title and TEXT limits', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', action: 'create', runId: '4', runCaseId: '5', attemptId: '6' });
+  ui.calls[0].resolve([{ id: 4, name: 'Regression' }]); await flush();
+  ui.calls[1].resolve({ ...run, cases: [{ ...run.cases[0], steps: [{ stepOrder: 1, action: '步骤'.repeat(20000), expectedResult: 'Complete' }] }] }); await flush();
+  ui.calls[2].resolve([{ ...fail(6), failureMessage: 'A'.repeat(400) }, { ...fail(7), failureMessage: 'Second failure' }]); await flush();
+  assert.equal(ui.$('#defect-create-title').val().length, 240);
+  assert.ok(Buffer.byteLength(ui.$('#defect-create-description').val(), 'utf8') < 65535);
+  assert.match(ui.$('#defect-create-description').val(), /Additional details omitted/);
+  ui.$('#defect-create-attempt').val('7'); await ui.fire(ui.nodes.get('defect-create-attempt'), 'change');
+  assert.equal(ui.$('#defect-create-title').val(), 'Frozen login — Second failure');
+  assert.match(ui.$('#defect-create-description').val(), /Actual result:\nSecond failure/);
+  assert.equal(ui.calls.length, 3);
+});
+
+test('defect search, quick views, status and sort use loaded records and preserve scoped filters on return', async () => {
+  const ui = browser();
+  const rows = [{ ...defect(9), assigneeId: 1, description: 'Asia cache fails', updatedAt: '2026-11-03' },
+    { ...defect(10, 'RESOLVED'), assigneeId: 2, title: 'Server fix', updatedAt: '2026-11-04', priority: 'LOW' },
+    { ...defect(11, 'CLOSED'), assigneeId: 1, title: 'Old cache failure', updatedAt: '2026-11-02' }];
+  ui.calls[0].resolve(rows); await flush();
+  const ids = () => ui.nodes.get('defect-list').children.filter(node => node.attrs['data-defect-id']).map(node => String(node.attrs['data-defect-id']));
+  assert.deepEqual(ids(), ['10', '9', '11']);
+  const quick = value => ui.nodes.get('defect-list-toolbar').all().find(node => node.attrs['data-defect-view'] === value);
+  await ui.fire(quick('MINE')); assert.deepEqual(ids(), ['9', '11']);
+  await ui.fire(quick('UNCLOSED')); assert.deepEqual(ids(), ['10', '9']);
+  await ui.fire(quick('RETEST')); assert.deepEqual(ids(), ['10']);
+  await ui.fire(ui.nodes.get('defect-list-clear'));
+  ui.$('#defect-list-search').val('cache'); await ui.fire(ui.nodes.get('defect-list-search'), 'input');
+  ui.$('#defect-list-status-filter').val('OPEN'); await ui.fire(ui.nodes.get('defect-list-status-filter'), 'change');
+  assert.deepEqual(ids(), ['9']); assert.match(ui.$('#defect-list-status').text(), /Showing 1 of 3 loaded defects/);
+  assert.match(ui.$('#defect-list').text(), /Record revision 2/); assert.doesNotMatch(ui.$('#defect-list').text(), /v2/);
+  await ui.fire(ui.nodes.get('defect-list').all().find(node => node.tag === 'a'));
+  ui.calls[1].resolve({ defect: rows[0], evidence: [] }); await flush();
+  await ui.fire(ui.nodes.get('defect-back')); ui.calls[2].resolve(rows); await flush();
+  assert.equal(ui.$('#defect-list-search').val(), 'cache'); assert.equal(ui.$('#defect-list-status-filter').val(), 'OPEN');
+  assert.deepEqual(ids(), ['9']);
+  ui.$('#defect-list-search').val('not-found'); await ui.fire(ui.nodes.get('defect-list-search'), 'input');
+  assert.match(ui.$('#defect-list').text(), /No matching defects/); assert.doesNotMatch(ui.$('#defect-list-status').text(), /No defects in this project/);
+  assert.equal(ui.calls.length, 3); assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('list filters are separated by project and actual actor identity', async () => {
+  const options = { actor: { id: 1, systemRole: 'ADMIN', status: 'ACTIVE' } }, ui = browser(undefined, options);
+  ui.calls[0].resolve([defect()]); await flush();
+  ui.$('#defect-list-search').val('Remember actor one'); await ui.fire(ui.nodes.get('defect-list-search'), 'input');
+  options.actor = { id: 2, systemRole: 'ADMIN', status: 'ACTIVE' };
+  ui.emit('veriqra:project', { project: { id: 1 } }); ui.calls[1].resolve([defect()]); await flush();
+  assert.equal(ui.$('#defect-list-search').val(), '');
+  ui.$('#defect-list-search').val('Actor two'); await ui.fire(ui.nodes.get('defect-list-search'), 'input');
+  options.actor = { id: 1, systemRole: 'ADMIN', status: 'ACTIVE' };
+  ui.emit('veriqra:project', { project: { id: 1 } }); ui.calls[2].resolve([defect()]); await flush();
+  assert.equal(ui.$('#defect-list-search').val(), 'Remember actor one');
+  ui.nav.select('defects', { projectId: '2' }); ui.emit('veriqra:project', { project: { id: 2 } }); ui.calls[3].resolve([]); await flush();
+  assert.equal(ui.$('#defect-list-search').val(), ''); assert.match(ui.$('#defect-list-status').text(), /No defects in this project/);
+});
+
+test('failure evidence shows the actual source build and environment separately from record revision', async () => {
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' });
+  ui.calls[0].resolve({ defect: defect(), evidence: [evidence()] }); await flush();
+  ui.calls[1].resolve({ ...run, run: { ...run.run, buildVersion: 'v1.4.1', environment: 'Windows 11' } }); ui.calls[2].resolve([fail(6)]); await flush();
+  assert.match(ui.$('#defect-detail').text(), /Tested buildv1.4.1EnvironmentWindows 11/);
+  assert.match(ui.$('#defect-detail').text(), /Record revision2/);
+  assert.match(ui.$('#defect-evidence').text(), /Tested buildv1.4.1EnvironmentWindows 11/);
+  assert.deepEqual(ui.calls.map(call => call.url), ['projects/1/defects/9', 'projects/1/runs/4', 'projects/1/runs/4/cases/5/attempts']);
+});
+
+test('rows arriving before actor identity restore the verified actor filters and scroll once identity arrives', async () => {
+  const ui = browser(undefined, { manualActor: true }), scrolls = [], frames = [];
+  ui.window.scrollTo = (x, y) => scrolls.push([x, y]); ui.window.requestAnimationFrame = fn => frames.push(fn);
+  ui.actorCalls[0].resolve({ id: 1, systemRole: 'ADMIN', status: 'ACTIVE' }); ui.calls[0].resolve([defect()]); await flush();
+  ui.$('#defect-list-search').val('Broken'); await ui.fire(ui.nodes.get('defect-list-search'), 'input'); ui.window.scrollY = 420;
+  ui.emit('veriqra:project', { project: { id: 1 } }); ui.calls[1].resolve([defect()]); await flush();
+  assert.equal(ui.$('#defect-list-search').val(), '');
+  ui.actorCalls[1].resolve({ id: 1, systemRole: 'ADMIN', status: 'ACTIVE' }); await flush();
+  assert.equal(ui.$('#defect-list-search').val(), 'Broken'); assert.equal(frames.length, 1);
+  frames.shift()(); assert.deepEqual(scrolls, [[0, 420]]);
+});
+
+test('list locale change reuses loaded data while a pending actor can still resolve assigned-to-me', async () => {
+  const ui = browser(undefined, { manualActor: true });
+  ui.calls[0].resolve([{ ...defect(), assigneeId: 1 }]); await flush();
+  let mine = ui.nodes.get('defect-list-toolbar').all().find(node => node.attrs['data-defect-view'] === 'MINE');
+  assert.equal(mine.disabled, true); assert.match(mine.content, /—$/);
+  ui.locale('zh-CN');
+  assert.equal(ui.calls.length, 1);
+  ui.actorCalls[0].resolve({ id: 1, systemRole: 'ADMIN', status: 'ACTIVE' }); await flush();
+  mine = ui.nodes.get('defect-list-toolbar').all().find(node => node.attrs['data-defect-view'] === 'MINE');
+  assert.equal(mine.disabled, false); await ui.fire(mine);
+  assert.equal(ui.nodes.get('defect-list').children.filter(node => node.attrs['data-defect-id']).length, 1);
+});
+
+const aiDraftSource = { projectId: '1', runId: '4', runCaseId: '5', attemptId: '6' };
+const aiDraftWording = { draftTitle: '  Suggested defect title  ', suggestion: 'Investigate the switch handler.' };
+function openAiDraftRoute(ui, source = aiDraftSource) { ui.nav.open('defects', { action: 'create', ...source }); }
+
+test('staged AI wording is appended only after the routed FAIL is verified and preserves frozen evidence', async () => {
+  const ui = browser({ view: 'runs', ...aiDraftSource });
+  const discard = ui.window.VeriqraDefects.stageAiDraft({ ...aiDraftSource, ...aiDraftWording });
+  try { openAiDraftRoute(ui); } finally { discard(); }
+  assert.equal(ui.$('#defect-create-title').val(), '');
+  await loadPrefill(ui);
+  assert.equal(ui.$('#defect-create-title').val(), 'Suggested defect title');
+  assert.match(ui.$('#defect-create-description').val(), /Run Case snapshot: Frozen login[\s\S]+Actual result:\nActual failure[\s\S]+AI suggestion[^\n]*\nInvestigate the switch handler\./);
+  assert.equal(ui.calls.every(call => call.method === 'GET'), true);
+});
+
+test('canceled, expired and mismatched staging cannot supply wording to a later matching form', async () => {
+  for (const outcome of ['canceled', 'expired', 'mismatched']) {
+    const ui = browser({ view: 'runs', ...aiDraftSource });
+    const discard = ui.window.VeriqraDefects.stageAiDraft({ ...aiDraftSource, ...aiDraftWording });
+    if (outcome === 'canceled') discard();
+    if (outcome === 'expired') await flush();
+    if (outcome === 'mismatched') ui.nav.open('defects', { projectId: '1' });
+    openAiDraftRoute(ui); await loadPrefill(ui);
+    assert.match(ui.$('#defect-create-title').val(), /Frozen login/);
+    assert.doesNotMatch(ui.$('#defect-create-description').val(), /Investigate the switch handler/);
+  }
+});
+
+test('source changes discard AI wording while preserving a manual draft title entered before verification', async () => {
+  const ui = browser({ view: 'runs', ...aiDraftSource });
+  const discard = ui.window.VeriqraDefects.stageAiDraft({ ...aiDraftSource, ...aiDraftWording });
+  try { openAiDraftRoute(ui); } finally { discard(); }
+  ui.$('#defect-create-title').val('My manual title'); await ui.fire(ui.nodes.get('defect-create-title'), 'input');
+  ui.calls[0].resolve([{ id: 4, name: 'Regression' }]); await flush();
+  ui.calls[1].resolve(run); await flush();
+  ui.calls[2].resolve([fail(6), { ...fail(7), comment: 'Different failure' }]); await flush();
+  assert.equal(ui.$('#defect-create-title').val(), 'My manual title');
+  assert.match(ui.$('#defect-create-description').val(), /Investigate the switch handler/);
+  ui.$('#defect-create-attempt').val('7'); await ui.fire(ui.nodes.get('defect-create-attempt'), 'change');
+  assert.equal(ui.$('#defect-create-title').val(), 'My manual title');
+  assert.match(ui.$('#defect-create-description').val(), /Different failure/);
+  assert.doesNotMatch(ui.$('#defect-create-description').val(), /Investigate the switch handler/);
+  ui.$('#defect-create-attempt').val('6'); await ui.fire(ui.nodes.get('defect-create-attempt'), 'change');
+  assert.doesNotMatch(ui.$('#defect-create-description').val(), /Investigate the switch handler/);
+});
+
+
+test('AI analysis mounts from base defect before enrichment and is cleared when returning to list', async () => {
+  const mounts = [], blocks = []; let clears = 0;
+  const ui = browser({ view: 'defects', projectId: '1', defectId: '9' }, { ai: {
+    mount: value => mounts.push(value), clear: () => { clears++; }, setBlocked: value => blocks.push(value)
+  } });
+  ui.calls[0].resolve({ defect: defect(), evidence: [evidence()] }); await flush();
+  const owner = mounts.at(-1);
+  assert.equal(owner.projectId, '1'); assert.equal(owner.defect.id, 9); assert.equal(owner.isCurrent(), true);
+  assert.ok(ui.calls.some(call => call.url.endsWith('/attempts')));
+  const pending = ui.fire(button(ui, 'defect-actions', 'Start work')); await flush();
+  assert.equal(blocks.at(-1), true);
+  ui.calls.find(call => call.method === 'POST').reject({ status: 409, message: 'Conflict' }); await pending;
+  assert.equal(blocks.at(-1), false);
+  const actorReads = ui.actorCalls.length;
+  ui.emit('veriqra:reauthenticated', {}); await flush();
+  assert.ok(ui.actorCalls.length > actorReads);
+  assert.ok(mounts.at(-1).actorId > 0);
+  const before = clears;
+  ui.nav.open('defects', { projectId: '1' }); await flush();
+  assert.ok(clears > before); assert.equal(owner.isCurrent(), false);
 });

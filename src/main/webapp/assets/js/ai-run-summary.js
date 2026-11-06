@@ -32,6 +32,46 @@
       const list = $('<ul>'); rows.forEach(function (row) { list.append($('<li>').text(row)); }); target.append(list);
     }
   }
+  function validId(id) { return Number.isSafeInteger(id) && id > 0; }
+  function renderFailureActions(target) {
+    const navigation = window.VeriqraQaNavigation;
+    if (!navigation || !Array.isArray(result.failureActions)) return;
+    const token = epoch, projectId = context.projectId, runId = context.run.id;
+    const list = $('<ul class="list-group ai-summary-failure-actions">');
+    result.failureActions.forEach(function (item) {
+      if (!item || !validId(item.runCaseId) || !validId(item.attemptId) || typeof item.title !== 'string'
+          || !Array.isArray(item.linkedDefects)) return;
+      const row = $('<li class="list-group-item">').append($('<h5 class="fs-6 mb-1">').text(item.title));
+      if (typeof item.suggestion === 'string' && item.suggestion.trim()) row.append($('<p class="mb-2">').text(item.suggestion));
+      const actions = $('<div class="d-flex flex-wrap gap-2">');
+      if (item.linkedDefects.length) {
+        item.linkedDefects.forEach(function (defect) {
+          if (!defect || !validId(defect.id)) return;
+          const destination = { projectId: projectId, defectId: defect.id };
+          actions.append($('<a class="btn btn-outline-primary btn-sm">')
+            .attr('href', navigation.href('defects', destination))
+            .text(t('openLinkedDefect', { key: 'BUG-' + String(defect.keyNo).padStart(3, '0') }))
+            .on('click', function (event) {
+              if (event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              if (current(token)) navigation.open('defects', destination);
+            }));
+        });
+      } else if (context.canWrite && context.canWrite()) {
+        const source = { projectId: projectId, runId: runId, runCaseId: item.runCaseId, attemptId: item.attemptId };
+        actions.append($('<button type="button" class="btn btn-outline-primary btn-sm ai-summary-create-defect">')
+          .text(t('createDefectDraft')).on('click', function () {
+            if (!current(token) || !context.canWrite()) return;
+            const discard = window.VeriqraDefects?.stageAiDraft?.({ ...source, draftTitle: item.draftTitle, suggestion: item.suggestion });
+            try { navigation.open('defects', { ...source, action: 'create', failureAttemptId: item.attemptId }); }
+            finally { if (discard) discard(); }
+          }));
+      }
+      if (actions.children().length) row.append(actions);
+      list.append(row);
+    });
+    if (list.children().length) target.append($('<h4>').text(t('failureActions')), list);
+  }
   function renderResult() {
     const target = panel.find('.ai-summary-result').empty().removeClass('d-none');
     const input = result.input;
@@ -42,7 +82,9 @@
     if (input.detailsTruncated || input.omittedCaseCount || input.omittedDefectCount)
       target.append($('<p class="small text-secondary">').text(t('excerpt')));
     target.append($('<h4>').text(t('overview')), $('<p class="ai-summary-overview">').text(result.analysis.overview));
-    section(target, 'findings', result.analysis.findings); section(target, 'recommendations', result.analysis.recommendations);
+    section(target, 'findings', result.analysis.findings);
+    renderFailureActions(target);
+    section(target, 'recommendations', result.analysis.recommendations);
   }
   function plainText() {
     if (!result) return '';
@@ -92,7 +134,7 @@
     clear(); if (!next || !next.projectId || !next.run || !next.run.id) return;
     context = next;
     const heading = $('<div class="ai-summary-heading">').append($('<div>').append(
-      $('<h3 id="ai-run-summary-title">').text(t('heading')), $('<p class="small text-secondary mb-0">').text(t('basis'))),
+      $('<h3 id="ai-run-summary-title">').text(t('heading'))),
       $('<div class="ai-summary-actions">').append(
         $('<button type="button" class="btn btn-outline-primary ai-summary-generate">').on('click', generate),
         $('<button type="button" class="btn btn-outline-secondary ai-summary-copy d-none">').text(t('copy')).on('click', copy)));

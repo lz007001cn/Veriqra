@@ -5,6 +5,7 @@ import io.github.lz007001cn.veriqra.jdbc.*;
 import io.github.lz007001cn.veriqra.service.*;
 import io.github.lz007001cn.veriqra.service.auth.PasswordVerifier;
 import io.github.lz007001cn.veriqra.service.importing.JUnitXmlParser;
+import io.github.lz007001cn.veriqra.service.release.ReleaseAcceptanceService;
 import io.github.lz007001cn.veriqra.service.support.*;
 import io.github.lz007001cn.veriqra.web.WebServices;
 import io.github.lz007001cn.veriqra.admin.*;
@@ -34,7 +35,9 @@ public final class ApplicationListener implements ServletContextListener {
             Class.forName("com.mysql.cj.jdbc.Driver");
             DriverManager.drivers().filter(driver -> !existing.contains(driver)
                     && driver.getClass().getClassLoader() == getClass().getClassLoader()).forEach(ownedDrivers::add);
-            pool = new ConnectionPool(DatabaseConfig.load());
+            var databaseConfig = DatabaseConfig.load();
+            pool = new ConnectionPool(databaseConfig);
+            context.setAttribute(SystemInformation.ATTRIBUTE, SystemInformation.capture(databaseConfig));
             // Verify before exposing any Services; an old or partial migration must fail closed.
             try (var schemaConnection = pool.borrow()) {
                 schemaConnection.setReadOnly(true);
@@ -57,6 +60,9 @@ public final class ApplicationListener implements ServletContextListener {
             context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService.class.getName(),
                     new io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService(transactions, daos, access,
                             aiProvider, java.time.Clock.systemUTC()));
+            context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiAssistanceService.class.getName(),
+                    new io.github.lz007001cn.veriqra.service.ai.AiAssistanceService(transactions, daos, access,
+                            aiProvider, java.time.Clock.systemUTC()));
             var adminPolicy = new AdminAccessPolicy();
             context.setAttribute(AdminServices.ATTRIBUTE, new AdminServices(
                     new AdminUserService(transactions, adminPolicy, passwords),
@@ -64,6 +70,9 @@ public final class ApplicationListener implements ServletContextListener {
                     new TelemetryService(transactions), System.currentTimeMillis()));
             context.setAttribute(ProjectSettingsService.class.getName(),
                     new DefaultProjectSettingsService(transactions, daos, access));
+            context.setAttribute(ReleaseAcceptanceService.class.getName(),
+                    new ReleaseAcceptanceService(transactions, daos, access, java.time.Clock.systemUTC()));
+            context.setAttribute(DefectCommentService.class.getName(), new DefectCommentService(transactions, daos, access));
             context.setAttribute(WebServices.ATTRIBUTE, new WebServices(
                     new DefaultAuthService(transactions, daos, passwords),
                     new DefaultProjectService(transactions, daos, access),
@@ -88,13 +97,17 @@ public final class ApplicationListener implements ServletContextListener {
     }
     @Override public void contextDestroyed(ServletContextEvent event) {
         event.getServletContext().removeAttribute(WebServices.ATTRIBUTE);
+        event.getServletContext().removeAttribute(DefectCommentService.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService.class.getName());
+        event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiAssistanceService.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiSettingsManager.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.VertexAiProvider.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.admin.GoogleAiDashboard.ATTRIBUTE);
         event.getServletContext().removeAttribute(AdminServices.ATTRIBUTE);
+        event.getServletContext().removeAttribute(SystemInformation.ATTRIBUTE);
         event.getServletContext().removeAttribute(ProjectSettingsService.class.getName());
+        event.getServletContext().removeAttribute(ReleaseAcceptanceService.class.getName());
         closePool(event.getServletContext());
     }
     private void closePool(ServletContext context) {

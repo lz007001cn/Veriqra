@@ -27,13 +27,16 @@ public final class AiRunSummaryService {
             throw new ValidationException("Project and run IDs are required");
         if (language == null || !Set.of("zh-CN", "en").contains(language))
             throw new ValidationException("Unsupported summary language");
-        AiRunSummaryInput input = transactions.execute(c -> snapshot(factory.create(c), actor, projectId, runId));
-        AiRunSummaryAnalysis result = provider.summarize(input, language);
+        Snapshot snapshot = transactions.execute(c -> snapshot(factory.create(c), actor, projectId, runId));
+        AiRunSummaryAnalysis result = provider.summarize(snapshot.input(), language);
         validateAnalysis(result);
-        return new AiRunSummaryPreview(input, result, LocalDateTime.now(clock));
+        return new AiRunSummaryPreview(snapshot.input(), result, LocalDateTime.now(clock),
+                addSuggestions(snapshot.actions(), result.failureSuggestions()));
     }
 
-    private AiRunSummaryInput snapshot(ServiceDaos d, Long actor, Long projectId, Long runId) {
+    private record Snapshot(AiRunSummaryInput input, List<AiRunSummaryPreview.FailureAction> actions) { }
+
+    private Snapshot snapshot(ServiceDaos d, Long actor, Long projectId, Long runId) {
         d.projects().findById(projectId).orElseThrow(() -> new NotFoundException("Project does not exist"));
         access.requireProjectRead(d.users(), d.members(), actor, projectId);
         TestRun run = d.testRuns().findById(runId).filter(r -> projectId.equals(r.projectId()))
@@ -50,9 +53,9 @@ public final class AiRunSummaryService {
         List<CaseState> selected = all.stream().sorted(Comparator.comparingInt((CaseState c) -> priority(c.outcome()))
                 .thenComparing(c -> c.row().id())).limit(MAX_CASES).toList();
         List<Long> defectIds = new ArrayList<>(new LinkedHashSet<>(d.attemptDefects().listDefectIdsByRun(runId)));
-        List<Defect> defects = defectIds.stream().limit(MAX_DEFECTS).map(id -> d.defects().findById(id)
-                .filter(row -> projectId.equals(row.projectId()))
-                .orElseThrow(() -> new ConflictException("Linked defect does not belong to run project"))).toList();
+        Map<Long, Defect> defectRows = new HashMap<>();
+        List<Defect> defects = defectIds.stream().limit(MAX_DEFECTS)
+                .map(id -> linkedDefect(d, projectId, id, defectRows)).toList();
         Budget budget = new Budget();
         String runName = budget.text(run.name(), 240), environment = budget.text(run.environment(), 500), build = budget.text(run.buildVersion(), 240);
         // Reserve identity/title space before optional long notes can consume the shared budget.
@@ -63,6 +66,7 @@ public final class AiRunSummaryService {
                 new AiRunSummaryInput.DefectEvidence(row.id(), row.keyNo(), defectTitles.get(row.id()),
                         row.status().name(), row.severity().name(), budget.text(row.resolutionNote(), 800), row.updatedAt())).toList();
         List<AiRunSummaryInput.CaseEvidence> evidence = new ArrayList<>();
+        List<AiRunSummaryPreview.FailureAction> failureActions = new ArrayList<>();
         for (CaseState item : selected) {
             TestRunCase row = item.row(); TestAttempt attempt = item.latest();
             String actual = budget.text(attempt == null ? null : attempt.comment(), 1000);
@@ -73,13 +77,52 @@ public final class AiRunSummaryService {
             List<AiRunSummaryInput.StepEvidence> stepEvidence = steps.stream().limit(8).map(step ->
                     new AiRunSummaryInput.StepEvidence(step.stepOrder(), budget.text(step.action(), 240),
                             budget.text(step.expectedResult(), 240))).toList();
+            AiRunSummaryInput.JunitFailureContext junitFailure = null;
+            if (attempt != null && attempt.importId() != null && attempt.status() == TestAttemptStatus.FAIL) {
+                List<Defect> linked = d.attemptDefects().listDefectsByAttempt(attempt.id()).stream()
+                        .map(link -> {
+                            if (!attempt.id().equals(link.attemptId())) throw new ConflictException("Defect link does not belong to failure attempt");
+                            return linkedDefect(d, projectId, link.defectId(), defectRows);
+                        }).distinct().toList();
+                var links = linked.stream().map(defect -> new AiRunSummaryPreview.LinkedDefect(defect.id(), defect.keyNo(), defect.title())).toList();
+                int unclosed = (int) linked.stream().filter(defect -> defect.status() != DefectStatus.CLOSED).count();
+                junitFailure = new AiRunSummaryInput.JunitFailureContext(links.size(), unclosed);
+                failureActions.add(new AiRunSummaryPreview.FailureAction(row.id(), attempt.id(), row.snapshotTitle(), null, null, links));
+            }
             evidence.add(new AiRunSummaryInput.CaseEvidence(row.id(), row.testCaseId(), titles.get(row.id()),
                     item.outcome(), attempt == null ? null : attempt.attemptNo(), description, preconditions,
-                    stepEvidence, actual, failure));
+                    stepEvidence, actual, failure, junitFailure));
         }
-        return new AiRunSummaryInput(projectId, runId, runName, run.status().name(), environment, build,
+        var input = new AiRunSummaryInput(projectId, runId, runName, run.status().name(), environment, build,
                 run.createdAt(), run.endedAt(), LocalDateTime.now(clock), counts, evidence, all.size() - evidence.size(), defectIds.size(),
                 defectEvidence, defectIds.size() - defectEvidence.size(), budget.truncated);
+        return new Snapshot(input, List.copyOf(failureActions));
+    }
+
+    private static Defect linkedDefect(ServiceDaos d, Long projectId, Long id, Map<Long, Defect> cache) {
+        return cache.computeIfAbsent(id, key -> d.defects().findById(key)
+                .filter(row -> projectId.equals(row.projectId()))
+                .orElseThrow(() -> new ConflictException("Linked defect does not belong to run project")));
+    }
+
+    private static List<AiRunSummaryPreview.FailureAction> addSuggestions(List<AiRunSummaryPreview.FailureAction> actions,
+            List<AiRunSummaryAnalysis.FailureSuggestion> suggestions) {
+        if (actions.isEmpty() || suggestions.isEmpty()) return actions;
+        Set<Long> allowed = new HashSet<>();
+        actions.forEach(action -> allowed.add(action.runCaseId()));
+        Map<Long, AiRunSummaryAnalysis.FailureSuggestion> matched = new HashMap<>();
+        Set<Long> ambiguous = new HashSet<>();
+        for (var suggestion : suggestions) {
+            Long id = suggestion.runCaseId();
+            if (allowed.contains(id) && matched.putIfAbsent(id, suggestion) != null) ambiguous.add(id);
+        }
+        ambiguous.forEach(matched::remove);
+        return actions.stream().map(action -> {
+            var suggestion = matched.get(action.runCaseId());
+            return suggestion == null ? action : new AiRunSummaryPreview.FailureAction(action.runCaseId(), action.attemptId(),
+                    action.title(), action.linkedDefects().isEmpty() ? suggestion.draftTitle() : null,
+                    suggestion.suggestion(), action.linkedDefects());
+        }).toList();
     }
 
     private record CaseState(TestRunCase row, TestAttempt latest) {

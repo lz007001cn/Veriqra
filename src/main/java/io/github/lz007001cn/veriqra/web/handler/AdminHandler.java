@@ -27,18 +27,11 @@ public final class AdminHandler {
         }
         if (parts.length == 3 && parts[2].equals("system")) {
             JsonHttp.method(response, request.getMethod(), "GET");
-            BuildInfo build = BuildInfo.current();
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("veriqraVersion", build.version()); data.put("buildCommit", build.commit());
-            data.put("buildTime", build.buildTime()); data.put("applicationStatus", "UP");
-            data.put("databaseStatus", "UP"); data.put("databaseVersion", admin.logs().databaseVersion(actor));
-            data.put("databaseTableCount", admin.logs().databaseTableCount(actor));
-            data.put("javaVersion", System.getProperty("java.version"));
-            data.put("tomcatVersion", request.getServletContext().getServerInfo());
-            data.put("uptimeSeconds", Math.max(0, (System.currentTimeMillis() - admin.startedAtMillis()) / 1000));
-            data.put("serverTime", java.time.Instant.now().toString());
-            data.put("applicationTimeZone", "Asia/Shanghai (UTC+8)");
-            JsonHttp.write(response, 200, data);
+            var context = request.getServletContext();
+            var information = (SystemInformation) context.getAttribute(SystemInformation.ATTRIBUTE);
+            if (information == null) information = SystemInformation.unavailable();
+            JsonHttp.write(response, 200, information.snapshot(context, admin.startedAtMillis(),
+                    () -> admin.logs().databaseVersion(actor), () -> admin.logs().databaseTableCount(actor)));
             return;
         }
         throw new HttpFailure(404, "NOT_FOUND", "Resource not found");

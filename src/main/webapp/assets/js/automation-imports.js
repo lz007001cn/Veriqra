@@ -232,12 +232,20 @@
   function renderImport(result) {
     importResult = result;
     const target = $('#import-result').empty();
+    const counts = { PASS: 0, FAIL: 0, SKIPPED: 0 };
+    for (const attempt of result.attempts) {
+      if (Object.hasOwn(counts, attempt.outcome)) counts[attempt.outcome]++;
+    }
     target.append($('<h3 class="fs-5">').text(result.replayed ? t("automation.importReplayed", null, 'Import replayed') : t("automation.importCompleted", null, 'Import completed')));
+    target.append($('<p class="fw-semibold mb-2">').text(t('automation.importResultCounts', {
+      pass: window.I18n.formatNumber(counts.PASS), fail: window.I18n.formatNumber(counts.FAIL),
+      skipped: window.I18n.formatNumber(counts.SKIPPED)
+    }, 'Passed {pass} · Failed {fail} · Skipped {skipped}')));
     target.append($('<p>').text(t('automation.importSummary', { importId: result.testImport.id, run: result.run.name,
       runId: result.run.id, status: window.I18n.enumLabel(result.run.status), cases: window.I18n.formatNumber(result.runCases.length),
       attempts: window.I18n.formatNumber(result.attempts.length) },
     'Import #{importId} · Run "{run}" (#{runId}) · {status} · {cases} Run Case snapshot(s) · {attempts} Attempt(s).')));
-    target.append($('<button type="button" class="btn btn-outline-primary">').text(t("automation.openImportedRunAndHistory", null, 'Open imported Run and history'))
+    target.append($('<button type="button" class="btn btn-outline-primary">').text(t('automation.viewImportResults', null, 'View run results'))
       .on('click', function () { openRun(result.run.id); }));
   }
   $(document).on('veriqra:project', function (event) {
@@ -338,6 +346,7 @@
       if (valid(token) && window.VeriqraImportHistory) window.VeriqraImportHistory.complete();
       if (!valid(token) || uploadToken !== uploadGeneration || file !== selectedFile) return;
       pendingImport = null;
+      $('#import-preview').empty();
       renderImport(result);
       status(result.replayed ? t("automation.existingImportReturnedForThisRequestKey", null, 'Existing import returned for this request key.') : t("automation.importCompletedOpenTheRunToInspectSnapshotsAndAttemptHistory", null, 'Import completed. Open the Run to inspect snapshots and Attempt history.'));
       // The server has accepted the bytes; release the selected file from client state.

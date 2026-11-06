@@ -79,6 +79,10 @@ abstract class MysqlFixture {
         if(createdTables.size()!=35 || !createdTables.subList(32,35).equals(List.of(
                 "defect_retest_links","defect_closure_receipts","defect_closure_items")))
             throw new IllegalStateException("Unexpected R1 fixture tables");
+        installSchema(owner, Files.readString(Path.of("database/migrations/20261106-defect-comments.sql")), createdTables);
+        installSchema(owner, Files.readString(Path.of("database/migrations/20261106-release-acceptance.sql")), createdTables);
+        if (createdTables.size() != 37 || !createdTables.subList(35, 37).equals(List.of("defect_comments", "release_acceptances")))
+            throw new IllegalStateException("Unexpected collaboration fixture tables");
         pool=new ConnectionPool(config); tx=new JdbcTransactionManager(pool);
     }
 
@@ -117,6 +121,8 @@ abstract class MysqlFixture {
     @BeforeEach void resetRows() throws SQLException {
         // Only rows inserted by this fixture; the development seed is never loaded or referenced.
         try(var c=pool.borrow(); var s=c.createStatement()) {
+            s.executeUpdate("DELETE FROM release_acceptances");
+            s.executeUpdate("DELETE FROM defect_comments");
             // Fresh fixture-owned close-time records must be removed before their retained
             // source associations. Keep both FOREIGN_KEY_CHECKS and CHECK rules enabled.
             //noinspection SqlWithoutWhere

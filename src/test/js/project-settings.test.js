@@ -37,11 +37,12 @@ function browser() {
       const attrs = Object.fromEntries([...input.matchAll(/([\w-]+)="([^"]*)"/g)].map(value => [value[1], value[2]]));
       return Collection.from([new Node(/^<(\w+)/.exec(input)[1], attrs)]);
     }
+    if (input.includes(',')) return Collection.from(input.split(',').flatMap(selector => $(selector.trim())));
     if (!nodes.has(input)) nodes.set(input, new Node('div', { id: input.slice(1) }));
     return Collection.from([nodes.get(input)]);
   }
   const api = {};
-  for (const method of ['get', 'post', 'delete']) api[method] = (url, body) => {
+  for (const method of ['get', 'post', 'put', 'delete']) api[method] = (url, body) => {
     let resolve, reject; const result = new Promise((yes, no) => { resolve = yes; reject = no; });
     calls.push({ method, url, body, resolve, reject }); return result;
   };
@@ -56,7 +57,12 @@ function browser() {
   return { $, calls, guards, emit, fire, project, loaded, nodes, i18n: window.I18n };
 }
 const admin = { id: 1, username: 'admin', systemRole: 'ADMIN', status: 'ACTIVE' };
-const member = (userId = 2, projectRole = 'TESTER') => ({ userId, username: 'user' + userId, displayName: 'User ' + userId, projectRole, status: 'ACTIVE', userStatus: 'ACTIVE' });
+const member = (userId = 2, projectRole = 'TESTER', overrides = {}) => ({ userId, username: 'user' + userId,
+  displayName: 'User ' + userId, projectRole, status: 'ACTIVE', userStatus: 'ACTIVE', version: 1, ...overrides });
+function memberEditor(ui, userId) {
+  const row = ui.nodes.get('#project-settings-members').children.find(item => item.children[0].text.startsWith('User ' + userId + ' ('));
+  return row?.children.find(item => item.tag === 'button');
+}
 
 test('first project render uses the catalog loaded after script initialization', async () => {
   const ui = browser();
@@ -88,8 +94,10 @@ test('project managers can add members while appointment remains administrator m
   const ui = browser(); ui.project(); await ui.loaded({ id: 2, systemRole: 'USER', status: 'ACTIVE' }, [member()], [{ userId: 2, status: 'ACTIVE' }]);
   assert.equal(ui.$('#project-settings-member-form').hasClass('d-none'), false);
   assert.equal(ui.$('#project-settings-manager-form').hasClass('d-none'), true);
+  assert.equal(memberEditor(ui, 2), undefined, 'Project managers cannot edit their own membership');
   const reader = browser(); reader.project(); await reader.loaded({ id: 2, systemRole: 'USER', status: 'ACTIVE' }, [member(2, 'TESTER')]);
   assert.equal(reader.$('#project-settings-member-form').hasClass('d-none'), true);
+  assert.equal(memberEditor(reader, 2), undefined);
   reader.$('#project-settings-username').val('blocked'); await reader.fire('#project-settings-member-form');
   assert.equal(reader.calls.length, 3);
 });
@@ -118,4 +126,57 @@ test('late project responses cannot show another project or clear its new member
   ui.emit('veriqra:localechange'); assert.equal(ui.$('#project-settings-username').val(), 'Retained entry');
   const work = ui.fire('#project-settings-member-form'); await flush(); ui.calls.at(-1).reject({ status: 409, message: 'Already a member' }); await work;
   assert.equal(ui.$('#project-settings-username').val(), 'Retained entry'); assert.match(ui.$('#project-settings-notice').text(), /Already a member/);
+});
+
+test('a project manager can retain a role change draft and explicitly hand off unresolved defects', async () => {
+  const ui = browser();
+  const manager = { id: 9, systemRole: 'USER', status: 'ACTIVE' };
+  const members = [member(9), member(2, 'DEVELOPER', { version: 7 }), member(3, 'DEVELOPER'),
+    member(4, 'DEVELOPER', { userStatus: 'DISABLED' }), member(5, 'DEVELOPER', { status: 'INACTIVE' }), member(6)];
+  const managers = [{ userId: 9, status: 'ACTIVE' }];
+  ui.project(); await ui.loaded(manager, members, managers);
+  await ui.fire(memberEditor(ui, 2), 'click');
+  ui.$('#project-settings-edit-role').val('TESTER'); await ui.fire('#project-settings-edit-role', 'change');
+  assert.equal(ui.$('#project-settings-handoff').hasClass('d-none'), false);
+  assert.deepEqual(ui.nodes.get('#project-settings-replacement').children.map(node => node.value), ['', '3']);
+  const first = ui.fire('#project-settings-edit-form'); await flush();
+  const missing = ui.calls.at(-1); assert.equal(missing.method, 'put'); assert.equal(missing.url, 'projects/7/members/2');
+  assert.deepEqual(JSON.parse(JSON.stringify(missing.body)), { expectedVersion: 7, projectRole: 'TESTER', status: 'ACTIVE', replacementAssigneeId: null });
+  missing.reject({ status: 409, code: 'MEMBER_DEFECT_HANDOFF_REQUIRED' }); await first;
+  assert.equal(ui.$('#project-settings-edit-role').val(), 'TESTER');
+  assert.match(ui.$('#project-settings-edit-error').text(), /replacement developer/);
+  assert.equal(ui.guards.get('project-settings').dirty(), true);
+  await ui.fire('#project-settings-edit-form'); assert.equal(ui.calls.length, 4);
+  ui.$('#project-settings-replacement').val('3'); await ui.fire('#project-settings-replacement', 'change');
+  const work = ui.fire('#project-settings-edit-form'); await flush();
+  const write = ui.calls.at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(write.body)), { expectedVersion: 7, projectRole: 'TESTER', status: 'ACTIVE', replacementAssigneeId: 3 });
+  write.resolve(member(2, 'TESTER', { version: 8 })); await flush();
+  await ui.loaded(manager, members.map(row => row.userId === 2 ? member(2, 'TESTER', { version: 8 }) : row), managers); await work;
+  assert.equal(ui.$('#project-settings-edit-form').hasClass('d-none'), true);
+  assert.equal(ui.guards.get('project-settings').dirty(), false);
+});
+
+test('deactivation keeps the disabled developer’s role and a stale edit needs an explicit reload', async () => {
+  const ui = browser();
+  const developer = member(2, 'DEVELOPER', { userStatus: 'DISABLED', version: 4 });
+  ui.project(); await ui.loaded(admin, [developer, member(3, 'DEVELOPER')]);
+  await ui.fire(memberEditor(ui, 2), 'click');
+  assert.equal(ui.$('#project-settings-edit-role').prop('disabled'), true);
+  ui.$('#project-settings-edit-status').val('INACTIVE'); await ui.fire('#project-settings-edit-status', 'change');
+  ui.$('#project-settings-replacement').val('3'); await ui.fire('#project-settings-replacement', 'change');
+  const work = ui.fire('#project-settings-edit-form'); await flush();
+  const write = ui.calls.at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(write.body)), { expectedVersion: 4, projectRole: 'DEVELOPER', status: 'INACTIVE', replacementAssigneeId: 3 });
+  write.reject({ status: 409, code: 'MEMBER_VERSION_CHANGED' }); await work;
+  assert.equal(ui.$('#project-settings-edit-status').val(), 'INACTIVE');
+  assert.equal(ui.$('#project-settings-replacement').val(), '3');
+  assert.equal(ui.$('#project-settings-edit-save').prop('disabled'), true);
+  assert.equal(ui.$('#project-settings-edit-reload').hasClass('d-none'), false);
+  await ui.fire('#project-settings-edit-form'); assert.equal(ui.calls.length, 4);
+  const reloading = ui.fire('#project-settings-edit-reload', 'click'); await flush();
+  await ui.loaded(admin, [{ ...developer, status: 'INACTIVE', version: 5 }, member(3, 'DEVELOPER')]); await reloading;
+  assert.equal(ui.$('#project-settings-edit-form').hasClass('d-none'), true);
+  assert.equal(memberEditor(ui, 2), undefined);
+  assert.equal(ui.guards.get('project-settings').dirty(), false);
 });

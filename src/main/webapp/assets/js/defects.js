@@ -25,12 +25,16 @@
   let closureGeneration = 0;
   let closureNeedsAccessRefresh = false;
   let retestEditor = null;
+  let retestHandoff = null;
   const candidatePages = new Map();
   let retestPending = null;
   let editBlocked = false;
   let actionFeedback = null;
   let listLoaded = false;
+  let listRows = [];
   const listPositions = new Map();
+  let generatedDraft = null;
+  let pendingAiDraft = null;
   const expandedSections = new Map();
   const pickerData = { 'defect-create': {}, 'defect-action': {} };
   const pickerGeneration = { 'defect-create': 0, 'defect-action': 0 };
@@ -58,16 +62,22 @@
         event.preventDefault(); nav.open(next, Object.assign({ projectId: projectId }, context));
       });
   }
+  function listKey() { return projectId + '/' + (actor && actor.id != null ? actor.id : 'unverified'); }
+  function listState() {
+    const key = listKey();
+    if (!listPositions.has(key)) listPositions.set(key, { scroll: 0, search: '', status: '', quick: 'ALL', sort: 'UPDATED' });
+    return listPositions.get(key);
+  }
   function rememberList(id) {
     if (!active() || !listLoaded || $('#defect-list-panel').hasClass('d-none')) return;
-    const position = listPositions.get(projectId) || { scroll: 0 };
+    const position = listState();
+    position.remembered = true;
     if (Number.isFinite(window.scrollY)) position.scroll = window.scrollY;
     if (id != null) position.id = String(id);
-    listPositions.set(projectId, position);
   }
   function restoreList(token) {
-    const position = listPositions.get(projectId);
-    if (!position || typeof window.scrollTo !== 'function') return;
+    const position = listPositions.get(listKey());
+    if (!position || !position.remembered || typeof window.scrollTo !== 'function') return;
     const restore = function () { if (valid(token) && !$('#defect-list-panel').hasClass('d-none')) window.scrollTo(0, position.scroll); };
     if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(restore); else restore();
   }
@@ -85,6 +95,7 @@
     refreshMemberControls();
     if (value) $('#defect-closure button, #defect-retest-form input, #defect-retest-form textarea, #defect-retest-form button').prop('disabled', true);
     else { updatePickerSubmit('defect-action'); renderClosure(); if (detail) { renderActions(detail.defect); renderDefect(detail.defect); if (evidenceValues) renderEvidence(detail); if (actionMode) actionLabels(actionMode); } }
+    if (window.VeriqraAiDefectAnalysis) window.VeriqraAiDefectAnalysis.setBlocked(value);
   }
   function failureContext(prefix) {
     return { runId: String($('#' + prefix + '-run').val() || ''), runCaseId: String($('#' + prefix + '-case').val() || ''),
@@ -126,14 +137,18 @@
       : t('defects.conflict', null, 'The record changed or this action is not allowed in its current state. Reload the latest detail before trying again.');
   }
   function reset() {
+    if (window.VeriqraAiDefectAnalysis) window.VeriqraAiDefectAnalysis.clear();
+    if (window.VeriqraDefectComments) window.VeriqraDefectComments.clear();
     generation++;
     listLoaded = false;
+    listRows = []; generatedDraft = null; pendingAiDraft = null;
+    $('#defect-list-toolbar').remove();
     pickerGeneration['defect-create']++;
     pickerGeneration['defect-action']++;
     detail = null; actionMode = null; mutating = false; evidenceValues = null; evidenceLoading = false; linkableDefects = [];
     editBlocked = false;
     projectMembers = []; accessGeneration++; Object.keys(memberPickers).forEach(function (key) { delete memberPickers[key]; });
-    closureEligibility = null; closureLoading = false; closureFailure = null; closureGeneration++; closureNeedsAccessRefresh = false; retestEditor = null; candidatePages.clear(); retestPending = null;
+    closureEligibility = null; closureLoading = false; closureFailure = null; closureGeneration++; closureNeedsAccessRefresh = false; retestEditor = null; retestHandoff = null; candidatePages.clear(); retestPending = null;
     pickerData['defect-create'] = {}; pickerData['defect-action'] = {};
     clearPickerFailures('defect-create'); clearPickerFailures('defect-action');
     $('#defect-list, #defect-detail, #defect-evidence, #defect-actions, #defect-closure').empty();
@@ -143,6 +158,8 @@
     notice(''); actionStatus(''); formError('#defect-create-error', ''); formError('#defect-action-error', '');
   }
   function panels(which) {
+    if (which !== 'detail' && window.VeriqraAiDefectAnalysis) window.VeriqraAiDefectAnalysis.clear();
+    if (which !== 'detail' && window.VeriqraDefectComments) window.VeriqraDefectComments.clear();
     $('#defect-list-panel').toggleClass('d-none', which !== 'list');
     $('#defect-detail-panel').toggleClass('d-none', which !== 'detail');
     $('#defect-create-form').toggleClass('d-none', which !== 'create');
@@ -152,29 +169,88 @@
     const token = ++generation;
     listLoaded = false;
     detail = null; actionMode = null; mutating = false;
+    $('#defect-list-toolbar').remove();
     panels('list'); notice('');
     $('#defect-list').empty(); $('#defect-list-status').text(t("defects.loadingDefects", null, 'Loading defects…'));
     focusHeading('#defect-list-panel h2');
     try {
       const rows = await api.get(base('defects'));
       if (!valid(token)) return;
-      $('#defect-list-status').text(rows.length ? t('defects.defectCount', { count: window.I18n.formatNumber(rows.length) }, '{count} defect(s)') : t("defects.noDefectsInThisProject", null, 'No defects in this project.'));
-      rows.forEach(function (row) {
-        const title = 'BUG-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title;
-        const position = listPositions.get(projectId);
-        $('#defect-list').append($('<div class="asset-list-row">').attr('data-defect-id', row.id).toggleClass('is-recently-viewed', !!position && sameId(position.id, row.id)).append(
-          $('<div class="asset-list-summary">').append(routeLink(title, 'defects', { defectId: String(row.id) }).removeClass('btn btn-outline-primary btn-sm').addClass('asset-title-link'),
-            $('<p class="mb-1 text-secondary">').text(row.description || t("common.noDescription", null, 'No description'))),
-          $('<div class="asset-list-meta">').append(badge(row.status),
-            $('<span>').text(t('defects.severityPriority', { severity: label(row.severity), priority: label(row.priority) }, 'Severity {severity} · Priority {priority}')),
-            $('<span>').text('v' + row.version), $('<small>').text(t('defects.updatedAt', { date: date(row.updatedAt) }, 'Updated {date}')))));
-      });
-      listLoaded = true; restoreList(token);
+      listRows = rows; listLoaded = true;
+      renderListToolbar(); renderListRows(); restoreList(token);
     } catch (error) { if (valid(token)) {
       $('#defect-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(error.message, true);
       $('#defect-list').append($('<button type="button" class="btn btn-outline-secondary btn-sm">')
         .text(t('common.retry', null, 'Retry')).on('click', function () { if (valid(token)) return list(); }));
     } }
+  }
+  function quickMatch(row, quick) {
+    return quick === 'UNCLOSED' ? row.status !== 'CLOSED'
+      : quick === 'RETEST' ? row.status === 'RESOLVED'
+      : quick === 'MINE' ? !!actor && sameId(row.assigneeId, actor.id) : true;
+  }
+  function renderListToolbar() {
+    $('#defect-list-toolbar').remove();
+    const state = listState(), toolbar = $('<div id="defect-list-toolbar" class="workflow-list-toolbar">');
+    const quick = $('<div class="workflow-list-quickviews" role="group">').attr('aria-label', t('zentaoDefects.quickViews', null, 'Defect views'));
+    [['ALL', 'all', 'All'], ['UNCLOSED', 'unclosed', 'Unclosed'], ['RETEST', 'awaitingRetest', 'Awaiting retest'], ['MINE', 'assignedToMe', 'Assigned to me']].forEach(function (entry) {
+      const count = listRows.filter(function (row) { return quickMatch(row, entry[0]); }).length;
+      quick.append($('<button type="button" class="btn btn-sm btn-outline-secondary">').attr('data-defect-view', entry[0])
+        .attr('aria-pressed', state.quick === entry[0] ? 'true' : 'false').prop('disabled', entry[0] === 'MINE' && !actor)
+        .text(t('zentaoDefects.' + entry[1], null, entry[2]) + ' ' + (entry[0] === 'MINE' && !actor ? '—' : window.I18n.formatNumber(count)))
+        .on('click', function () {
+          if (entry[0] === 'MINE' && !actor) return;
+          state.quick = entry[0]; state.status = ''; state.scroll = 0;
+          renderListToolbar(); renderListRows();
+        }));
+    });
+    const filters = $('<div class="workflow-list-filters">');
+    function filter(id, text, control) {
+      filters.append($('<div class="workflow-list-filter">').append($('<label>').attr('for', id).text(text), control.attr('id', id)));
+    }
+    filter('defect-list-search', t('zentaoDefects.search', null, 'Search title, ID or description'),
+      $('<input type="search" class="form-control">').val(state.search).on('input', function () { state.search = String($(this).val() || ''); state.scroll = 0; renderListRows(); }));
+    const status = $('<select class="form-select">').append(option('', t('zentaoDefects.allStatuses', null, 'All statuses')));
+    ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', 'REOPENED'].forEach(function (value) { status.append(option(value, label(value))); });
+    status.val(state.status).on('change', function () { state.status = String($(this).val() || ''); state.scroll = 0; renderListRows(); });
+    filter('defect-list-status-filter', t('common.status', null, 'Status'), status);
+    const sort = $('<select class="form-select">');
+    [['UPDATED', 'recentlyUpdated', 'Recently updated'], ['NEWEST', 'newest', 'Newest first'], ['PRIORITY', 'highestPriority', 'Highest priority']].forEach(function (entry) { sort.append(option(entry[0], t('zentaoDefects.' + entry[1], null, entry[2]))); });
+    sort.val(state.sort).on('change', function () { state.sort = String($(this).val() || 'UPDATED'); state.scroll = 0; renderListRows(); });
+    filter('defect-list-sort', t('zentaoDefects.sort', null, 'Sort'), sort);
+    filters.append($('<button type="button" id="defect-list-clear" class="btn btn-outline-secondary">').text(t('zentaoDefects.clear', null, 'Clear filters'))
+      .on('click', function () { state.search = ''; state.status = ''; state.quick = 'ALL'; state.sort = 'UPDATED'; state.scroll = 0; renderListToolbar(); renderListRows(); }));
+    toolbar.append(quick, filters);
+    $('#defect-list').before(toolbar);
+  }
+  function renderListRows() {
+    if (!active() || !listLoaded || $('#defect-list-panel').hasClass('d-none')) return;
+    const state = listState(), search = state.search.trim().toLocaleLowerCase();
+    const visible = listRows.filter(function (row) {
+      return quickMatch(row, state.quick) && (!state.status || row.status === state.status) && (!search ||
+        ['BUG-' + String(row.keyNo).padStart(3, '0'), row.title, row.description].join(' ').toLocaleLowerCase().includes(search));
+    });
+    const rank = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+    visible.sort(function (left, right) {
+      if (state.sort === 'PRIORITY' && rank[left.priority] !== rank[right.priority]) return (rank[right.priority] || 0) - (rank[left.priority] || 0);
+      if (state.sort === 'NEWEST') return Number(right.id) - Number(left.id);
+      return (Date.parse(right.updatedAt) || 0) - (Date.parse(left.updatedAt) || 0) || Number(right.id) - Number(left.id);
+    });
+    $('#defect-list').empty();
+    $('#defect-list-status').addClass('workflow-list-count').text(listRows.length
+      ? t('zentaoDefects.filteredCount', { shown: window.I18n.formatNumber(visible.length), total: window.I18n.formatNumber(listRows.length) }, 'Showing {shown} of {total} loaded defects')
+      : t('defects.noDefectsInThisProject', null, 'No defects in this project.'));
+    if (listRows.length && !visible.length) $('#defect-list').append($('<p class="text-secondary mb-0">').text(t('zentaoDefects.noMatches', null, 'No matching defects. Change the search or filters.')));
+    visible.forEach(function (row) {
+      const title = 'BUG-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title;
+      $('#defect-list').append($('<div class="asset-list-row workflow-list-row">').attr('data-defect-id', row.id).toggleClass('is-recently-viewed', sameId(state.id, row.id)).append(
+        $('<div class="asset-list-summary">').append(routeLink(title, 'defects', { defectId: String(row.id) }).removeClass('btn btn-outline-primary btn-sm').addClass('asset-title-link'),
+          $('<p class="mb-1 text-secondary">').text(row.description || t('common.noDescription', null, 'No description'))),
+        $('<div class="asset-list-meta">').append(badge(row.status),
+          $('<span>').text(t('defects.severityPriority', { severity: label(row.severity), priority: label(row.priority) }, 'Severity {severity} · Priority {priority}')),
+          $('<small>').text(t('zentaoDefects.recordRevision', { version: row.version }, 'Record revision {version}')),
+          $('<small>').text(t('defects.updatedAt', { date: date(row.updatedAt) }, 'Updated {date}')))));
+    });
   }
   async function loadEvidence(current, token) {
     const evidenceToken = ++evidenceGeneration;
@@ -198,6 +274,7 @@
     if (!valid(token) || detail !== current || evidenceToken !== evidenceGeneration) return;
     evidenceValues = values;
     evidenceLoading = false;
+    renderDefect(current.defect);
     renderEvidence(current);
   }
   function renderEvidence(current) {
@@ -217,6 +294,8 @@
         $('<strong>').text(t('defects.linkedFailAttempt', { number: link.attemptNo, id: link.attemptId }, 'Linked FAIL attempt #{number} · ID {id}')), badge(link.outcome)),
       $('<dl class="asset-fields mb-2">').append(
         field(t('defects.run', null, 'Run'), value.run ? value.run.name : t('common.unavailable', null, 'Unavailable')),
+        field(t('zentaoDefects.testedBuild', null, 'Tested build'), value.run ? value.run.buildVersion : null),
+        field(t('zentaoDefects.environment', null, 'Environment'), value.run ? value.run.environment : null),
         field(t("defects.runCaseSnapshot", null, 'Run Case snapshot'), value.runCase ? value.runCase.snapshotTitle : t('common.unavailable', null, 'Unavailable')),
         field(t("defects.executed", null, 'Executed'), source ? date(source.executedAt) : null), field(t('defects.actor', null, 'Executed by'), source ? projectUserName(source.executedBy) : null),
         field(t("defects.actualResultComment", null, 'Actual result / comment'), source ? source.comment : null, true),
@@ -239,13 +318,17 @@
       .text(t("defects.removeLinkCorrection", null, 'Remove link (correction)')).prop('disabled', mutating).on('click', function () { return removeEvidence(link, defect); }));
     return card;
   }
-  async function openDetail(id, feedback) {
+  async function openDetail(id, feedback, handoff) {
     if (!active()) return;
+    if (window.VeriqraAiDefectAnalysis) window.VeriqraAiDefectAnalysis.clear();
+    if (window.VeriqraDefectComments && (!detail || !sameId(detail.defect.id, id))) window.VeriqraDefectComments.clear();
     rememberList(id);
     const token = ++generation;
     actionMode = null; detail = null; mutating = false; evidenceValues = null; evidenceLoading = false; panels('detail'); notice(''); actionStatus('');
     closureEligibility = null; closureLoading = true; closureFailure = null; closureGeneration++; closureNeedsAccessRefresh = false; retestEditor = null; candidatePages.clear(); retestPending = null;
-    selectContext(Object.assign({}, routeContext, { defectId: String(id), action: undefined }));
+    retestHandoff = handoff || null;
+    // The URL opens this confirmation once. Refreshes and ordinary defect links use the usual detail.
+    selectContext(Object.assign({}, routeContext, { defectId: String(id), action: undefined, retestRunId: undefined, retestRunCaseId: undefined, retestPassAttemptId: undefined }));
     $('#defect-detail-panel button').prop('disabled', false);
     $('#defect-action-form').addClass('d-none');
     $('#defect-detail-title').text(t("defects.loadingDefect", null, 'Loading defect…'));
@@ -272,12 +355,31 @@
   }
   function renderDefect(defect) {
     $('#defect-detail-title').text('BUG-' + String(defect.keyNo).padStart(3, '0') + ' · ' + defect.title);
-    $('#defect-detail').empty().append($('<dl class="asset-fields">').append(
+    const target = $('#defect-detail').empty();
+    const sources = [...new Map((evidenceValues || []).filter(function (value) { return value.run; }).map(function (value) { return [String(value.run.id), value.run]; })).values()];
+    if (sources.length === 1) target.append(sourceContext(sources[0]));
+    else if (sources.length > 1) target.append($('<p class="workflow-context-strip">').text(t('zentaoDefects.multipleSources', { count: sources.length }, '{count} source runs. Each failure below shows its tested build and environment.')));
+    target.append($('<dl class="asset-fields">').append(
         field(t("common.status", null, 'Status'), label(defect.status)), field(t("common.severity", null, 'Severity'), label(defect.severity)),
-        field(t("common.priority", null, 'Priority'), label(defect.priority)), field(t("common.version", null, 'Version'), defect.version),
+        field(t("common.priority", null, 'Priority'), label(defect.priority)), field(t('zentaoDefects.revisionLabel', null, 'Record revision'), defect.version),
         field(t("common.description", null, 'Description'), defect.description, true), field(t('defects.reporter', null, 'Reported by'), projectUserName(defect.reporterId)),
         field(t('defects.assignee', null, 'Assignee'), assigneeName(defect.assigneeId)), field(t("defects.resolutionNote", null, 'Resolution note'), defect.resolutionNote, true),
         field(t("common.created", null, 'Created'), date(defect.createdAt)), field(t("common.updated", null, 'Updated'), date(defect.updatedAt))));
+    syncAiAnalysis();
+    syncDiscussion();
+  }
+  function syncDiscussion() {
+    if (!window.VeriqraDefectComments || !detail || !actor || !active()) return;
+    window.VeriqraDefectComments.mount({ projectId: projectId, defectId: detail.defect.id, actorId: actor.id,
+      writable: actor.status === 'ACTIVE' && !projectArchived });
+  }
+  function syncAiAnalysis() {
+    if (!window.VeriqraAiDefectAnalysis) return;
+    if (!detail || !active() || $('#defect-detail-panel').hasClass('d-none')) { window.VeriqraAiDefectAnalysis.clear(); return; }
+    const owner = detail, token = generation;
+    window.VeriqraAiDefectAnalysis.mount({ projectId: projectId, defect: owner.defect, actorId: actor && actor.id,
+      isCurrent: function () { return valid(token) && detail === owner && !$('#defect-detail-panel').hasClass('d-none'); } });
+    window.VeriqraAiDefectAnalysis.setBlocked(mutating);
   }
   function renderActions(defect) {
     const actions = $('#defect-actions').empty().addClass('workflow-next');
@@ -328,8 +430,18 @@
       const value = await api.get('auth/me');
       if (!valid(token) || accessToken !== accessGeneration) return;
       actor = value;
-      if (detail) { renderActions(detail.defect); renderClosure(); if (evidenceValues) renderEvidence(detail); recoverStoredOperation(); }
-    } catch (error) { if (valid(token) && accessToken === accessGeneration) { actor = null; if (detail) { renderActions(detail.defect); renderClosure(); } } }
+      syncAiAnalysis();
+      syncDiscussion();
+      if (detail) { renderActions(detail.defect); renderClosure(); if (evidenceValues) renderEvidence(detail); recoverStoredOperation(); openRetestHandoff(); }
+      if (listLoaded && !$('#defect-list-panel').hasClass('d-none')) { renderListToolbar(); renderListRows(); restoreList(token); }
+    } catch (error) {
+      if (valid(token) && accessToken === accessGeneration) {
+        actor = null; syncAiAnalysis();
+        if (window.VeriqraDefectComments) window.VeriqraDefectComments.clear();
+        if (retestHandoff) { retestHandoff = null; retestHandoffUnavailable(); }
+        if (detail) { renderActions(detail.defect); renderClosure(); }
+      }
+    }
   }
   function editorActive() { return !!actionMode || !!retestEditor; }
   function actionButton(text, callback, primary) { return $('<button type="button" class="btn ' + (primary && !editorActive() ? 'btn-primary' : 'btn-outline-primary') + '">').text(text).prop('disabled', mutating || editorActive()).on('click', function () { if (!mutating && !editorActive()) return callback(); }); }
@@ -397,11 +509,12 @@
       const value = results[0];
       if (refreshAccess) { actor = results[1]; projectArchived = results[2].status === 'ARCHIVED'; projectMembers = results[3]; }
       closureEligibility = value; closureLoading = false;
-      renderClosure(); renderActions(current.defect); recoverStoredOperation();
+      renderClosure(); renderActions(current.defect); recoverStoredOperation(); openRetestHandoff();
     } catch (error) {
       if (!stillCurrent()) return;
       closureLoading = false; closureEligibility = null; closureFailure = error;
       renderClosure(); renderActions(current.defect);
+      if (retestHandoff) { retestHandoff = null; retestHandoffUnavailable(); }
     }
   }
   function renderClosure() {
@@ -493,6 +606,60 @@
     renderRetestEditor(); renderOperationRecovery();
   }
   function timingText(basis) { return t(basis === 'IMPORT_REVIEW_ATTESTATION' ? 'defects.importAttestation' : 'defects.manualTiming', null, basis === 'IMPORT_REVIEW_ATTESTATION' ? 'Operator attestation of external execution timing' : 'Manual server-recorded execution timing'); }
+  const maxAttemptId = 9223372036854775807n;
+  function retestHandoffFromRoute(context) {
+    const ids = [context.failureAttemptId, context.retestRunId, context.retestRunCaseId, context.retestPassAttemptId].map(String);
+    if (!ids.every(function (id) { return /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= maxAttemptId; })) return null;
+    return { failureAttemptId: ids[0], runId: ids[1], runCaseId: ids[2], passAttemptId: ids[3] };
+  }
+  function retestHandoffUnavailable(reason) {
+    const message = t('defects.retestHandoffUnavailable', null, 'This retest PASS could not be used. Review the latest defect and available retest evidence.');
+    actionStatus(reason ? message + ' ' + reasonText(reason) : message, true);
+  }
+  async function openRetestHandoff() {
+    if (!retestHandoff || !detail || closureLoading || !actor) return;
+    const memberState = detailMemberState();
+    if (!canManage() && memberState && memberState.loading) return;
+    const handoff = retestHandoff;
+    retestHandoff = null;
+    if (mutating || retestPending || editorActive()) return;
+    const current = detail, eligibility = closureEligibility;
+    if (!canManage() || current.defect.status !== 'RESOLVED' || !eligibility || eligibility.defectVersion !== current.defect.version) {
+      retestHandoffUnavailable();
+      return;
+    }
+    const failure = (eligibility.failures || []).find(function (row) { return sameId(row.source.attempt.id, handoff.failureAttemptId); });
+    if (!failure || failure.source.attempt.status !== 'FAIL') { retestHandoffUnavailable(); return; }
+    const selected = failure.selection && !failure.selection.revocation && sameId(failure.selection.passAttemptId, handoff.passAttemptId);
+    const accepted = failure.eligible && failure.selectedPass && sameId(failure.selectedPass.attempt.id, handoff.passAttemptId);
+    if (selected || accepted) {
+      actionStatus(t('defects.retestHandoffAlreadyLinked', null, 'This PASS is already selected or satisfies the current retest rule. Review closure eligibility.'));
+      return;
+    }
+    const token = generation, actorId = actor.id;
+    const stillCurrent = function () {
+      return valid(token) && detail === current && closureEligibility === eligibility && sameId(actor && actor.id, actorId)
+        && canManage() && !mutating && !retestPending && !editorActive();
+    };
+    // Candidate pages are descending by attempt ID and the cursor is exclusive.
+    const passId = BigInt(handoff.passAttemptId);
+    const cursor = passId === maxAttemptId ? '' : '&cursor=' + String(passId + 1n);
+    actionStatus(t('defects.retestHandoffChecking', null, 'Checking this retest PASS…'));
+    try {
+      const response = await api.get(defectPath(current.defect.id) + '/retest-candidates?failureAttemptId=' + handoff.failureAttemptId + '&pageSize=1' + cursor);
+      if (!stillCurrent()) return;
+      const candidate = response && sameId(response.failureAttemptId, handoff.failureAttemptId) && (response.candidates || [])[0];
+      const execution = candidate && candidate.execution;
+      const matches = execution && sameId(execution.run.id, handoff.runId) && sameId(execution.runCase.id, handoff.runCaseId)
+        && sameId(execution.attempt.id, handoff.passAttemptId) && execution.attempt.status === 'PASS';
+      if (!matches || candidate.eligible !== true) {
+        retestHandoffUnavailable(matches && candidate.reasons && candidate.reasons[0]);
+        return;
+      }
+      actionStatus('');
+      showRetestEditor(failure, candidate, 'LINK');
+    } catch (error) { if (stillCurrent()) retestHandoffUnavailable(); }
+  }
   async function loadCandidates(failure, cursor) {
     const token = generation, id = String(failure.source.attempt.id), previous = candidatePages.get(id);
     const state = { rows: cursor && previous ? previous.rows.slice() : [], loading: true, nextCursor: null };
@@ -686,7 +853,96 @@
     const context = failureContext('defect-create');
     if (sync !== false) selectContext(Object.assign({}, routeContext, context, { action: createMode, failureAttemptId: context.attemptId || undefined }));
     const target = $('#defect-create-context').empty();
+    const data = pickerData['defect-create'];
+    if (data.run && sameId(data.run.id, context.runId)) target.append(sourceContext(data.run));
+    if (createMode !== 'link' && selectedFailure('defect-create')) {
+      populateFailureDraft();
+      target.append($('<p class="small text-secondary mb-2">').text(t('zentaoDefects.draftHint', null, 'Title and description are prepared from this frozen failure. Review or edit them before saving. Your edits are retained when the source changes.')));
+    }
     if (context.runId && context.runCaseId && context.attemptId) target.append(routeLink(t('defects.openSourceAttempt', null, 'Open source attempt'), 'runs', context));
+  }
+  function sourceContext(run) {
+    return $('<dl class="workflow-context-strip">').append(field(t('defects.run', null, 'Run'), run.name),
+      field(t('zentaoDefects.testedBuild', null, 'Tested build'), run.buildVersion),
+      field(t('zentaoDefects.environment', null, 'Environment'), run.environment));
+  }
+  function boundedDraftText(value, limit) {
+    return typeof value === 'string' ? value.trim().slice(0, limit).replace(/[\uD800-\uDBFF]$/, '').trimEnd() : '';
+  }
+  function stageAiDraft(value) {
+    pendingAiDraft = null;
+    if (!value || !sameId(value.projectId, projectId) || projectArchived) return;
+    const ids = [value.projectId, value.runId, value.runCaseId, value.attemptId].map(String);
+    if (!ids.every(function (id) { return /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)); })) return;
+    const draftTitle = boundedDraftText(value.draftTitle, 240);
+    // Reserve room below the TEXT column limit for AI wording without trimming frozen evidence further.
+    const suggestion = boundedDraftText(value.suggestion, 1200);
+    if (!draftTitle && !suggestion) return;
+    const draft = { projectId: ids[0], runId: ids[1], runCaseId: ids[2], attemptId: ids[3], draftTitle: draftTitle, suggestion: suggestion };
+    pendingAiDraft = draft;
+    const discard = function () { if (pendingAiDraft === draft) pendingAiDraft = null; };
+    // A same-project navigation dispatches its view event synchronously.
+    Promise.resolve().then(discard);
+    return discard;
+  }
+  function matchesAiDraft(draft, source) {
+    return draft && source && sameId(draft.projectId, source.projectId) && sameId(draft.runId, source.runId)
+      && sameId(draft.runCaseId, source.runCaseId) && sameId(draft.attemptId, source.attemptId || source.failureAttemptId);
+  }
+  function takeAiDraft(next, context) {
+    const draft = pendingAiDraft;
+    pendingAiDraft = null;
+    return next === 'defects' && context && context.action === 'create' && !context.defectId && matchesAiDraft(draft, context) ? draft : null;
+  }
+  function discardAiOnSourceChange() {
+    if (!generatedDraft || !generatedDraft.ai || matchesAiDraft(generatedDraft.ai, Object.assign({ projectId: projectId }, failureContext('defect-create')))) return;
+    generatedDraft.ai = null;
+    ['title', 'description'].forEach(function (name) {
+      const field = $('#defect-create-' + name);
+      if (!generatedDraft.edited[name] && field.val() === generatedDraft[name]) field.val('');
+      generatedDraft[name] = null;
+    });
+  }
+  function populateFailureDraft() {
+    if (!generatedDraft || createMode === 'link') return;
+    const data = pickerData['defect-create'], selected = selectedFailure('defect-create');
+    const runCase = (data.cases || []).find(function (row) { return sameId(row.runCaseId, $('#defect-create-case').val()); });
+    const attempt = (data.attempts || []).find(function (row) { return sameId(row.id, selected); });
+    if (!runCase || !attempt || !data.run || !sameId(data.run.id, data.runId)) return;
+    const missing = t('zentaoDefects.notRecorded', null, 'Not recorded');
+    const actual = [attempt.failureMessage, attempt.comment].filter(function (value, index, values) { return value && values.indexOf(value) === index; }).join('\n') || missing;
+    const title = (runCase.snapshotTitle + ' — ' + (attempt.failureMessage || attempt.comment || t('zentaoDefects.failed', null, 'Test failed')).split(/\r?\n/)[0]).slice(0, 240).replace(/[\uD800-\uDBFF]$/, '');
+    const sections = [t('defects.run', null, 'Run') + ': ' + data.run.name,
+      t('zentaoDefects.testedBuild', null, 'Tested build') + ': ' + (data.run.buildVersion || missing),
+      t('zentaoDefects.environment', null, 'Environment') + ': ' + (data.run.environment || missing),
+      t('defects.runCaseSnapshot', null, 'Run Case snapshot') + ': ' + runCase.snapshotTitle,
+      t('defects.linkedFailAttempt', { number: attempt.attemptNo, id: attempt.id }, 'Linked FAIL attempt #{number} · ID {id}'),
+      t('zentaoDefects.actual', null, 'Actual result') + ':\n' + actual];
+    if (runCase.snapshotPreconditions) sections.push(t('zentaoDefects.preconditions', null, 'Preconditions') + ':\n' + runCase.snapshotPreconditions);
+    const steps = (runCase.steps || []).map(function (step, index) {
+      return (step.stepOrder || index + 1) + '. ' + step.action + '\n' + t('zentaoDefects.expected', null, 'Expected') + ': ' + step.expectedResult;
+    });
+    sections.push(t('zentaoDefects.reproduction', null, 'Reproduction steps') + ':\n' + (steps.join('\n\n') || missing));
+    const proposed = { title: title, description: limitDraftDescription(sections.join('\n\n')) };
+    const aiDraft = generatedDraft.ai;
+    if (sameId(attempt.runCaseId, runCase.runCaseId) && matchesAiDraft(aiDraft, { projectId: projectId, runId: data.runId, runCaseId: runCase.runCaseId, attemptId: attempt.id })) {
+      if (aiDraft.draftTitle) proposed.title = aiDraft.draftTitle;
+      if (aiDraft.suggestion) proposed.description += '\n\n' + t('defects.aiDraftSuggestion', null, 'AI suggestion (review before saving)') + ':\n' + aiDraft.suggestion;
+    }
+    ['title', 'description'].forEach(function (name) {
+      const field = $('#defect-create-' + name), previous = generatedDraft[name];
+      if (!generatedDraft.edited[name] && (!field.val() || field.val() === previous)) { field.val(proposed[name]); generatedDraft[name] = proposed[name]; }
+    });
+  }
+  function limitDraftDescription(value) {
+    // A defect description is MySQL TEXT (65,535 UTF-8 bytes). Leave room for the source-reference note.
+    let bytes = 0, result = '';
+    for (const character of value) {
+      const point = character.codePointAt(0), length = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+      if (bytes + length > 60000) return result + '\n\n' + t('zentaoDefects.detailsOmitted', null, 'Additional details omitted. Open the source attempt for the complete frozen evidence.');
+      result += character; bytes += length;
+    }
+    return value;
   }
   async function loadRuns(prefix, prefill) {
     const token = generation, pickerToken = ++pickerGeneration[prefix];
@@ -711,7 +967,7 @@
     const token = generation, pickerToken = ++pickerGeneration[prefix];
     clearPickerFailures(prefix, ['case', 'attempt']);
     const runId = $('#' + prefix + '-run').val();
-    pickerData[prefix].cases = []; pickerData[prefix].attempts = [];
+    pickerData[prefix].cases = []; pickerData[prefix].attempts = []; pickerData[prefix].run = null;
     const select = $('#' + prefix + '-case').empty().append(option('', runId ? t('defects.loadingRunCases', null, 'Loading Run Cases…') : t("defects.selectARunFirst", null, 'Select a Run first'))).prop('disabled', true);
     $('#' + prefix + '-attempt').empty().prop('disabled', true);
     updatePickerSubmit(prefix);
@@ -720,6 +976,7 @@
       const result = await api.get(runPath(runId));
       if (!pickerValid(prefix, token, pickerToken)) return;
       pickerData[prefix].cases = result.cases;
+      pickerData[prefix].run = result.run;
       select.prop('disabled', !result.cases.length);
       select.empty().append(option('', result.cases.length ? t("defects.selectARunCase", null, 'Select a Run Case') : t('defects.noRunCases', null, 'No Run Cases in this Run.')));
       result.cases.forEach(function (item) { select.append(option(item.runCaseId, item.snapshotTitle + ' · #' + item.runCaseId)); });
@@ -821,10 +1078,11 @@
       state.loading = false;
       renderMembers(prefix);
       if (detail) { renderDefect(detail.defect); renderActions(detail.defect); renderClosure(); if (evidenceValues) renderEvidence(detail); }
+      if (prefix === 'defect-detail') openRetestHandoff();
     } catch (error) {
       if (!valid(token) || accessToken !== accessGeneration || memberPickers[prefix] !== state) return;
       state.loading = false; state.failed = true; renderMembers(prefix);
-      if (prefix === 'defect-detail' && detail) { renderActions(detail.defect); renderClosure(); }
+      if (prefix === 'defect-detail' && detail) { renderActions(detail.defect); renderClosure(); openRetestHandoff(); }
       if (prefix !== 'defect-detail') $('#' + prefix + '-assignee-status').append($('<button type="button" class="btn btn-outline-secondary btn-sm ms-2">')
         .attr('id', prefix + '-assignee-retry').text(t('common.retry', null, 'Retry')).on('click', function () { if (valid(token) && !mutating && memberPickers[prefix] === state) return loadMembers(prefix, state.retained); }));
     }
@@ -849,13 +1107,14 @@
       updatePickerSubmit('defect-create');
     } catch (error) { pickerReadFailed('defect-create', 'target', error, function () { return loadLinkableDefects(token); }, function () { return valid(token) && createMode === 'link'; }); }
   }
-  function showCreate(prefill) {
+  function showCreate(prefill, aiDraft) {
     if (!active()) return;
     const token = ++generation; detail = null; actionMode = null; mutating = false; linkableDefects = [];
     createMode = prefill && prefill.action === 'link' ? 'link' : 'create';
     selectContext(Object.assign({}, prefill || {}, { action: createMode, defectId: undefined }));
     panels('create'); notice(''); formError('#defect-create-error', '');
     $('#defect-create-form')[0].reset();
+    generatedDraft = { title: null, description: null, ai: aiDraft || null, edited: { title: false, description: false } };
     $('#defect-create-form input, #defect-create-form select, #defect-create-form textarea, #defect-create-form button').prop('disabled', false);
     $('#defect-create-context').empty();
     createLabels();
@@ -915,13 +1174,13 @@
         } catch (failure) { if (valid(token)) formError('#defect-action-error', failure.message); }
       }));
   }
-  function consumeRoute(context) {
+  function consumeRoute(context, aiDraft) {
     if (!active()) return;
     const value = context || {};
     if (value.projectId && !sameId(value.projectId, projectId)) return;
     routeContext = Object.assign({}, value);
-    if (value.defectId) { launch = null; openDetail(value.defectId); }
-    else if (value.action === 'create' || value.action === 'link') { launch = null; showCreate(value); }
+    if (value.defectId) { launch = null; openDetail(value.defectId, null, retestHandoffFromRoute(value)); }
+    else if (value.action === 'create' || value.action === 'link') { launch = null; showCreate(value, aiDraft); }
     else if (launch && sameId(launch.projectId, projectId)) { const prefill = launch; launch = null; showCreate(prefill); }
     else list();
   }
@@ -941,11 +1200,20 @@
   });
   $(document).on('veriqra:view', function (event) {
     const payload = event.originalEvent.detail, next = payload.view;
+    const context = payload.context || (navigation() && navigation().read());
+    const aiDraft = takeAiDraft(next, context);
     rememberList();
     if (next !== view) { reset(); view = next; }
     if (!active()) return;
-    consumeRoute(payload.context || (navigation() && navigation().read()));
+    consumeRoute(context, aiDraft);
     if (!actor) loadActor(generation);
+  });
+  document.addEventListener('veriqra:reauthenticated', function () {
+    if (!active()) return;
+    actor = null; syncAiAnalysis();
+    if (window.VeriqraDefectComments) window.VeriqraDefectComments.reauthenticate();
+    if (detail) { renderActions(detail.defect); renderClosure(); }
+    loadActor(generation);
   });
   document.addEventListener('veriqra:localechange', function () {
     if (!active() || mutating) return;
@@ -975,7 +1243,8 @@
     else {
       const context = navigation() && navigation().read();
       if (!$('#defect-detail-panel').hasClass('d-none') && context && context.defectId && sameId(context.projectId, projectId)) openDetail(context.defectId);
-      else list();
+      else if (listLoaded && !$('#defect-list-panel').hasClass('d-none')) { renderListToolbar(); renderListRows(); }
+      else { list(); if (!actor) loadActor(generation); }
     }
   });
   $('#defect-new').on('click', function () { if (navigation()) navigation().open('defects', { projectId: projectId, action: 'create' }); else showCreate(null); });
@@ -984,11 +1253,14 @@
   ['defect-create', 'defect-action'].forEach(function (prefix) {
     $('#' + prefix + '-assignee-search').on('input', function () { renderMembers(prefix); });
     $('#' + prefix + '-assignee').on('change', function () { if (memberPickers[prefix]) memberPickers[prefix].selected = String($(this).val() || ''); updatePickerSubmit(prefix); });
-    $('#' + prefix + '-run').on('change', function () { pickerError(prefix, ''); loadCases(prefix); if (prefix === 'defect-create') renderCreateContext(); });
-    $('#' + prefix + '-case').on('change', function () { pickerError(prefix, ''); loadAttempts(prefix); if (prefix === 'defect-create') renderCreateContext(); });
-    $('#' + prefix + '-attempt').on('change', function () { updatePickerSubmit(prefix); if (prefix === 'defect-create') renderCreateContext(); });
+    $('#' + prefix + '-run').on('change', function () { if (prefix === 'defect-create') discardAiOnSourceChange(); pickerError(prefix, ''); loadCases(prefix); if (prefix === 'defect-create') renderCreateContext(); });
+    $('#' + prefix + '-case').on('change', function () { if (prefix === 'defect-create') discardAiOnSourceChange(); pickerError(prefix, ''); loadAttempts(prefix); if (prefix === 'defect-create') renderCreateContext(); });
+    $('#' + prefix + '-attempt').on('change', function () { if (prefix === 'defect-create') discardAiOnSourceChange(); updatePickerSubmit(prefix); if (prefix === 'defect-create') renderCreateContext(); });
   });
   $('#defect-create-target').on('change', function () { updatePickerSubmit('defect-create'); });
+  ['title', 'description'].forEach(function (name) {
+    $('#defect-create-' + name).on('input', function () { if (generatedDraft) generatedDraft.edited[name] = true; });
+  });
   $('#defect-create-form').on('submit', async function (event) {
     event.preventDefault();
     if (!active() || mutating || $('#defect-create-submit').prop('disabled') || !this.reportValidity()) return;
@@ -1062,4 +1334,5 @@
     } }
     finally { if (valid(token)) mutationState(false); }
   });
+  window.VeriqraDefects = Object.freeze({ stageAiDraft: stageAiDraft });
 })(jQuery, window.VeriqraApi);

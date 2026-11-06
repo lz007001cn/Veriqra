@@ -244,6 +244,15 @@ test('project picker removes previous item context and only publishes its verifi
   ui.requests[3].resolve(ui.project(8)); assert.equal(ui.lastProject().detail.project.id, 8); assert.equal(ui.saved.get('veriqra.selectedProjectId'), '8');
 });
 
+test('retest handoff preserves exact evidence IDs only in defect routes', async () => {
+  const ui = browser('http://127.0.0.1:9000/veriqra/index.html?projectId=7#dashboard'); await ui.boot();
+  const source = { projectId: '7', defectId: '90', failureAttemptId: '60', retestRunId: '55', retestRunCaseId: '75', retestPassAttemptId: '85' };
+  ui.nav.open('defects', source);
+  assert.deepEqual(plain(ui.nav.read()), { view: 'defects', ...source });
+  ui.nav.open('runs', { projectId: '7', runId: '55' });
+  assert.deepEqual(plain(ui.nav.read()), { view: 'runs', projectId: '7', runId: '55' });
+});
+
 test('generated dashboard links use the verified project in native href and preserve modified clicks', async () => {
   for (const base of ['http://127.0.0.1:9000/', 'http://127.0.0.1:9000/veriqra/']) {
     const ui = browser(base + 'index.html?projectId=7#dashboard'); await ui.boot();

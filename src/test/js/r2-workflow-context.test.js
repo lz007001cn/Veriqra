@@ -323,7 +323,7 @@ test('already authenticated login and fresh login both reject external returnTo 
 
 test('fresh and existing sessions return to approved admin pages without carrying arbitrary query data', async () => {
   for (const base of ['https://example.test/', 'https://example.test/veriqra/']) {
-    for (const path of ['admin/users.html', 'admin/ai.html']) for (const existing of [true, false]) {
+    for (const path of ['admin/users.html', 'admin/ai.html', 'admin/system.html']) for (const existing of [true, false]) {
       const ui = browser({ base, href: base + 'login.html?returnTo=' + encodeURIComponent(base + path + '?ignored=secret#unused') });
       await ui.loadLogin();
       if (existing) ui.requests[0].call.resolve(actor());

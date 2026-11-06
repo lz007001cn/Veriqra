@@ -9,7 +9,7 @@ import java.util.*;
 
 /** Non-owning, connection-scoped DAO. Caller owns all transaction boundaries. */
 public final class JdbcTestRunDao implements TestRunDao {
-    private static final String SELECT = "SELECT id, project_id, test_plan_id, name, environment, build_version, status, ended_at, created_by, created_at, updated_at, lock_version FROM test_runs";
+    private static final String SELECT = "SELECT id, project_id, test_plan_id, name, environment, build_version, status, ended_at, created_by, created_at, updated_at, lock_version, assignee_id FROM test_runs";
     private final Connection connection;
     public JdbcTestRunDao(Connection connection) { this.connection = Objects.requireNonNull(connection); }
 
@@ -35,6 +35,16 @@ public final class JdbcTestRunDao implements TestRunDao {
         return query(SELECT + " WHERE test_plan_id=? ORDER BY created_at, id", testPlanId);
     }
 
+    @Override public boolean hasActiveAssignment(Long projectId, Long userId) {
+        requireTransaction();
+        String sql = "SELECT id FROM test_runs WHERE project_id=? AND assignee_id=? AND status='IN_PROGRESS' LIMIT 1 FOR UPDATE";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, projectId);
+            statement.setLong(2, userId);
+            try (ResultSet rows = statement.executeQuery()) { return rows.next(); }
+        } catch (SQLException e) { throw new DataAccessException("Check active run assignment", e); }
+    }
+
     private void requireTransaction() {
         try {
             if (connection.getAutoCommit()) throw new SQLException("Locking read requires an outer transaction", "25000");
@@ -53,7 +63,7 @@ public final class JdbcTestRunDao implements TestRunDao {
     }
 
     @Override public TestRun insert(TestRun value) {
-        String sql = "INSERT INTO test_runs (project_id, test_plan_id, name, environment, build_version, status, ended_at, created_by) VALUES (?,?,?,?,?,?,?,?)";
+        String sql = "INSERT INTO test_runs (project_id, test_plan_id, name, environment, build_version, status, ended_at, created_by, assignee_id) VALUES (?,?,?,?,?,?,?,?,?)";
         try (PreparedStatement s = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             s.setObject(1, value.projectId(), Types.BIGINT);
             s.setObject(2, value.testPlanId(), Types.BIGINT);
@@ -63,6 +73,7 @@ public final class JdbcTestRunDao implements TestRunDao {
             s.setString(6, value.status() == null ? null : value.status().name());
             s.setObject(7, value.endedAt(), Types.TIMESTAMP);
             s.setObject(8, value.createdBy(), Types.BIGINT);
+            s.setObject(9, value.assigneeId(), Types.BIGINT);
             if (s.executeUpdate() != 1) throw new SQLException("Unexpected insert count");
             long id;
             try (ResultSet keys = s.getGeneratedKeys()) {
@@ -71,6 +82,19 @@ public final class JdbcTestRunDao implements TestRunDao {
             }
             return findById(id).orElseThrow(() -> new DataAccessException("Inserted TestRun could not be read"));
         } catch (SQLException e) { throw new DataAccessException("Insert TestRun", e); }
+    }
+
+    @Override public TestRun updateAssignee(Long id, Integer lockVersion, Long assigneeId) {
+        requireTransaction();
+        JdbcValues.writableVersion(lockVersion);
+        String sql = "UPDATE test_runs SET assignee_id=?, updated_at=CURRENT_TIMESTAMP(6), lock_version=lock_version+1 WHERE id=? AND lock_version=?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, assigneeId, Types.BIGINT);
+            statement.setLong(2, id);
+            statement.setInt(3, lockVersion);
+            if (statement.executeUpdate() != 1) throw new OptimisticLockException();
+            return findById(id).orElseThrow(() -> new DataAccessException("Assigned TestRun could not be read"));
+        } catch (SQLException e) { throw new DataAccessException("Assign TestRun", e); }
     }
 
     @Override public TestRun update(TestRun value) {
@@ -103,7 +127,7 @@ public final class JdbcTestRunDao implements TestRunDao {
                     rs.getObject("created_by", Long.class),
                     rs.getObject("created_at", LocalDateTime.class),
                     rs.getObject("updated_at", LocalDateTime.class),
-                    JdbcValues.version(rs));
+                    JdbcValues.version(rs), rs.getObject("assignee_id", Long.class));
         } catch (IllegalArgumentException e) { throw new SQLException("Unsupported TestRun enum", "22000", e); }
     }
 }

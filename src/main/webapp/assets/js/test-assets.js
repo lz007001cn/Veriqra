@@ -41,6 +41,7 @@
   let selectedListTarget = null;
   let renderedListScope = null;
   let aiCasesOpen = false;
+  let requirementAssistOpen = false;
   const uncertainWrites = new Map();
   const draftOwner = 'test-assets';
   const root = $('#asset-workspace');
@@ -103,7 +104,7 @@
       priority: $('#asset-priority').val(), status: $('#asset-status').val(), preconditions: $('#asset-preconditions').val(),
       steps: $('#step-editor .step-editor-row').map(function () { return { action: $(this).find('.step-action').val(), expected: $(this).find('.step-expected').val() }; }).get() });
   }
-  function dirty() { return !!(window.VeriqraAiCases && window.VeriqraAiCases.hasDraft()) || writing || uncertainWrites.size > 0 || !!(pendingLink && pendingLink.uncertain) || (formBaseline !== null && draftValue() !== null && formBaseline !== draftValue()); }
+  function dirty() { return !!(window.VeriqraAiCases && window.VeriqraAiCases.hasDraft()) || !!(window.VeriqraRequirementAssist && window.VeriqraRequirementAssist.hasDraft()) || writing || uncertainWrites.size > 0 || !!(pendingLink && pendingLink.uncertain) || (formBaseline !== null && draftValue() !== null && formBaseline !== draftValue()); }
   function confirmDiscard() { return !dirty() || window.confirm(t('r2Assets.discardDraft', null, 'Discard the unsaved draft?')); }
   function guard() {
     if (window.VeriqraDraftGuard) window.VeriqraDraftGuard.register(draftOwner, { dirty: dirty, clear: function () { formBaseline = null; pendingLink = null; uncertainWrites.clear(); } });
@@ -309,7 +310,7 @@
     return link;
   }
   function syncAssetPrimaryEmphasis() {
-    const inlineTask = !$('#asset-detail-panel').hasClass('d-none') && (aiCasesOpen || !$('#trace-form').hasClass('d-none'));
+    const inlineTask = !$('#asset-detail-panel').hasClass('d-none') && (aiCasesOpen || requirementAssistOpen || !$('#trace-form').hasClass('d-none'));
     $('#asset-edit, #asset-ready, #asset-primary-actions a, #asset-primary-actions button, #asset-workflow-next a, #asset-workflow-next button').each(function () {
       const button = $(this);
       if (button.hasClass('asset-primary-demoted')) button.removeClass('asset-primary-demoted btn-outline-primary').addClass('btn-primary');
@@ -330,6 +331,8 @@
     $('#asset-traces button, #asset-primary-actions button').prop('disabled', writing);
     $('#requirement-link-open').prop('disabled', !writable() || writing || traceState !== 'loaded' || aiCasesOpen);
     $('#requirement-ai-open').prop('disabled', !writable() || writing || !$('#trace-form').hasClass('d-none'));
+    $('#requirement-review-open, #requirement-coverage-open').prop('disabled', !writable() || writing || !$('#trace-form').hasClass('d-none'));
+    if (permissionState === 'error' && window.VeriqraRequirementAssist) window.VeriqraRequirementAssist.clear();
     $('#asset-workflow-next button').prop('disabled', writing);
     $('#asset-partial-link-retry').prop('disabled', writing || !canWrite());
     $('#asset-permission-note').toggleClass('d-none', !!canWrite()).text(permissionState === 'loading' ? t('r2Assets.permissionsLoading', null, 'Checking project permissions…')
@@ -364,8 +367,9 @@
   function focusHeading(selector) { $(selector).attr('tabindex', '-1').trigger('focus'); }
   function reset() {
     if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
+    if (window.VeriqraRequirementAssist) window.VeriqraRequirementAssist.clear();
     generation++;
-    renderedListScope = null; selectedListTarget = null; aiCasesOpen = false;
+    renderedListScope = null; selectedListTarget = null; aiCasesOpen = false; requirementAssistOpen = false;
     rows = [];
     detail = null;
     detailId = null;
@@ -413,6 +417,7 @@
     if (!projectId || !active()) return;
     rememberListPosition(); renderedListScope = null; restoreListFilters();
     if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
+    if (window.VeriqraRequirementAssist) window.VeriqraRequirementAssist.clear();
     const token = ++generation;
     detail = null; detailId = null; writing = false; formBaseline = null;
     pendingLink = null;
@@ -500,7 +505,11 @@
   async function openDetail(id, message) {
     rememberListPosition(id);
     const token = ++generation;
-    if (!sameId(detailId, id)) aiCasesOpen = false;
+    if (!sameId(detailId, id)) {
+      aiCasesOpen = false; requirementAssistOpen = false;
+      if (window.VeriqraAiCases) window.VeriqraAiCases.clear();
+      if (window.VeriqraRequirementAssist) window.VeriqraRequirementAssist.clear();
+    }
     detail = null;
     detailId = String(id);
     currentLinks = [];
@@ -626,7 +635,8 @@
     syncAssetPrimaryEmphasis();
   }
   function renderPrimaryActions() {
-    if (window.VeriqraAiCases) window.VeriqraAiCases.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable() } : null);
+    if (window.VeriqraAiCases) window.VeriqraAiCases.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable(), actorId: qaContext && qaContext.actorId } : null);
+    if (window.VeriqraRequirementAssist) window.VeriqraRequirementAssist.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable(), actorId: qaContext && qaContext.actorId, onAdoptCriteria: adoptAiCriteria } : null);
     const current = routeContext();
     const target = $('#asset-primary-actions').empty().toggleClass('requirement-actions', view === 'requirements');
     if (current.sourceRequirementId && view === 'test-cases') target.append(linkTo('requirements',
@@ -658,6 +668,10 @@
         .text(t('requirements.generateCases')).on('click', function () {
           if (writable() && !writing && $('#trace-form').hasClass('d-none') && window.VeriqraAiCases) window.VeriqraAiCases.open();
         }));
+      if (window.VeriqraRequirementAssist) [['review', 'requirement-review-open', 'reviewTitle', 'Check requirement'], ['coverage', 'requirement-coverage-open', 'coverageTitle', 'Find coverage gaps']].forEach(function (entry) {
+        target.append($('<button id="' + entry[1] + '" type="button" class="btn btn-outline-secondary" aria-controls="ai-requirement-assist-panel">')
+          .text(t('aiRequirementAssist.' + entry[2], null, entry[3])).on('click', function () { if (writable() && !writing && $('#trace-form').hasClass('d-none')) window.VeriqraRequirementAssist.open(entry[0]); }));
+      });
       const hasCurrent = currentLinks.some(function (entry) { return entry.status !== 'REMOVED'; });
       target.append(linkTo('test-cases', { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('requirements.newCase'), detail.row.status === 'ACTIVE' && traceState === 'loaded' && !hasCurrent).removeClass('btn-sm'),
         $('<button id="requirement-link-open" type="button" class="btn btn-outline-secondary" aria-controls="trace-form">')
@@ -872,6 +886,22 @@
   function renumberSteps() {
     $('#step-editor .step-number').each(function (index) { $(this).text(t('assets.stepNumber', { number: index + 1 }, 'Step {number}')); });
   }
+  async function adoptAiCriteria(value) {
+    if (view !== 'requirements' || !detail || !writable() || writing || !sameId(value.requirementId, detail.row.id) || !Array.isArray(value.criteria) || !value.criteria.length) throw { status: 409 };
+    const token = generation, ownerProject = projectId, ownerActor = qaContext && qaContext.actorId;
+    const permissions = await window.VeriqraQaContext.load(projectId, true);
+    if (!valid(token) || !sameId(ownerProject, projectId)) throw { status: 409 };
+    if (!permissions.canWriteAssets || !sameId(permissions.actorId, ownerActor)) { permissionState = 'error'; qaContext = null; updateControls(); throw { status: 403 }; }
+    const current = await api.get(base('requirements') + '/' + encodeURIComponent(value.requirementId));
+    if (!valid(token) || !detail || !sameId(current.id, detail.row.id) || current.version !== value.expectedVersion || current.status === 'ARCHIVED') throw { status: 409 };
+    if ($('#asset-form').hasClass('d-none')) { detail.row = current; showForm(true); }
+    else if (!editing || detail.row.version !== current.version) throw { status: 409 };
+    const original = String($('#asset-description').val() || '');
+    const appended = value.criteria.filter(function (criterion) { return typeof criterion === 'string' && criterion.trim(); }).map(function (criterion) { return '- ' + criterion.trim(); }).join('\n');
+    if (!appended) throw { status: 409 };
+    $('#asset-description').val(original + (original ? '\n\n' : '') + t('aiRequirementAssist.adoptedHeading', null, 'Acceptance criteria (AI suggestions)') + '\n' + appended).trigger('focus');
+    notice(t('aiRequirementAssist.draftReady', null, 'Selected criteria were appended to an unsaved edit draft. Review and save the requirement when ready.'));
+  }
   function showForm(update, context) {
     if (!projectId || !active() || !canWrite() || writing || (update && !writable())) return;
     generation++;
@@ -1035,6 +1065,16 @@
     const owner = event.detail || {};
     if (view !== 'requirements' || !detail || !sameId(owner.projectId, projectId) || !sameId(owner.requirementId, detail.row.id)) return;
     aiCasesOpen = owner.open === true; updateControls();
+  });
+  document.addEventListener('veriqra:ai-requirement-visibility', function (event) {
+    const owner = event.detail || {};
+    if (view !== 'requirements' || !detail || !sameId(owner.projectId, projectId) || !sameId(owner.requirementId, detail.row.id)) return;
+    requirementAssistOpen = owner.open === true; updateControls();
+  });
+  document.addEventListener('veriqra:ai-assist-permission-lost', function (event) {
+    const owner = event.detail || {};
+    if (!sameId(owner.projectId, projectId) || !qaContext || !sameId(owner.actorId, qaContext.actorId)) return;
+    permissionState = 'error'; qaContext = null; updateControls();
   });
   $('#asset-back').on('click', function () { if (!writing && confirmDiscard()) return list(); });
   $('#asset-new').on('click', function () {

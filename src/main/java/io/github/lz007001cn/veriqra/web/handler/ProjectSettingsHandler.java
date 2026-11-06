@@ -2,6 +2,7 @@ package io.github.lz007001cn.veriqra.web.handler;
 
 import io.github.lz007001cn.veriqra.model.ProjectRole;
 import io.github.lz007001cn.veriqra.service.ProjectSettingsService;
+import io.github.lz007001cn.veriqra.service.exception.MembershipConflictException;
 import io.github.lz007001cn.veriqra.web.*;
 import jakarta.servlet.http.*;
 import java.io.IOException;
@@ -36,6 +37,17 @@ public final class ProjectSettingsHandler {
             JsonHttp.method(res,method,"DELETE");
             service.revokeManager(actor,project,JsonHttp.positiveId(path[4]));
             res.setStatus(204);return;
+        }
+        if (path.length == 5 && path[3].equals("members")) {
+            JsonHttp.method(res, method, "PUT");
+            Long memberId = JsonHttp.positiveId(path[4]);
+            var change = JsonHttp.read(req, ProjectSettingsService.MemberChange.class);
+            try {
+                JsonHttp.write(res, 200, service.updateProjectMember(actor, project, memberId, change));
+            } catch (MembershipConflictException conflict) {
+                throw new HttpFailure(409, conflict.code(), conflict.getMessage());
+            }
+            return;
         }
         throw new HttpFailure(404,"NOT_FOUND","Resource not found");
     }

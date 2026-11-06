@@ -1,6 +1,7 @@
 package io.github.lz007001cn.veriqra.service;
 
 import io.github.lz007001cn.veriqra.exception.DataAccessException;
+import io.github.lz007001cn.veriqra.exception.OptimisticLockException;
 import io.github.lz007001cn.veriqra.model.*;
 import io.github.lz007001cn.veriqra.service.exception.*;
 import io.github.lz007001cn.veriqra.service.support.*;
@@ -92,6 +93,107 @@ public final class DefaultProjectSettingsService implements ProjectSettingsServi
         });
     }
 
+    @Override public MemberView updateProjectMember(Long actorId, Long projectId, Long memberId, MemberChange change) {
+        long project = id(projectId, "projectId"), member = id(memberId, "memberId");
+        if (actorId == null || actorId <= 0) throw new ForbiddenException("An authenticated actor is required");
+        ServiceValidation.required(change, "membership change");
+        ProjectRole role = ServiceValidation.required(change.projectRole(), "projectRole");
+        MembershipStatus status = ServiceValidation.required(change.status(), "status");
+        Long replacement = change.replacementAssigneeId();
+        if (replacement != null) id(replacement, "replacementAssigneeId");
+        if (change.expectedVersion() == null || change.expectedVersion() < 0) {
+            throw new ValidationException("expectedVersion must be nonnegative");
+        }
+
+        return transactions.execute(c -> {
+            var d = factory.create(c);
+            // Assignment writers lock the project before membership and the affected work rows.
+            // An exclusive project lock makes the set of assignments stable for the whole handoff.
+            activeProjectForUpdate(d, project);
+            var participants = new TreeSet<>(List.of(actorId, member));
+            if (replacement != null) participants.add(replacement);
+            var users = new HashMap<Long, User>();
+            var members = new HashMap<Long, ProjectMember>();
+            for (Long userId : participants) {
+                d.users().findByIdForShare(userId).ifPresent(user -> users.put(userId, user));
+            }
+            for (Long userId : participants) {
+                var row = userId == member ? d.members().findForUpdate(project, userId) : d.members().findForShare(project, userId);
+                row.ifPresent(value -> members.put(userId, value));
+            }
+
+            User actor = users.get(actorId);
+            if (actor == null || actor.status() != UserStatus.ACTIVE) throw new ForbiddenException("Active user is required");
+            boolean admin = actor.systemRole() == SystemRole.ADMIN;
+            if (!admin && !activeManager(d, project, actorId)) throw new ForbiddenException("Project manager access is required");
+            ProjectMember current = members.get(member);
+            if (current == null) throw new NotFoundException("Project member does not exist");
+            User target = users.get(member);
+            if (target == null) throw new NotFoundException("Member user does not exist");
+            if (!Objects.equals(current.lockVersion(), change.expectedVersion())) throw staleMembership();
+            if (current.status() != MembershipStatus.ACTIVE) {
+                throw new MembershipConflictException("MEMBER_INACTIVE", "Only active project memberships can be edited");
+            }
+
+            boolean departing = status == MembershipStatus.INACTIVE;
+            boolean roleChanged = current.projectRole() != role;
+            if (departing && roleChanged) throw new ValidationException("Deactivation must preserve the existing project role");
+            if (departing && activeManager(d, project, member)) {
+                throw new MembershipConflictException("MEMBER_MANAGER_APPOINTMENT_ACTIVE", "Adjust this member's manager appointment before deactivation");
+            }
+            if (roleChanged && !admin && actorId == member) {
+                throw new MembershipConflictException("MEMBER_SELF_ROLE_CHANGE", "A project manager cannot change their own project role");
+            }
+            if (!departing && target.status() != UserStatus.ACTIVE) {
+                throw new MembershipConflictException("MEMBER_ACCOUNT_DISABLED", "A disabled account cannot change its project role");
+            }
+            boolean needsDefectHandoff = current.projectRole() == ProjectRole.DEVELOPER && (departing || roleChanged);
+            if (!needsDefectHandoff && replacement != null) {
+                throw new ValidationException("A replacement is only accepted when the member stops being a developer");
+            }
+            if (!departing && !roleChanged) return view(target, current);
+            if (current.projectRole() == ProjectRole.TESTER && d.testRuns().hasActiveAssignment(project, member)) {
+                throw new MembershipConflictException("RUN_ASSIGNMENTS_EXIST", "Reassign this member's unfinished test runs before changing their membership");
+            }
+
+            try {
+                if (needsDefectHandoff) {
+                    handoffDefects(d, project, member, replacement, users.get(replacement), members.get(replacement));
+                }
+                var updated = d.members().update(new ProjectMember(project, member, role, status,
+                        current.joinedAt(), current.updatedAt(), change.expectedVersion()));
+                return view(target, updated);
+            } catch (OptimisticLockException stale) {
+                throw staleMembership();
+            }
+        });
+    }
+
+    private static void handoffDefects(ServiceDaos d, long project, long member, Long replacement,
+                                       User replacementUser, ProjectMember replacementMember) {
+        var openDefects = d.defects().listByProject(project).stream()
+                .filter(defect -> Objects.equals(defect.assigneeId(), member) && defect.status() != DefectStatus.CLOSED)
+                .sorted(Comparator.comparing(Defect::id)).toList();
+        if (replacement == null) {
+            if (openDefects.isEmpty()) return;
+            throw new MembershipConflictException("MEMBER_DEFECT_HANDOFF_REQUIRED", "Choose a developer to receive this member's unclosed defects");
+        }
+        if (replacement == member || replacementUser == null || replacementUser.status() != UserStatus.ACTIVE
+                || replacementMember == null || replacementMember.status() != MembershipStatus.ACTIVE
+                || replacementMember.projectRole() != ProjectRole.DEVELOPER) {
+            throw new MembershipConflictException("MEMBER_REPLACEMENT_INELIGIBLE", "Choose another active developer from this project");
+        }
+        for (Defect defect : openDefects) {
+            d.defects().update(new Defect(defect.id(), defect.projectId(), defect.keyNo(), defect.title(),
+                    defect.description(), defect.severity(), defect.priority(), defect.status(), defect.reporterId(),
+                    replacement, defect.resolutionNote(), defect.createdAt(), defect.updatedAt(), defect.lockVersion()));
+        }
+    }
+
+    private static MembershipConflictException staleMembership() {
+        return new MembershipConflictException("MEMBER_VERSION_CHANGED", "Project membership changed. Reload it before saving");
+    }
+
     private Project readableProject(ServiceDaos d, Long actorId, long projectId) {
         Project project = d.projects().findById(projectId).orElseThrow(() -> new NotFoundException("Project does not exist"));
         access.requireProjectRead(d.users(), d.members(), actorId, projectId);
@@ -128,6 +230,10 @@ public final class DefaultProjectSettingsService implements ProjectSettingsServi
     }
     private static MemberView view(ServiceDaos d, ProjectMember member) {
         User user = d.users().findById(member.userId()).orElseThrow(() -> new NotFoundException("Member user does not exist"));
-        return new MemberView(user.id(), user.username(), user.displayName(), member.projectRole(), member.status(), user.status());
+        return view(user, member);
+    }
+    private static MemberView view(User user, ProjectMember member) {
+        return new MemberView(user.id(), user.username(), user.displayName(), member.projectRole(), member.status(),
+                user.status(), member.lockVersion());
     }
 }

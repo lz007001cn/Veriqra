@@ -52,6 +52,7 @@ class ProjectAccessPolicyTest {
                         ? Optional.of(value) : Optional.empty();
             }
             public Optional<ProjectMember> findForShare(Long projectId, Long userId) { return find(projectId, userId); }
+            public Optional<ProjectMember> findForUpdate(Long projectId, Long userId) { return find(projectId, userId); }
             public boolean existsRecord(Long projectId, Long userId) { return find(projectId, userId).isPresent(); }
             public List<ProjectMember> listByProject(Long projectId) { return List.of(); }
             public List<ProjectMember> listByUser(Long userId, MembershipStatus status) { return List.of(); }

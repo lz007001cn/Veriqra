@@ -10,6 +10,10 @@ public final class RequirementHandler {
     public static void handle(HttpServletRequest req, HttpServletResponse res, WebServices s,
                               Long actor, Long project, String[] path) throws IOException {
         String method = req.getMethod();
+        if (path.length == 6 && (path[5].equals("ai-review") || path[5].equals("ai-coverage"))) {
+            AiAssistanceHandler.handle(req, res, actor, project, path);
+            return;
+        }
         if (path.length == 5 && path[4].equals("coverage")) {
             JsonHttp.method(res, method, "GET");
             if (!req.getParameterMap().isEmpty())

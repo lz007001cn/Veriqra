@@ -1,5 +1,6 @@
 package io.github.lz007001cn.veriqra.service.ai;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -14,9 +15,11 @@ public record AiRunSummaryInput(Long projectId, Long runId, String runName, Stri
     public record StepEvidence(Integer stepOrder, String action, String expectedResult) { }
     public record CaseEvidence(Long runCaseId, Long testCaseId, String title, String outcome,
             Integer attemptNo, String description, String preconditions, List<StepEvidence> steps,
-            String actualResult, String failureMessage) {
+            String actualResult, String failureMessage,
+            @JsonInclude(JsonInclude.Include.NON_NULL) JunitFailureContext junitFailure) {
         public CaseEvidence { steps = List.copyOf(steps); }
     }
+    public record JunitFailureContext(int linkedDefectCount, int unclosedDefectCount) { }
     public record DefectEvidence(Long defectId, Long keyNo, String title, String status,
             String severity, String resolutionNote, LocalDateTime updatedAt) { }
 }

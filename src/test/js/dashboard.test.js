@@ -80,6 +80,20 @@ function descendants(node) { return [node, ...node.children.flatMap(child => chi
 function links(ui, id = '#dashboard-attention-list') { return descendants(ui.$(id)[0]).filter(node => node.tag === 'a'); }
 function latestChart(ui) { return ui.charts.at(-1).settings.at(-1); }
 
+test('my work links only the current actor’s open responsibilities in the selected project', async () => {
+  const ui = browser(); ui.load();
+  await ui.lists(rows([{ ...run(40), assigneeId: 1 }, { ...run(41, 'COMPLETED'), assigneeId: 1 }, { ...run(42), assigneeId: 2 }], [], [
+    { id: 31, keyNo: 1, title: 'Assigned', status: 'OPEN', assigneeId: 1 },
+    { id: 32, keyNo: 2, title: 'Reported', status: 'RESOLVED', reporterId: 1 },
+    { id: 33, keyNo: 3, title: 'Closed', status: 'CLOSED', reporterId: 1, assigneeId: 1 },
+    { id: 34, keyNo: 4, title: 'Other tester', status: 'RESOLVED', reporterId: 2 }
+  ]));
+  const targets = links(ui, '#dashboard-my-work-items').map(link => new URL(link.attrs.href));
+  assert.deepEqual(targets.map(target => [target.hash, target.searchParams.get('runId') || target.searchParams.get('defectId')]),
+    [['#runs', '40'], ['#defects', '31'], ['#defects', '32']]);
+  assert.ok(targets.every(target => target.searchParams.get('projectId') === '7'));
+});
+
 test('four cards use real run outcomes, active confirmed coverage and project open defects', async () => {
   const ui = browser(); ui.load();
   await ui.lists(rows([run(40)], [{ id: 1, status: 'ACTIVE' }, { id: 2, status: 'ACTIVE' }, { id: 3, status: 'DRAFT' }, { id: 4, status: 'ARCHIVED' }],

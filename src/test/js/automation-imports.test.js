@@ -11,7 +11,8 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 
 // Run the production module with deferred network responses, matching the other core browser fixtures.
 function browser() {
-  const nodes = new Map(), calls = [], listeners = new Map();
+  const nodes = new Map(), calls = [], listeners = new Map(), events = [];
+  const location = { hash: '#automation' };
   let locale = 'en';
   class Element {
     constructor(tag = 'div', attrs = {}) {
@@ -39,7 +40,7 @@ function browser() {
     on(names, fn) { return this.each(node => names.split(' ').forEach(name => { if (!node.handlers.has(name)) node.handlers.set(name, []); node.handlers.get(name).push(fn); })); }
   }
   const documentNode = new Element('document');
-  const document = { addEventListener(name, fn) { listeners.set(name, fn); } };
+  const document = { addEventListener(name, fn) { listeners.set(name, fn); }, dispatchEvent(event) { events.push(event); } };
   function $(selector) {
     if (selector === document) return new Collection([documentNode]);
     if (typeof selector !== 'string') return new Collection([selector]);
@@ -52,7 +53,7 @@ function browser() {
     return new Collection([nodes.get(selector.slice(1))]);
   }
   const api = {};
-  for (const method of ['get', 'post', 'put']) api[method] = (url, body) => {
+  for (const method of ['get', 'post', 'put', 'xml']) api[method] = (url, body) => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
     calls.push({ method, url, body, resolve, reject }); return promise;
@@ -61,14 +62,15 @@ function browser() {
     t: (key, values, fallback) => (catalogs[locale][key] || fallback || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''),
     enumLabel: String, formatNumber: String
   } };
-  vm.runInNewContext(source, { window, document, jQuery: $, URLSearchParams, crypto: global.crypto });
+  vm.runInNewContext(source, { window, document, location, jQuery: $, URLSearchParams, crypto: global.crypto,
+    CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } } });
   const fire = (node, name = 'click') => Promise.all((node.handlers.get(name) || []).map(fn => fn.call(node, { preventDefault() {} })));
   function emit(name, detail) {
     (documentNode.handlers.get(name) || []).forEach(fn => fn({ originalEvent: { detail } }));
     listeners.get(name)?.({ detail });
   }
   emit('veriqra:project', { project: { id: 7 } }); emit('veriqra:view', { view: 'automation' });
-  return { $, nodes, calls, fire, emit, locale(value) { locale = value; emit('veriqra:localechange', {}); } };
+  return { $, nodes, calls, events, location, fire, emit, locale(value) { locale = value; emit('veriqra:localechange', {}); } };
 }
 
 const identity = { id: 20, source: 'JUNIT', namespace: 'suite', externalKey: 'example.Test' };
@@ -121,4 +123,34 @@ test('failed automation refresh cannot restore cached identity rows or clear its
   const retry = button(ui, 'automation-identities', catalogs['zh-CN']['common.retry']);
   ui.emit('veriqra:view', { view: 'dashboard' }); const requests = ui.calls.length;
   await ui.fire(retry); assert.equal(ui.calls.length, requests, 'A stale Retry does not fetch for another view');
+});
+
+test('JUnit success and replay show imported attempt counts before the optional run action', async () => {
+  for (const replayed of [false, true]) {
+    const ui = browser(); respondRows(ui, 0); await flush();
+    ui.$('#import-file')[0].files = [{ name: 'junit.xml', size: 1000 }];
+    await ui.fire(ui.$('#import-file')[0], 'change');
+    ui.$('#import-namespace').val('suite'); ui.$('#import-run-name').val('Imported run');
+    const preview = ui.fire(ui.$('#import-preview-button')[0]);
+    ui.calls.at(-1).resolve({ readyToImport: true, mappedResults: [{ testCase: caseRow,
+      result: { namespace: 'suite', externalKey: 'example.Test', outcome: 'PASS' } }], unknownIdentities: [], invalidEntries: [] });
+    await preview;
+    const importing = ui.fire(ui.$('#import-form')[0], 'submit');
+    const result = { testImport: { id: 51 }, run: { id: 52, name: 'Imported run', status: 'COMPLETED' }, runCases: [caseRow],
+      attempts: [{ outcome: 'FAIL' }, { outcome: 'PASS' }, { outcome: 'SKIPPED' }, { outcome: 'PASS' }], replayed };
+    ui.calls.at(-1).resolve(result); await importing;
+    assert.equal(ui.nodes.get('import-preview').all().length, 0);
+    assert.ok(ui.nodes.get('import-result').all().some(node => node.content === 'Passed 2 · Failed 1 · Skipped 1'));
+    assert.equal(ui.events.length, 0);
+    assert.equal(ui.calls.length, 5, 'Only the initial reads, preview and import have run');
+    if (replayed) {
+      ui.emit('veriqra:import-recovered', { projectId: 7, result });
+      ui.locale('zh-CN');
+      assert.ok(ui.nodes.get('import-result').all().some(node => node.content === '通过 2 · 失败 1 · 跳过 1'));
+    }
+    await ui.fire(button(ui, 'import-result', replayed ? '查看运行结果' : 'View run results'));
+    assert.equal(ui.events[0].type, 'veriqra:open-run');
+    assert.equal(ui.events[0].detail.projectId, '7'); assert.equal(ui.events[0].detail.runId, 52);
+    assert.equal(ui.location.hash, '#runs'); assert.equal(ui.calls.length, 5);
+  }
 });

@@ -79,6 +79,12 @@ class I18nResourcesTest {
                         key = "projectSettings." + key;
                     if (script.getFileName().toString().equals("ai-run-summary.js") && !key.contains("."))
                         key = "aiSummary." + key;
+                    if (script.getFileName().toString().equals("ai-requirement-assist.js") && !key.contains("."))
+                        key = "aiRequirementAssist." + key;
+                    if (script.getFileName().toString().equals("ai-defect-analysis.js") && !key.contains("."))
+                        key = "aiDefect." + key;
+                    if (script.getFileName().toString().equals("defect-comments.js") && !key.contains("."))
+                        key = "defectComments." + key;
                     assertTrue(english.containsKey(key), script + ": " + key);
                 }
             }

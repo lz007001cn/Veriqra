@@ -22,14 +22,15 @@
   let workflowRequest = 0;
   function mayLeave() { return !window.VeriqraDraftGuard || window.VeriqraDraftGuard.allowLeave(); }
   const routeIds = ['projectId', 'requirementId', 'testCaseId', 'planId', 'runId', 'runCaseId', 'attemptId', 'defectId',
-    'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId', 'importId'];
+    'sourceRequirementId', 'sourceTestCaseId', 'sourcePlanId', 'failureAttemptId', 'importId', 'retestRunId', 'retestRunCaseId', 'retestPassAttemptId', 'acceptanceId'];
   const routeFields = {
     requirements: ['requirementId', 'sourceTestCaseId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId', 'defectId'],
     'test-cases': ['testCaseId', 'sourceRequirementId', 'sourcePlanId', 'runId', 'runCaseId', 'attemptId', 'defectId'],
     'test-plans': ['planId', 'sourceTestCaseId'],
     runs: ['runId', 'runCaseId', 'attemptId', 'sourcePlanId', 'sourceTestCaseId', 'defectId', 'failureAttemptId'],
-    defects: ['defectId', 'runId', 'runCaseId', 'failureAttemptId'],
-    automation: ['importId', 'runId']
+    defects: ['defectId', 'runId', 'runCaseId', 'failureAttemptId', 'retestRunId', 'retestRunCaseId', 'retestPassAttemptId'],
+    automation: ['importId', 'runId'],
+    'release-acceptance': ['acceptanceId']
   };
   function routeUrl() {
     // The fallback keeps source-only previews and simple test harnesses usable.
@@ -102,7 +103,7 @@
   function announce(name, detail) { document.dispatchEvent(new CustomEvent('veriqra:' + name, { detail: detail })); }
   function setView(view, silent) {
     view = normalizeView(view);
-    const nextView = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings'].includes(view) ? view : 'dashboard';
+    const nextView = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings', 'release-acceptance'].includes(view) ? view : 'dashboard';
     if (nextView !== currentView) {
       closeProjectCreation(false);
       dismissProjectCreated();
@@ -114,9 +115,10 @@
     $('[data-view]').removeClass('active').removeAttr('aria-current');
     $('[data-view="' + currentView + '"]').addClass('active').attr('aria-current', 'page');
     const labels = { dashboard: [t("shell.overview", null, 'OVERVIEW'), t("shell.projectDashboard", null, 'Project dashboard'), t("shell.yourCurrentQualityWorkspace", null, 'Your current quality workspace.')], requirements: [t("shell.testASSETS", null, 'TEST ASSETS'), t("common.requirements", null, 'Requirements'), t("shell.manageRequirementsAndTheirTestCoverage", null, 'Manage requirements and their test coverage.')], 'test-cases': [t("shell.testASSETS", null, 'TEST ASSETS'), t("common.testCases", null, 'Test cases'), t("shell.maintainCurrentTestDefinitionsAndSteps", null, 'Maintain current test definitions and steps.')], 'test-plans': [t("shell.planning", null, 'PLANNING'), t("common.testPlans", null, 'Test plans'), t("shell.defineTheCasesToExecute", null, 'Define the cases to execute.')], runs: [t("shell.execution", null, 'EXECUTION'), t("common.testRuns", null, 'Test runs'), t("shell.inspectFrozenSnapshotsAndRecordAttempts", null, 'Inspect frozen snapshots and record attempts.')], defects: [t("shell.quality", null, 'QUALITY'), t("common.defects", null, 'Defects'), t("shell.trackFailuresRetestsAndClosureEvidence", null, 'Track failures, retests and closure evidence.')], automation: [t("shell.automation", null, 'AUTOMATION'), t("common.automationImports", null, 'Automation & imports'), t("shell.confirmMappingsAndImportJUnitResults", null, 'Confirm mappings and import JUnit results.')], 'project-settings': [t('projectSettings.eyebrow', null, 'PROJECT'), t('projectSettings.title', null, 'Project settings'), t('projectSettings.description', null, 'Manage project members and managers.')] };
+    labels['release-acceptance'] = [t('shell.quality', null, 'QUALITY'), t('releaseAcceptance.title', null, 'Release acceptance'), ''];
     $('#view-eyebrow').text(labels[currentView][0]);
     $('#view-title').text(labels[currentView][1]);
-    $('#view-description').text(labels[currentView][2]);
+    $('#view-description').text(labels[currentView][2]).toggleClass('d-none', !labels[currentView][2]);
     document.title = labels[currentView][1] + ' · Veriqra';
     $('#project-dashboard').toggleClass('d-none', currentView !== 'dashboard' || !selectedId);
     $('#asset-workspace').toggleClass('d-none', !['requirements', 'test-cases'].includes(currentView) || !selectedId);
@@ -124,6 +126,7 @@
     $('#defect-workspace').toggleClass('d-none', currentView !== 'defects' || !selectedId);
     $('#automation-workspace').toggleClass('d-none', currentView !== 'automation' || !selectedId);
     $('#project-settings-workspace').toggleClass('d-none', currentView !== 'project-settings' || !selectedId);
+    $('#release-acceptance-workspace').toggleClass('d-none', currentView !== 'release-acceptance' || !selectedId);
     $('#sidebar').removeClass('open');
     $('#sidebar-toggle').attr('aria-expanded', 'false');
     if (!silent) {
@@ -153,7 +156,7 @@
     activeProject = null;
     selectedId = null;
     picker.empty().append($('<option>').val('').attr('data-i18n', 'shell.loadingProjects').text(t("shell.loadingProjects", null, 'Loading projects…'))).prop('disabled', true);
-    $('#project-dashboard, #empty-projects, #asset-workspace, #execution-workspace, #defect-workspace, #automation-workspace, #project-settings-workspace').addClass('d-none');
+    $('#project-dashboard, #empty-projects, #asset-workspace, #execution-workspace, #defect-workspace, #automation-workspace, #project-settings-workspace, #release-acceptance-workspace').addClass('d-none');
     $('#project-key, #project-title, #project-description, #project-status').text('');
   }
   function showProject(project) {
@@ -165,6 +168,7 @@
     $('#defect-workspace').toggleClass('d-none', currentView !== 'defects');
     $('#automation-workspace').toggleClass('d-none', currentView !== 'automation');
     $('#project-settings-workspace').toggleClass('d-none', currentView !== 'project-settings');
+    $('#release-acceptance-workspace').toggleClass('d-none', currentView !== 'release-acceptance');
     $('#project-title').text(project.name);
     $('#project-key').text(project.projectKey);
     $('#project-description').text(project.description || t("shell.noProjectDescriptionHasBeenAdded", null, 'No project description has been added.'));
@@ -185,7 +189,7 @@
     activeProject = null;
     $('#project-created').addClass('d-none');
     announce('project', { project: null });
-    $('#project-dashboard, #asset-workspace, #execution-workspace, #defect-workspace, #automation-workspace, #project-settings-workspace').addClass('d-none');
+    $('#project-dashboard, #asset-workspace, #execution-workspace, #defect-workspace, #automation-workspace, #project-settings-workspace, #release-acceptance-workspace').addClass('d-none');
     // Set the module view while no project is selected; verified project delivery then loads it once.
     setView(currentView);
     picker.prop('disabled', true);
@@ -229,7 +233,7 @@
           announce('project', { project: null });
           rememberProject(null);
           picker.append($('<option>').val('').attr('data-i18n', 'shell.noProjectsAvailable').text(t("shell.noProjectsAvailable", null, 'No projects available')));
-          $('#project-dashboard, #asset-workspace, #execution-workspace, #defect-workspace, #automation-workspace, #project-settings-workspace').addClass('d-none');
+          $('#project-dashboard, #asset-workspace, #execution-workspace, #defect-workspace, #automation-workspace, #project-settings-workspace, #release-acceptance-workspace').addClass('d-none');
           $('#empty-projects').removeClass('d-none');
           return;
         }
@@ -404,7 +408,7 @@
   });
   function renderProjectLinks() {
     $('#project-setup-link').attr('href', window.VeriqraQaNavigation.href('project-settings', { projectId: selectedId || desiredProject }));
-    ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings'].forEach(function (view) {
+    ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings', 'release-acceptance'].forEach(function (view) {
       $('[data-view="' + view + '"]').attr('href', window.VeriqraQaNavigation.href(view, { projectId: selectedId || desiredProject }));
     });
   }

@@ -39,8 +39,36 @@
     $('#dashboard-summary-status').addClass('d-none');
     $('#dashboard-summary-retry').addClass('d-none').prop('disabled', false);
     $('#dashboard-attention-list').empty();
+    $('#dashboard-my-work').addClass('d-none');
+    $('#dashboard-my-work-items').empty();
     $('#dashboard-results-chart').empty().attr('aria-label', t('common.loading', null, 'Loading…'));
     $('#qa-next-step').empty().append($('<p>').text(t('r2.loadingNext')));
+  }
+  function renderMyWork(value) {
+    const context = value.context, data = value.data, actorId = String(context.actorId);
+    if (context.projectStatus !== 'ACTIVE') return;
+    const target = $('#dashboard-my-work-items').empty();
+    const groups = [
+      { title: 'dashboard.myRuns', view: 'runs', id: 'runId', rows: context.canWriteAssets
+        ? data.runs.filter(function (row) { return row.status === 'IN_PROGRESS' && String(row.assigneeId) === actorId; }) : [] },
+      { title: 'dashboard.myDefects', view: 'defects', id: 'defectId', rows: data.defects.filter(function (row) {
+        return String(row.assigneeId) === actorId && ['OPEN', 'IN_PROGRESS', 'REOPENED'].includes(row.status);
+      }) },
+      { title: 'dashboard.myRetests', view: 'defects', id: 'defectId', rows: context.canWriteAssets
+        ? data.defects.filter(function (row) { return row.status === 'RESOLVED' && String(row.reporterId) === actorId; }) : [] }
+    ];
+    for (const group of groups) {
+      if (!group.rows.length) continue;
+      const list = $('<ul class="mb-2">');
+      group.rows.forEach(function (row) {
+        const title = group.view === 'runs' ? row.name : 'BUG-' + String(row.keyNo).padStart(3, '0') + ' · ' + row.title;
+        list.append($('<li>').append(routeLink(title, group.view, { [group.id]: row.id })));
+      });
+      target.append($('<h3 class="fs-6">').text(t(group.title)), list);
+    }
+    if (!groups.some(function (group) { return group.rows.length; }))
+      target.append($('<p class="text-secondary mb-0">').text(t('dashboard.noMyWork')));
+    $('#dashboard-my-work').removeClass('d-none');
   }
   function recommendation(value) {
     const data = value.data, context = value.context;
@@ -250,7 +278,7 @@
           if (!current(value)) return;
           if (!lists.every(Array.isArray)) throw new Error('Invalid lists');
           value.data = { requirements: lists[0], cases: lists[1], plans: lists[2], runs: lists[3], defects: lists[4] };
-          projectCounts(value); coverage(value); chooseRuns(value);
+          projectCounts(value); renderMyWork(value); coverage(value); chooseRuns(value);
         } catch (_) { failed(value); }
       }).fail(function () { failed(value); });
     } catch (_) { failed(value); }

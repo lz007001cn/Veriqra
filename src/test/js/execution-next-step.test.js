@@ -162,7 +162,7 @@ test('record-result shortcut focuses the outcome and does not submit an attempt'
   const ui = browser(); await loadCase(ui, '50', [], run(['NOT_RUN']));
   assert.match(ui.textOf(ui.$('#execution-case-progress')[0]), /follow the frozen steps below/);
   await ui.click(ui.find('#execution-case-navigation', 'Record a result'));
-  assert.equal(ui.$('#execution-outcome')[0].focused, true);
+  assert.equal(ui.$('#execution-outcome-option-pass')[0].focused, true);
   assert.equal(ui.calls.every(call => call.method === 'GET'), true);
 });
 

@@ -9,6 +9,8 @@ public interface ProjectMemberDao {
     Optional<ProjectMember> find(Long projectId, Long userId);
     /** Requires an outer transaction; stabilizes membership status/role during a business write. */
     Optional<ProjectMember> findForShare(Long projectId, Long userId);
+    /** Current exclusive read for role or status changes that affect assignments. */
+    Optional<ProjectMember> findForUpdate(Long projectId, Long userId);
     /** Row existence including INACTIVE; not an active-membership or authorization check. */
     boolean existsRecord(Long projectId, Long userId);
     List<ProjectMember> listByProject(Long projectId);

@@ -23,7 +23,6 @@ table.admin-table { min-width: 48rem; }
 .admin-ai-card h2 { font-size: 1.125rem; margin: 0 0 .75rem; }
 .admin-ai-card h3 { font-size: 1rem; margin-bottom: .75rem; }
 .admin-ai-card p:last-child { margin-bottom: 0; }
-.admin-ai-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .admin-ai-current { padding: .85rem 1rem; background: #f2f5fc; border-left: 3px solid #4668bf; margin-bottom: 1.25rem; }
 .admin-ai-current strong { display: block; margin-bottom: .25rem; font-size: .875rem; color: #4668bf; }
 .admin-ai-current code, .admin-ai-context dd, .admin-ai-quota td { overflow-wrap: anywhere; }
@@ -65,4 +64,4 @@ table.admin-table { min-width: 48rem; }
 .admin-ai-links { display: flex; gap: .6rem 1.25rem; flex-wrap: wrap; margin-top: 1rem; }
 .admin-ai-note { font-size: .875rem; color: var(--vq-text-secondary); }
 @media (max-width: 767px) { .admin-ai-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .admin-ai-billing { grid-template-columns: 1fr; } }
-@media (max-width: 575px) { .admin-ai-card { padding: 1rem; } .admin-ai-heading .btn { width: 100%; } .admin-ai-context { display: grid; gap: .75rem; } }
+@media (max-width: 575px) { .admin-ai-card { padding: 1rem; } #ai-connection-card .admin-ai-actions .btn { width: 100%; } .admin-ai-context { display: grid; gap: .75rem; } }

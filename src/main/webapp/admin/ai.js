@@ -120,7 +120,7 @@
     $('#ai-model').prop('disabled', saving || loading || !configuration?.writable);
     $('#ai-save').prop('disabled', !dirty || !draft.trim() || saving || loading || uncertain || needsReview || !configuration?.writable);
     $('#ai-reset').prop('disabled', !dirty || saving || loading || uncertain);
-    $('#ai-draft-note').text(dirty ? message('unsavedModel', 'Unsaved selection. The current model stays active until you save.') : message('modelSaved', 'This model is currently active.'));
+    $('#ai-draft-note').text(dirty ? message('unsavedModel', 'Unsaved selection.') : '').toggleClass('d-none', !dirty);
   }
   function sourceLabel(value) {
     if (value === 'configuration') return message('sourceServerConfiguration', 'Server configuration');
@@ -136,7 +136,7 @@
       .forEach(([key, label]) => metadata.append($('<div>').append(text('dt', label), text('dd', key === 'source' ? sourceLabel(configuration.source) : configuration[key]))));
     card.append(metadata);
     const form = $('<form id="ai-model-form" novalidate>');
-    const select = $('<select id="ai-model" class="form-select">').attr('aria-describedby', 'ai-model-help ai-draft-note');
+    const select = $('<select id="ai-model" class="form-select">').attr('aria-describedby', 'ai-draft-note');
     const candidates = Array.isArray(configuration.models) ? configuration.models.filter(item => item && typeof item.id === 'string' && item.id && item.id !== customChoice) : [];
     const seen = new Set();
     candidates.forEach(item => { if (!seen.has(item.id)) { const label = String(item.label || '').trim(); seen.add(item.id); select.append($('<option>').val(item.id).text(label && label !== item.id ? label + ' · ' + item.id : item.id)); } });
@@ -144,11 +144,11 @@
     if (!choice || choice !== customChoice && !seen.has(choice)) choice = seen.has(draft) ? draft : customChoice;
     select.val(choice).on('change', function () { choice = this.value; if (choice !== customChoice) draft = choice; else draft = $('#ai-custom-model').val(); failure = null; notice = null; showFeedback(); updateModelControls(); });
     const custom = $('<input id="ai-custom-model" class="form-control" type="text" maxlength="128" autocomplete="off" spellcheck="false">')
-      .attr({ pattern: 'gemini-[a-z0-9][a-z0-9._-]*', 'aria-describedby': 'ai-model-help ai-draft-note' }).val(choice === customChoice ? draft : '')
+      .attr({ pattern: 'gemini-[a-z0-9][a-z0-9._-]*', 'aria-describedby': 'ai-draft-note' }).val(choice === customChoice ? draft : '')
       .on('input', function () { draft = this.value; failure = null; notice = null; showFeedback(); updateModelControls(); });
     const fields = $('<div class="admin-ai-model-fields">').append($('<div>').append($('<label for="ai-model" class="form-label">').text(message('selectModel', 'Select model')), select),
       $('<div id="ai-custom-field">').append($('<label for="ai-custom-model" class="form-label">').text(message('customModelId', 'Model ID')), custom));
-    form.append(fields, text('p', message('modelHelp', 'Saving applies the model immediately to new AI requests. Selecting a model does not send a generation request.'), 'admin-ai-note mt-2').attr('id', 'ai-model-help'),
+    form.append(fields,
       text('p', '', 'small').attr({ id: 'ai-draft-note', role: 'status', 'aria-live': 'polite' }),
       $('<div class="admin-ai-actions">').append($('<button id="ai-save" type="submit" class="btn btn-primary">').text(saving ? message('saving', 'Saving…') : t('common.save', null, 'Save')),
         button('ai-reset', message('discardSelection', 'Reset selection'), () => { clearDraft(); failure = null; notice = null; render(); }, 'btn-outline-secondary')));
@@ -158,12 +158,11 @@
   }
   function renderConnection() {
     const card = section('ai-connection-card', message('connectionTitle', 'Google Cloud connection'));
-    const heading = $('<div class="admin-ai-heading">').append($('<div>').append(text('p', message('refreshHelp', 'Refresh reads Google connection and monitoring data for the current effective configuration. It does not generate AI content.'), 'admin-ai-note')),
-      $('<div class="admin-ai-actions mt-0">').append(button('ai-refresh', refreshing ? message('refreshing', 'Refreshing…') : message('refreshGoogle', 'Refresh Google data'), refreshGoogle)
+    const actions = $('<div class="admin-ai-actions mt-0">').append(button('ai-refresh', refreshing ? message('refreshing', 'Refreshing…') : message('refreshGoogle', 'Refresh Google data'), refreshGoogle)
         .prop('disabled', refreshing || saving || loading || !configuration.configured),
       button('ai-check-model', checking ? message('checkingModel', 'Checking model…') : message('checkModel', 'Check current model'), checkModel, 'btn-outline-secondary')
-        .prop('disabled', checking || saving || loading || !configuration.configured)));
-    card.append(heading); appendStatus(card, report?.connection);
+        .prop('disabled', checking || saving || loading || !configuration.configured));
+    card.append(actions); appendStatus(card, report?.connection);
     card.append(text('p', message('lastRefresh', 'Last refresh: {time}', { time: time(report?.checkedAt) }), 'admin-ai-note mt-2'));
     if (!configuration.configured) card.append(text('p', message('credentialsRequired', 'Configure the Google project and credentials on the server to read Google data.'), 'admin-ai-note'));
     card.append(disclosure('ai-model-check-help', message('modelCheckDetails', 'About the model check'),
@@ -219,7 +218,6 @@
   function renderQuotas() {
     const card = section('ai-quota-card', message('quotasTitle', 'Google quotas'));
     const data = report?.quotas; appendStatus(card, data);
-    card.append(text('p', message('quotaSummaryHelp', 'Project quota settings, not remaining calls. Expand a metric to inspect its limits and scope.'), 'admin-ai-note mt-2'));
     if (data?.capacityMode) card.append(text('p', message('capacityMode', 'Capacity mode: {mode}', {
       mode: ['SHARED_PAYGO', 'DSQ'].includes(data.capacityMode) ? message('sharedCapacity', 'Shared capacity (Standard PayGo)') : data.capacityMode }), 'admin-ai-note'));
     const items = isOk(data) && Array.isArray(data.items) ? data.items : [];
