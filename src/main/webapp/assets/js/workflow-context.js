@@ -67,7 +67,7 @@
         return input.pathname === new URL(path, document.baseURI).pathname;
       });
       if (adminPage) return new URL(adminPage, document.baseURI).href;
-      if (input.pathname !== fallback.pathname) return fallback.href;
+      if (input.pathname !== fallback.pathname && input.pathname !== new URL('./', fallback).pathname) return fallback.href;
       const views = ['dashboard', 'requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation', 'project-settings', 'release-acceptance'];
       const requestedView = input.hash.slice(1) || 'dashboard';
       const view = requestedView === 'collaboration' ? 'project-settings' : requestedView;
@@ -109,7 +109,12 @@
   global.VeriqraSessionRecovery = Object.freeze({
     safeReturnTarget: safeReturnTarget,
     loginUrl: loginUrl,
-    unauthorized: function () { sessionExpired = true; banner(); return true; },
+    unauthorized: function () {
+      if (identity == null && !dirty()) return false;
+      sessionExpired = true;
+      banner();
+      return true;
+    },
     paused: function () { return sessionExpired; }
   });
   document.addEventListener('veriqra:identity', function (event) { identity = event.detail.user.id; });

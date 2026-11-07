@@ -202,8 +202,31 @@ test('draft registrations survive confirmed leave, remain dirty, and never write
   ui.guard.unregister('requirements'); assert.equal(ui.unload().defaultPrevented, undefined);
 });
 
+test('an initial 401 redirects the workspace and admin pages to sign-in in the same tab', () => {
+  for (const base of ['https://example.test/', 'https://example.test/veriqra/']) {
+    for (const [entry, destination] of [
+      ['', 'index.html#dashboard'],
+      ['?projectId=7&secret=omitted#runs', 'index.html?projectId=7#runs'],
+      ['index.html?projectId=7&sourceRunId=40#release-acceptance', 'index.html?projectId=7&sourceRunId=40#release-acceptance'],
+      ['admin/users.html', 'admin/users.html'],
+      ['admin/ai.html', 'admin/ai.html'],
+      ['admin/system.html', 'admin/system.html']
+    ]) {
+      const ui = browser({ base, href: base + entry });
+      ui.api.get('auth/me');
+      ui.requests[0].call.reject(failure(401));
+      assert.equal(ui.replacements.length, 1);
+      const login = new URL(ui.replacements[0]);
+      assert.equal(login.pathname, new URL('login.html', base).pathname);
+      assert.equal(login.searchParams.get('returnTo'), base + destination);
+      assert.equal(ui.$('#session-recovery').length, 0);
+    }
+  }
+});
+
 test('401 keeps drafts in memory and offers a new-tab login with a sanitized return URL', () => {
   const ui = browser(); let clears = 0;
+  ui.fire('veriqra:identity', { user: actor() });
   ui.guard.register('case', { dirty: () => true, clear: () => { clears++; } });
   ui.api.post('projects/7/test-cases', { title: 'Synthetic unsaved input' });
   ui.requests[0].call.reject(failure(401));
@@ -216,7 +239,8 @@ test('401 keeps drafts in memory and offers a new-tab login with a sanitized ret
 });
 
 test('paused session denies JSON and XML writes locally; GET and explicit authentication remain available', () => {
-  const ui = browser(); ui.api.get('auth/me'); ui.requests[0].call.reject(failure(401));
+  const ui = browser(); ui.fire('veriqra:identity', { user: actor() });
+  ui.api.get('auth/me'); ui.requests[0].call.reject(failure(401));
   for (const method of ['post', 'put', 'delete']) {
     let error; ui.api[method]('projects/7/test-cases', {}).fail(value => { error = value; });
     assert.equal(error.status, 401);
