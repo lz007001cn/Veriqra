@@ -21,10 +21,10 @@ Gemini 3／4 的用例生成与测试总结请求使用 `thinkingLevel: LOW`，�
 | 区域 | 真实数据来源 | 边界 |
 |---|---|---|
 | Google 项目连接 | Cloud Resource Manager 项目查询 | 成功表示可读取项目，不代表所有模型生成已验证。 |
-| 最近 24 小时用量 | Cloud Monitoring PublisherModel 指标 | 当前项目、当前模型、跨区域，可能包含其他应用。无监测数据使用 `—`，不冒充零用量。 |
+| 最近 24 小时／7 天用量 | Cloud Monitoring PublisherModel 指标 | 两个时段以同一次刷新为结束时间。统计当前 Google 项目的生效模型，覆盖所有区域，可能包含其他应用。无监测数据时显示 `—`。 |
 | 配额上限 | Service Usage consumerQuotaMetrics（FULL） | 展示相关模型/地区的有效限额。共享 PayGo 不提供可保证的固定剩余调用量。 |
 | 账单状态 | Cloud Billing 项目关联与可读取的账号元数据 | 可显示结算关联和账号信息；不会据此推算赠金余额。 |
-| 赠金与费用 | Google 控制台入口 | 当前公开 Billing API 未提供赠金剩余字段。费用明细需要另行配置账单导出；本页没有伪造实时余额。 |
+| 赠金与费用 | Google 赠金页面与账单报表入口 | 赠金余额在赠金页面查看。实际支出、月度预测和 Cloud Assist 摘要可在账单报表查看。实际支出可通过另行配置的 Cloud Billing BigQuery 导出获取。 |
 
 独立的“检查当前模型”仅向该模型调用 `countTokens`，请求内容为固定 `ping`。官方当前标明此接口免费；成功只表示模型 Token 计数请求通过，不代表内容生成和当时容量必然可用。普通刷新不会执行此检查。[Token 计数](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/get-token-count)
 

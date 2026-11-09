@@ -45,9 +45,13 @@ class GoogleAiDashboardTest {
             Map<String,String> q = query(uri);
             assertTrue(q.get("filter").contains("resource.labels.model_user_id=\"gemini-3.8-flash\""));
             assertFalse(q.get("filter").contains("location=\"global\""));
-            assertEquals("2026-11-02T00:00:00Z",q.get("interval.startTime"));
+            boolean weekly = "2026-10-27T00:00:00Z".equals(q.get("interval.startTime"));
+            assertEquals(weekly ? "3600s" : "60s", q.get("aggregation.alignmentPeriod"));
+            if (!weekly) assertEquals("2026-11-02T00:00:00Z", q.get("interval.startTime"));
+            assertEquals("2026-11-03T00:00:00Z", q.get("interval.endTime"));
             assertEquals("ALIGN_SUM",q.get("aggregation.perSeriesAligner"));
             if (q.get("filter").contains("model_invocation_count")) {
+                if (weekly) return node("{\"timeSeries\":[{\"points\":[{\"value\":{\"int64Value\":\"10\"}},{\"value\":{\"int64Value\":\"2\"}}]}]}");
                 if (q.containsKey("pageToken")) return node("{\"timeSeries\":[{\"points\":[{\"value\":{\"int64Value\":\"3\"}}]}]}");
                 return node("{\"timeSeries\":[{\"points\":[{\"value\":{\"int64Value\":\"2\"}}]}],\"nextPageToken\":\"next page/+\"}");
             }
@@ -59,6 +63,12 @@ class GoogleAiDashboardTest {
         Map<String,Object> usage = section(data,"usage");
         assertEquals(5L,usage.get("requests")); assertEquals(100L,usage.get("inputTokens"));
         assertEquals(20L,usage.get("outputTokens")); assertEquals(120L,usage.get("totalTokens"));
+        Map<String,Object> weeklyUsage = section(data, "usage7d");
+        assertEquals("OK", weeklyUsage.get("status"));
+        assertEquals(12L, weeklyUsage.get("requests"));
+        assertEquals(120L, weeklyUsage.get("totalTokens"));
+        assertEquals(Instant.parse("2026-10-27T00:00:00Z"), weeklyUsage.get("windowStart"));
+        assertEquals(usage.get("windowEnd"), weeklyUsage.get("windowEnd"));
         assertNull(section(data,"quotas").get("remaining"));
         assertNull(section(data,"billing").get("remainingCredit"));
         assertEquals("CONSOLE_ONLY",section(data,"billing").get("creditStatus"));
@@ -139,14 +149,19 @@ class GoogleAiDashboardTest {
         assertEquals(0L,usage.get("inputTokens")); assertNull(usage.get("outputTokens")); assertNull(usage.get("requests"));
     }
 
-    @Test void tokenPermissionFailurePreservesKnownRequestsAndOtherSections() {
+    @Test void weeklyTokenFailurePreservesKnownRequestsAndOtherSections() {
         var dashboard=new GoogleAiDashboard(uri -> {
             if (!uri.getHost().equals("monitoring.googleapis.com")) return base(uri);
-            if (query(uri).get("filter").contains("token_count")) throw new GoogleApiException(403,"PERMISSION_DENIED");
+            var q = query(uri);
+            if (q.get("filter").contains("token_count")) {
+                if (q.get("aggregation.alignmentPeriod").equals("3600s")) throw new GoogleApiException(403, "PERMISSION_DENIED");
+                return node("{}");
+            }
             return node("{\"timeSeries\":[{\"points\":[{\"value\":{\"int64Value\":\"4\"}}]}]}");
         },clock);
-        var data=dashboard.refresh(settings().get()); var usage=section(data,"usage");
+        var data=dashboard.refresh(settings().get()); var usage=section(data,"usage7d");
         assertEquals("PARTIAL",usage.get("status")); assertEquals(4L,usage.get("requests")); assertNull(usage.get("totalTokens"));
+        assertEquals("OK", section(data, "usage").get("status"));
         assertEquals(true,section(data,"billing").get("billingEnabled"));
     }
 

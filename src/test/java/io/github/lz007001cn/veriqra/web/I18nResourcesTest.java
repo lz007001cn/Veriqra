@@ -49,8 +49,8 @@ class I18nResourcesTest {
             for (Path page : pages.toList()) {
                 String html = Files.readString(page);
                 if (page.equals(WEB.resolve("admin/index.html"))) {
-                    assertTrue(html.contains("content=\"0;url=users.html\""));
-                    assertTrue(html.contains("href=\"users.html\""));
+                    assertTrue(html.contains("content=\"0;url=ai.html\""));
+                    assertTrue(html.contains("href=\"ai.html\""));
                     continue;
                 }
                 assertTrue(html.contains("assets/js/i18n.js"), page.toString());

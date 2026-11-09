@@ -17,12 +17,15 @@ public final class GoogleAiDashboard {
     public static final String ATTRIBUTE = GoogleAiDashboard.class.getName();
     @FunctionalInterface public interface Reader { JsonNode get(URI uri); }
     private record Cached(String key, Instant fetchedAt, Map<String,Object> data) { }
+    private record UsageWindow(Duration duration, String alignmentPeriod) { }
     private final Reader reader;
     private final Clock clock;
     private Cached cached;
     private static final String METRIC_PREFIX = "aiplatform.googleapis.com/publisher/online_serving/";
     private static final String CAPACITY = "SHARED_PAYGO";
     private static final int MAX_PAGES = 8;
+    private static final UsageWindow DAILY_USAGE = new UsageWindow(Duration.ofHours(24), "60s");
+    private static final UsageWindow WEEKLY_USAGE = new UsageWindow(Duration.ofDays(7), "3600s");
 
     public GoogleAiDashboard(Reader reader, Clock clock) {
         this.reader = Objects.requireNonNull(reader); this.clock = Objects.requireNonNull(clock);
@@ -38,7 +41,8 @@ public final class GoogleAiDashboard {
                 "model", settings.model(), "revision", settings.revision());
         if (!settings.configured()) {
             result.put("connection", unavailable("NOT_CONFIGURED"));
-            result.put("usage", usageUnavailable("NOT_CONFIGURED", now));
+            result.put("usage", usageUnavailable("NOT_CONFIGURED", now, DAILY_USAGE));
+            result.put("usage7d", usageUnavailable("NOT_CONFIGURED", now, WEEKLY_USAGE));
             result.put("quotas", quotaUnavailable("NOT_CONFIGURED"));
             result.put("billing", billingUnavailable("NOT_CONFIGURED"));
             return result;
@@ -59,12 +63,14 @@ public final class GoogleAiDashboard {
         final String projectFailure = Objects.toString(connection.get("code"), "PROJECT_NUMBER_UNAVAILABLE");
         // These sections have independent permissions. One denied API must not hide successful reads from another.
         try (var tasks = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<Map<String,Object>> usage = tasks.submit(() -> usage(settings, now));
+            Future<Map<String,Object>> usage = tasks.submit(() -> usage(settings, now, DAILY_USAGE));
+            Future<Map<String,Object>> usage7d = tasks.submit(() -> usage(settings, now, WEEKLY_USAGE));
             Future<Map<String,Object>> quotas = tasks.submit(() -> projectNumber == null
                     ? quotaUnavailable(projectFailure)
                     : quotas(settings, projectNumber));
             Future<Map<String,Object>> billing = tasks.submit(() -> billing(settings.project()));
-            result.put("usage", await(usage, usageUnavailable("TIMEOUT", now), deadline));
+            result.put("usage", await(usage, usageUnavailable("TIMEOUT", now, DAILY_USAGE), deadline));
+            result.put("usage7d", await(usage7d, usageUnavailable("TIMEOUT", now, WEEKLY_USAGE), deadline));
             result.put("quotas", await(quotas, quotaUnavailable("TIMEOUT"), deadline));
             result.put("billing", await(billing, billingUnavailable("TIMEOUT"), deadline));
         }
@@ -72,16 +78,16 @@ public final class GoogleAiDashboard {
         return cached.data();
     }
 
-    private Map<String,Object> usage(AiSettingsManager.Settings settings, Instant end) {
-        Map<String,Object> result = usageUnavailable("NO_DATA", end);
+    private Map<String,Object> usage(AiSettingsManager.Settings settings, Instant end, UsageWindow window) {
+        Map<String,Object> result = usageUnavailable("NO_DATA", end, window);
         result.put("scope", "GOOGLE_PROJECT_CURRENT_MODEL_ALL_LOCATIONS");
         String failureCode = null;
         try {
-            List<JsonNode> requests = series(settings, "model_invocation_count", end, false);
+            List<JsonNode> requests = series(settings, "model_invocation_count", end, window, false);
             result.put("requests", total(requests));
         } catch (GoogleApiException failure) { failureCode = failure.code(); }
         try {
-            List<JsonNode> tokens = series(settings, "token_count", end, true);
+            List<JsonNode> tokens = series(settings, "token_count", end, window, true);
             Long input = null, output = null, total = total(tokens);
             for (JsonNode series : tokens) {
                 String type = series.path("metric").path("labels").path("type").asText();
@@ -98,13 +104,13 @@ public final class GoogleAiDashboard {
         return result;
     }
 
-    private List<JsonNode> series(AiSettingsManager.Settings settings, String metric, Instant end, boolean types) {
+    private List<JsonNode> series(AiSettingsManager.Settings settings, String metric, Instant end, UsageWindow window, boolean types) {
         Map<String,String> query = new LinkedHashMap<>();
         query.put("filter", "metric.type=\"" + METRIC_PREFIX + metric + "\" AND resource.type=\"aiplatform.googleapis.com/PublisherModel\""
                 + " AND resource.labels.publisher=\"google\" AND resource.labels.model_user_id=\"" + settings.model() + "\"");
-        query.put("interval.startTime", end.minus(Duration.ofHours(24)).toString());
+        query.put("interval.startTime", end.minus(window.duration()).toString());
         query.put("interval.endTime", end.toString()); query.put("view", "FULL");
-        query.put("aggregation.alignmentPeriod", "60s"); query.put("aggregation.perSeriesAligner", "ALIGN_SUM");
+        query.put("aggregation.alignmentPeriod", window.alignmentPeriod()); query.put("aggregation.perSeriesAligner", "ALIGN_SUM");
         query.put("aggregation.crossSeriesReducer", "REDUCE_SUM"); query.put("pageSize", "1000");
         if (types) query.put("aggregation.groupByFields", "metric.labels.type");
         return pages("https://monitoring.googleapis.com/v3/projects/" + segment(settings.project()) + "/timeSeries", query, "timeSeries");
@@ -205,12 +211,12 @@ public final class GoogleAiDashboard {
         String query = "?project=" + segment(Objects.toString(project, ""));
         return map("vertex", "https://console.cloud.google.com/vertex-ai" + query,
                 "quotas", "https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/quotas" + query,
-                "billing", "https://console.cloud.google.com/billing" + query,
+                "billing", "https://console.cloud.google.com/billing/reports" + query,
                 "credits", "https://console.cloud.google.com/billing/credits" + query);
     }
-    private static Map<String,Object> usageUnavailable(String code, Instant now) {
+    private static Map<String,Object> usageUnavailable(String code, Instant now, UsageWindow window) {
         return map("status", status(code), "code", code, "source", "GOOGLE_MONITORING",
-                "windowStart", now.minus(Duration.ofHours(24)), "windowEnd", now,
+                "windowStart", now.minus(window.duration()), "windowEnd", now,
                 "requests", null, "inputTokens", null, "outputTokens", null, "totalTokens", null);
     }
     private static Map<String,Object> quotaUnavailable(String code) {

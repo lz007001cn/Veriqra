@@ -9,6 +9,7 @@
   let configuration = null, report = null, draft = '', choice = '', saving = false, refreshing = false, loading = false;
   let uncertain = false, needsReview = false, failure = null, notice = null, accessFailure = null;
   let checking = false, modelCheck = null;
+  let usagePeriod = '24h';
   const hasDraft = () => saving || uncertain || !!configuration && draft.trim() !== String(configuration.model || '');
   const mayLeave = () => !window.VeriqraDraftGuard || window.VeriqraDraftGuard.allowLeave();
   const number = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -178,7 +179,7 @@
     }
     if (report && reportModel !== configuration.model) card.append(text('p', message('refreshNewModel', 'The model changed. Refresh to read data for the current configuration.'), 'admin-ai-note'));
     card.append(links([['vertex', message('openVertex', 'Open Vertex AI console')]]));
-    if (report && [report.connection, report.usage, report.quotas, report.billing].some(item => ['API_DISABLED', 'PERMISSION_DENIED'].includes(item?.status))) {
+    if (report && [report.connection, report.usage, report.usage7d, report.quotas, report.billing].some(item => ['API_DISABLED', 'PERMISSION_DENIED'].includes(item?.status))) {
       const setup = $('<details class="workflow-details">').attr('id', 'ai-query-setup').append(
         text('summary', message('querySetup', 'Set up Google data access')),
         text('p', message('querySetupHelp', 'Enable the required read APIs in this Google project. Model calls and monitoring, quota, and billing reads use separate permissions.'), 'admin-ai-note'),
@@ -195,8 +196,18 @@
   }
   let reportModel = null;
   function renderUsage() {
-    const card = section('ai-usage-card', message('usageTitle', 'Google usage · last 24 hours'));
-    const data = report?.usage; appendStatus(card, data);
+    const card = section('ai-usage-card', message('usageTitle', 'Google usage'));
+    const period = $('<select id="ai-usage-period" class="form-select form-select-sm w-auto">').append(
+      $('<option>').val('24h').text(message('usageLast24Hours', 'Last 24 hours')),
+      $('<option>').val('7d').text(message('usageLast7Days', 'Last 7 days'))).val(usagePeriod);
+    period.on('change', function () {
+      usagePeriod = this.value;
+      render();
+    });
+    card.append($('<div class="d-flex flex-wrap align-items-center gap-2 mb-2">').append(
+      text('label', message('usagePeriod', 'Time range')).attr('for', 'ai-usage-period'), period));
+    const data = usagePeriod === '7d' ? report?.usage7d : report?.usage;
+    appendStatus(card, data);
     const metrics = $('<dl class="admin-ai-metrics">');
     [['requests', message('requests', 'Requests')], ['inputTokens', message('inputTokens', 'Input tokens')], ['outputTokens', message('outputTokens', 'Output tokens')], ['totalTokens', message('totalTokens', 'Total tokens')]]
       .forEach(([key, label]) => metrics.append($('<div class="admin-ai-metric">').append(text('dt', label), text('dd', isOk(data) || data?.status === 'PARTIAL' ? number(data[key]) : '—').attr('id', 'ai-usage-' + key))));
@@ -261,10 +272,10 @@
       .forEach(([label, value]) => metadata.append($('<div>').append(text('dt', label), text('dd', value))));
     card.append(metadata, $('<div class="admin-ai-billing">').append($('<div>').append(text('h3', message('creditsTitle', 'Credits and balance')),
       links([['credits', message('openCredits', 'View Google credits')]])), $('<div>').append(text('h3', message('costsTitle', 'Costs')),
-      links([['billing', message('openBilling', 'Open Google billing')]]))));
+      links([['billing', message('openBilling', 'View billing reports and forecast')]]))));
     card.append(disclosure('ai-billing-details', message('billingDetails', 'About credits and costs'), $('<div>').append(
       text('p', message('creditsUnavailable', 'Google public APIs do not return the remaining promotional credit or account balance. View the current amount on the Google credits page.'), 'admin-ai-note'),
-      text('p', message('costsUnavailable', 'Billing export is not configured for this view. Costs are unavailable here; view charges in the Google billing console.'), 'admin-ai-note'))));
+      text('p', message('costsUnavailable', 'View actual costs, monthly forecasts and Cloud Assist summaries in Google Billing Reports. Displaying actual costs here requires a separate billing export.'), 'admin-ai-note'))));
     return card;
   }
   function render() {

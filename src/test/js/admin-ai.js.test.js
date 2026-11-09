@@ -201,6 +201,27 @@ test('manual refresh uses the effective server configuration while keeping the u
   assert.doesNotMatch(ui.textOf(ui.$('#ai-connection-card')[0]), /Model token-count check passed/);
 });
 
+test('Google usage switches between refreshed 24-hour and seven-day windows without another request', async () => {
+  const ui = await ready();
+  await ui.click(ui.$('#ai-refresh')[0]);
+  await ui.respond(ui.calls.at(-1), report({ usage7d: { status: 'OK', requests: 24, inputTokens: 800, outputTokens: 200, totalTokens: 1000 } }));
+  assert.equal(ui.$('#ai-usage-period').val(), '24h');
+  assert.equal(ui.$('#ai-usage-requests').text(), '0');
+
+  ui.$('#ai-usage-period').val('7d');
+  ui.emit(ui.$('#ai-usage-period')[0], 'change');
+  assert.equal(ui.$('#ai-usage-requests').text(), '24');
+  assert.equal(ui.$('#ai-usage-totalTokens').text(), '1000');
+  assert.equal(ui.calls.length, 3);
+  await ui.locale();
+  assert.equal(ui.$('#ai-usage-period').val(), '7d');
+
+  ui.$('#ai-usage-period').val('24h');
+  ui.emit(ui.$('#ai-usage-period')[0], 'change');
+  assert.equal(ui.$('#ai-usage-requests').text(), '0');
+  assert.equal(ui.$('#ai-usage-totalTokens').text(), '112');
+});
+
 test('query setup is shown for actual API or permission errors and links to the configured Google project', async () => {
   const ui = await ready();
   assert.equal(ui.$('#ai-query-setup').length, 0);
