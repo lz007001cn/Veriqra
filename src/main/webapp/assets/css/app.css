@@ -105,6 +105,93 @@ small, .small { font-size: var(--vq-font-sm); }
 .form-control:disabled, .form-select:disabled { color: var(--vq-text-muted); background-color: var(--vq-surface-muted); }
 .form-control::placeholder { color: var(--vq-text-muted); }
 textarea.form-control { line-height: var(--vq-line-height); }
+
+/* Match the project switcher while preserving native form and keyboard behavior. */
+@supports (appearance: base-select) and selector(::picker(select)) {
+  select.form-select:where(:not([multiple], [size]:not([size="1"]))) {
+    &, &::picker(select) {
+      appearance: base-select;
+    }
+
+    display: flex;
+    min-width: 0;
+    gap: var(--vq-space-2);
+    align-items: center;
+    padding-inline: .75rem;
+    background-image: none;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+
+    &:enabled {
+      cursor: pointer;
+    }
+
+    &:enabled:is(:hover, :open) {
+      border-color: var(--vq-accent);
+      background-color: var(--vq-accent-soft);
+    }
+
+    &::picker-icon {
+      content: "";
+      width: .5rem;
+      height: .5rem;
+      margin-inline: auto .25rem;
+      border: solid currentColor;
+      border-width: 0 1.5px 1.5px 0;
+      color: var(--vq-text-muted);
+      flex-shrink: 0;
+      transform: rotate(45deg);
+    }
+
+    &:open::picker-icon {
+      rotate: 180deg;
+    }
+
+    &::picker(select) {
+      min-inline-size: anchor-size(inline);
+      max-inline-size: calc(100dvw - 1rem);
+      max-block-size: min(22rem, 50dvh);
+      overflow: auto;
+      overscroll-behavior: contain;
+      margin-block: .375rem;
+      padding: .375rem;
+      color: var(--vq-text);
+      background: var(--vq-surface);
+      border: 1px solid var(--vq-border);
+      border-radius: var(--vq-radius-md);
+      box-shadow: var(--vq-shadow-overlay);
+      font-size: var(--vq-font-sm);
+    }
+
+    & option {
+      gap: var(--vq-space-2);
+      padding: .5rem .625rem;
+      border-radius: var(--vq-radius-sm);
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    & option:where(:enabled):is(:hover, :focus-visible) {
+      background-color: var(--vq-bg);
+    }
+
+    & option:checked {
+      color: var(--vq-accent);
+      background-color: var(--vq-accent-soft);
+      font-weight: 600;
+    }
+
+    & option::checkmark {
+      order: 1;
+      margin-inline-start: auto;
+    }
+
+    & option:disabled {
+      color: var(--vq-text-muted);
+      cursor: default;
+    }
+  }
+}
 .form-check-input { border-color: var(--vq-border-strong); }
 .form-check-input:checked { background-color: var(--vq-accent); border-color: var(--vq-accent); }
 .form-check-input:focus { border-color: var(--vq-accent); box-shadow: 0 0 0 2px var(--vq-accent-soft); }

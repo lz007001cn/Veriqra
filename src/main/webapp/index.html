@@ -7,6 +7,7 @@
   <title data-i18n="shell.workspaceVeriqra">Workspace · Veriqra</title>
   <link rel="stylesheet" href="assets/vendor/bootstrap-5.3.8.min.css">
   <link rel="stylesheet" href="assets/css/app.css">
+  <link rel="stylesheet" href="assets/css/project-chat.css">
   <script defer src="assets/vendor/jquery-3.7.1.min.js"></script>
   <script defer src="assets/vendor/bootstrap-5.3.8.bundle.min.js"></script>
   <script defer src="assets/vendor/echarts-6.0.0.min.js"></script>
@@ -15,6 +16,7 @@
   <script defer src="assets/js/workflow-context.js"></script>
   <script defer src="assets/js/dashboard.js"></script>
   <script defer src="assets/js/app.js"></script>
+  <script defer src="assets/js/project-chat.js"></script>
   <script defer src="assets/js/project-picker.js"></script>
   <script defer src="assets/js/test-assets.js"></script>
   <script defer src="assets/js/ai-cases.js"></script>
@@ -87,6 +89,27 @@
           <section id="dashboard-my-work" class="asset-panel mb-3 d-none" aria-labelledby="dashboard-my-work-title">
             <h2 id="dashboard-my-work-title" data-i18n="dashboard.myWork">My work</h2>
             <div id="dashboard-my-work-items" aria-live="polite"></div>
+          </section>
+          <section id="project-chat" class="asset-panel project-chat d-none" aria-labelledby="project-chat-title">
+            <div class="project-chat-heading">
+              <div>
+                <h2 id="project-chat-title" class="fs-5 mb-1" data-i18n="projectChat.title">Ask about this project</h2>
+                <p id="project-chat-scope" class="small text-secondary mb-0"></p>
+              </div>
+              <button id="project-chat-clear" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="projectChat.clear">Clear conversation</button>
+            </div>
+            <div id="project-chat-log" class="project-chat-log d-none" role="log" aria-live="polite" aria-relevant="additions text" aria-labelledby="project-chat-title" tabindex="0"></div>
+            <div class="project-chat-feedback">
+              <p id="project-chat-status" class="small mb-0" role="status" aria-live="polite"></p>
+              <button id="project-chat-retry" class="btn btn-outline-primary btn-sm d-none" type="button" data-i18n="common.retry">Retry</button>
+            </div>
+            <form id="project-chat-form">
+              <label for="project-chat-question" class="form-label" data-i18n="projectChat.question">Question</label>
+              <div class="project-chat-composer">
+                <textarea id="project-chat-question" class="form-control" rows="2" maxlength="1500" required disabled data-i18n-placeholder="projectChat.placeholder" placeholder="What’s blocking the current release?"></textarea>
+                <button id="project-chat-send" class="btn btn-primary" type="submit" disabled data-i18n="projectChat.send">Send</button>
+              </div>
+            </form>
           </section>
           <div class="dashboard-run-toolbar"><label for="dashboard-run-select" class="form-label mb-0" data-i18n="dashboard.currentRun">Current test run</label><select id="dashboard-run-select" class="form-select" disabled><option value="" data-i18n="common.loading">Loading…</option></select></div>
           <div class="dashboard-feedback"><p id="dashboard-summary-status" class="small text-secondary mb-0 d-none" role="status" aria-live="polite"></p><button id="dashboard-summary-retry" type="button" class="btn btn-outline-secondary btn-sm d-none" data-i18n="common.retry">Retry</button></div>

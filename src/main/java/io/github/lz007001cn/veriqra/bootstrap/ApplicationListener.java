@@ -3,6 +3,8 @@ package io.github.lz007001cn.veriqra.bootstrap;
 import io.github.lz007001cn.veriqra.config.DatabaseConfig;
 import io.github.lz007001cn.veriqra.jdbc.*;
 import io.github.lz007001cn.veriqra.service.*;
+import io.github.lz007001cn.veriqra.service.ai.ProjectChatContextLoader;
+import io.github.lz007001cn.veriqra.service.ai.ProjectChatService;
 import io.github.lz007001cn.veriqra.service.auth.PasswordVerifier;
 import io.github.lz007001cn.veriqra.service.importing.JUnitXmlParser;
 import io.github.lz007001cn.veriqra.service.release.ReleaseAcceptanceService;
@@ -63,6 +65,8 @@ public final class ApplicationListener implements ServletContextListener {
             context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiAssistanceService.class.getName(),
                     new io.github.lz007001cn.veriqra.service.ai.AiAssistanceService(transactions, daos, access,
                             aiProvider, java.time.Clock.systemUTC()));
+            context.setAttribute(ProjectChatService.class.getName(),
+                    new ProjectChatService(new ProjectChatContextLoader(transactions, daos, access), aiProvider));
             var adminPolicy = new AdminAccessPolicy();
             context.setAttribute(AdminServices.ATTRIBUTE, new AdminServices(
                     new AdminUserService(transactions, adminPolicy, passwords),
@@ -101,6 +105,7 @@ public final class ApplicationListener implements ServletContextListener {
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiCaseService.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiRunSummaryService.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiAssistanceService.class.getName());
+        event.getServletContext().removeAttribute(ProjectChatService.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.AiSettingsManager.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.service.ai.VertexAiProvider.class.getName());
         event.getServletContext().removeAttribute(io.github.lz007001cn.veriqra.admin.GoogleAiDashboard.ATTRIBUTE);
