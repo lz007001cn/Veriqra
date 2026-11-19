@@ -380,19 +380,6 @@
   });
   function renderWorkflow() {
     renderProjectLinks();
-    $('#workflow').empty();
-    const views = ['requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation'];
-    [t('common.requirements'), t('common.testCases'), t('common.testPlans'), t('common.runs'),
-      t('common.defects'), t('common.automationImports')].forEach(function (name, index) {
-      const card = $('<a class="workflow-card">').attr('href', window.VeriqraQaNavigation.href(views[index], {})).on('click', function (event) {
-        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0) return;
-        event.preventDefault(); window.VeriqraQaNavigation.open(views[index], {});
-      });
-      card.append($('<span class="workflow-number">').text(String(index + 1).padStart(2, '0')));
-      card.append($('<strong>').text(name));
-      card.append($('<span class="workflow-later">').text(t('qa.openArea')));
-      $('#workflow').append(card);
-    });
     if (currentView === 'dashboard' && activeProject && window.VeriqraQaContext) loadWorkflowSummary();
   }
   function loadWorkflowSummary() {

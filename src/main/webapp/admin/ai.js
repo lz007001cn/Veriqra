@@ -195,6 +195,67 @@
     return card;
   }
   let reportModel = null;
+  function creditAmount(estimate, value, fractionDigits) {
+    const currency = estimate?.currency;
+    if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency) || typeof value !== 'number'
+        || !Number.isFinite(value) || value < 0) return '—';
+    return new Intl.NumberFormat(window.I18n.getLocale(), {
+      style: 'currency', currency, currencyDisplay: 'code', maximumFractionDigits: fractionDigits
+    }).format(value);
+  }
+  function creditDate(value) {
+    return value ? window.I18n.formatDate(value) : '—';
+  }
+  function creditEstimateStatus(status) {
+    switch (status) {
+      case 'NO_DATA': return message('creditEstimateNoData', 'Google Monitoring has no token measurements for this period. The balance shown is the baseline.');
+      case 'PRICING_UNAVAILABLE': return message('creditEstimatePricingUnavailable', 'At least one model with measured tokens has no verified price.');
+      case 'USAGE_UNAVAILABLE': return message('creditEstimateUsageUnavailable', 'Google Monitoring token data could not be loaded.');
+      case 'PARTIAL': return message('creditEstimatePartial', 'Token counts or prices are incomplete.');
+      default: return '';
+    }
+  }
+  function appendCreditEstimate(metrics, details) {
+    const estimate = report?.creditEstimate;
+    const displayValue = ['OK', 'NO_DATA'].includes(estimate?.status) ? estimate.remaining : null;
+    const amount = creditAmount(estimate, displayValue);
+    const balance = amount !== '—' && estimate.currency === 'SGD'
+      ? new Intl.NumberFormat(window.I18n.getLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        .format(displayValue) + '＄'
+      : amount;
+    metrics.append($('<div class="admin-ai-metric" style="grid-column: 1 / -1">').append(
+      text('dt', message('creditEstimateLabel', 'Balance')),
+      text('dd', balance).attr('id', 'ai-usage-creditEstimate')));
+    if (!estimate) return;
+
+    details.append($('<h3 class="fs-6 mt-3">').text(message('creditEstimateDetails', 'Balance calculation')),
+      text('p', message('creditEstimateMethod', 'The estimate subtracts token charges from the baseline balance. Charges are (input tokens × input price + output tokens × output price) ÷ 1,000,000. Check Google Credits for the current balance.'), 'admin-ai-note'),
+      text('p', message('creditEstimateBaseline', 'Observed balance on {date}: {baseline} of {total}', {
+        date: creditDate(estimate.baselineDate), baseline: creditAmount(estimate, estimate.baseline), total: creditAmount(estimate, estimate.total)
+      }), 'admin-ai-note'),
+      text('p', message('creditEstimateScope', 'All measured models in this project use current public Global standard online text rates. Credits, cache discounts, other projects and services are excluded. Monitoring can lag.'), 'admin-ai-note'));
+    const status = creditEstimateStatus(estimate.status);
+    if (status) details.append(text('p', status, 'admin-ai-note'));
+
+    details.append(text('p', message('creditEstimateTokenWindow', 'Token usage window: {start} – {end}', {
+        start: time(estimate.usageStart), end: time(estimate.asOf)
+      }), 'admin-ai-note'),
+      text('p', message('creditEstimateTokens', 'Input: {input} tokens · Output: {output} tokens', {
+        input: number(estimate.inputTokens), output: number(estimate.outputTokens)
+      }), 'admin-ai-note'),
+      text('p', message('creditEstimateTokenSpend', 'Estimated token charges: {amount}', {
+        amount: creditAmount(estimate, estimate.estimatedSpend)
+      }), 'admin-ai-note'));
+    for (const model of estimate.models || []) {
+      details.append(text('p', model.model).addClass('fw-semibold mb-1'),
+        text('p', message('creditEstimateTokens', 'Input: {input} tokens · Output: {output} tokens', {
+          input: number(model.inputTokens), output: number(model.outputTokens)
+        }), 'admin-ai-note'),
+        text('p', message('creditEstimateRates', 'Price per million tokens: {input} input · {output} output', {
+          input: creditAmount(estimate, model.inputRate, 6), output: creditAmount(estimate, model.outputRate, 6)
+        }), 'admin-ai-note'));
+    }
+  }
   function renderUsage() {
     const card = section('ai-usage-card', message('usageTitle', 'Google usage'));
     const period = $('<select id="ai-usage-period" class="form-select form-select-sm w-auto">').append(
@@ -213,6 +274,7 @@
       .forEach(([key, label]) => metrics.append($('<div class="admin-ai-metric">').append(text('dt', label), text('dd', isOk(data) || data?.status === 'PARTIAL' ? number(data[key]) : '—').attr('id', 'ai-usage-' + key))));
     const help = $('<div>').append(text('p', message('usageHelp', 'Data covers this Google project and the current model across all locations, and may include other applications. Google Monitoring data may arrive late. Missing measurements are shown as —.'), 'admin-ai-note'));
     if (data?.windowStart || data?.windowEnd) help.append(text('p', message('usageWindow', 'Window: {start} – {end}', { start: time(data.windowStart), end: time(data.windowEnd) }), 'admin-ai-note'));
+    appendCreditEstimate(metrics, help);
     card.append(metrics, disclosure('ai-usage-details', message('usageDetails', 'Measurement scope and timing'), help));
     return card;
   }

@@ -1,18 +1,19 @@
 (function ($, api) {
   'use strict';
   const tr = function (key) { return window.I18n.t('imports.' + key); };
-  let projectId = null, actorId = null, view = '', epoch = 0;
+  let projectId = null, actorId = null, view = '', epoch = 0, recoveryRequest = 0;
+  const inFlight = new Map();
   const panel = $('<section id="import-history" class="asset-panel">');
   const heading = $('<h2 class="fs-5">'), status = $('<p role="status" aria-live="polite">'), rows = $('<div>'), detail = $('<div>'), recovery = $('<div>');
   const refresh = $('<button type="button" class="btn btn-outline-secondary mb-2">').on('click', load);
   panel.append(heading, refresh, status, recovery, rows, detail); $('#automation-workspace').append(panel);
   function base() { return 'projects/' + encodeURIComponent(projectId) + '/imports'; }
   function storageKey() { return actorId && projectId ? 'veriqra.import.' + actorId + '.' + projectId : null; }
-  function pending() {
-    try { return JSON.parse(sessionStorage.getItem(storageKey()) || 'null'); } catch (_) { return null; }
+  function pending(key = storageKey()) {
+    if (!key) return null;
+    try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_) { return null; }
   }
-  function store(value) {
-    const key = storageKey(); if (!key) throw new Error(tr('notReady'));
+  function store(key, value) {
     try { if (value) sessionStorage.setItem(key, JSON.stringify(value)); else sessionStorage.removeItem(key); }
     catch (_) { throw new Error(tr('storageFailed')); }
   }
@@ -35,18 +36,33 @@
     });
   }
   async function queryPending() {
-    const intent = pending(), token = epoch; if (!intent || !projectId || !actorId) return;
+    const scope = storageKey(), intent = pending(scope), token = epoch;
+    if (view !== 'automation' || !intent || inFlight.has(scope)) return;
+    const request = ++recoveryRequest;
+    const current = () => request === recoveryRequest && token === epoch && scope === storageKey() && !inFlight.has(scope)
+      && pending(scope)?.requestKey === intent.requestKey;
     recovery.text(tr('checking'));
     try {
       const result = await api.get(base() + '/requests/' + encodeURIComponent(intent.requestKey));
-      if (token !== epoch) return;
-      store(null); recovery.text(tr('recovered')); renderDetail(result);
+      if (!current()) return;
+      store(scope, null); recovery.text(tr('recovered')); renderDetail(result);
       document.dispatchEvent(new CustomEvent('veriqra:import-recovered', { detail: { projectId: projectId, result: result } }));
     } catch (error) {
-      if (token !== epoch) return;
-      recovery.empty().append($('<p>').text(error.status === 404 ? tr('notFound') : tr('queryFailed')),
-        $('<p class="small text-break">').text(intent.filename + ' · ' + intent.requestKey),
+      if (!current()) return;
+      const missing = error.status === 404;
+      const actions = $('<div class="d-flex flex-wrap gap-2 mb-2">').append(
         $('<button type="button" class="btn btn-outline-secondary btn-sm">').text(tr('checkAgain')).on('click', queryPending));
+      if (missing) actions.append($('<button type="button" class="btn btn-outline-primary btn-sm">')
+        .text(tr('discardPending')).on('click', function () {
+          if (!current() || !window.confirm(tr('discardConfirm'))) return;
+          try {
+            store(scope, null);
+            recovery.text(tr('discarded'));
+            document.dispatchEvent(new CustomEvent('veriqra:import-discarded', { detail: { projectId: projectId } }));
+          } catch (failure) { recovery.text(failure.message); }
+        }));
+      recovery.empty().append($('<p>').text(tr(missing ? 'notFound' : 'queryFailed')),
+        $('<p class="small text-break">').text(intent.filename + ' · ' + intent.requestKey), actions);
     }
   }
   async function load() {
@@ -68,20 +84,41 @@
     } catch (_) { if (token === epoch) status.text(tr('queryFailed')); }
   }
   async function begin(file, signature) {
-    if (!storageKey()) throw new Error(tr('notReady'));
-    const token = epoch;
+    const token = epoch, scope = storageKey();
+    if (!scope || inFlight.has(scope)) throw new Error(tr('notReady'));
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())))
       .map(function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
-    if (token !== epoch) throw new Error(tr('notReady'));
-    const previous = pending();
-    if (previous) {
-      if (previous.signature !== signature || previous.hash !== hash) throw new Error(tr('pendingMismatch'));
-      return previous.requestKey;
+    if (token !== epoch || scope !== storageKey() || inFlight.has(scope)) throw new Error(tr('notReady'));
+    const previous = pending(scope);
+    if (previous && (previous.signature !== signature || previous.hash !== hash)) {
+      queryPending();
+      throw new Error(tr('pendingMismatch'));
     }
-    const requestKey = crypto.randomUUID(); store({ requestKey: requestKey, signature: signature, hash: hash, filename: file.name });
-    return requestKey;
+    const requestKey = previous ? previous.requestKey : crypto.randomUUID();
+    if (!previous) store(scope, { requestKey: requestKey, signature: signature, hash: hash, filename: file.name });
+    const intent = { scope: scope, requestKey: requestKey, reused: !!previous };
+    inFlight.set(scope, intent);
+    ++recoveryRequest;
+    recovery.empty();
+    return intent;
   }
-  function complete() { store(null); recovery.empty(); load(); }
+  function finish(intent, outcome) {
+    const { scope, requestKey, reused } = intent;
+    if (inFlight.get(scope) !== intent) return;
+    inFlight.delete(scope);
+    if (pending(scope)?.requestKey !== requestKey) return;
+    const current = view === 'automation' && scope === storageKey();
+    if (outcome === 'saved' || (!reused && (outcome === 'rejected' || outcome === 'unsent'))) {
+      try { store(scope, null); }
+      catch (failure) { if (current) recovery.text(failure.message); return; }
+      if (current) {
+        recovery.empty();
+        if (outcome === 'saved') load();
+      }
+    } else if (current) {
+      queryPending();
+    }
+  }
   async function identify() {
     const token = epoch;
     try { const actor = await api.get('auth/me'); if (token === epoch) { actorId = actor.id; await queryPending(); } }
@@ -97,5 +134,5 @@
     if (view === 'automation' && projectId) { identify(); load(); }
   });
   document.addEventListener('veriqra:localechange', function () { if (view === 'automation') { load(); queryPending(); } });
-  window.VeriqraImportHistory = Object.freeze({ begin: begin, complete: complete });
+  window.VeriqraImportHistory = Object.freeze({ begin: begin, finish: finish });
 })(jQuery, window.VeriqraApi);

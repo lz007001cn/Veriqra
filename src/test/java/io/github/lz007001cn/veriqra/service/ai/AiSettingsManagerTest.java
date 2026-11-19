@@ -27,7 +27,8 @@ class AiSettingsManagerTest {
         assertTrue(result.configured());
         assertTrue(result.writable());
         assertFalse(Files.exists(path));
-        assertEquals(List.of("gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"),
+        assertEquals(List.of("gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon", "gemini-3.8-flash",
+                        "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"),
                 result.models().stream().map(AiSettingsManager.ModelOption::id).toList());
         assertThrows(UnsupportedOperationException.class, () -> result.models().clear());
         String serialized = new ObjectMapper().writeValueAsString(result);
@@ -51,8 +52,13 @@ class AiSettingsManagerTest {
         assertFalse(contents.contains("project-one"));
         assertEquals(saved, new AiSettingsManager(config, path).get());
         try (var siblings = Files.list(path.getParent())) { assertEquals(1, siblings.count()); }
-        assertEquals(2, manager.update("gemini-3.8-flash", saved.revision()).revision());
-        assertEquals(1, manager.get().models().stream().filter(option -> option.id().equals("gemini-3.8-flash")).count());
+        for (String model : List.of("gemini-4-hydrogen", "gemini-4-carbon")) {
+            var selected = manager.update(model, saved.revision());
+            assertEquals(saved.revision() + 1, selected.revision());
+            assertEquals(model, selected.model());
+            assertEquals(1, selected.models().stream().filter(option -> option.id().equals(model)).count());
+            saved = selected;
+        }
     }
 
     @Test void staleSaveAndInvalidModelsLeaveSnapshotAndFileUnchanged() throws Exception {

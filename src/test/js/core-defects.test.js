@@ -1134,6 +1134,36 @@ test('list filters are separated by project and actual actor identity', async ()
   assert.equal(ui.$('#defect-list-search').val(), ''); assert.match(ui.$('#defect-list-status').text(), /No defects in this project/);
 });
 
+test('severity and assignee filters combine, survive detail, and work before the member directory resolves', async () => {
+  const ui = browser(undefined, { manualMembers: true });
+  const rows = [
+    { ...defect(1), severity: 'CRITICAL', assigneeId: 11 },
+    { ...defect(2), severity: 'LOW', assigneeId: 11 },
+    { ...defect(3), severity: 'CRITICAL', assigneeId: null },
+    { ...defect(4), severity: 'CRITICAL', assigneeId: 14 }
+  ];
+  ui.calls[0].resolve(rows); await flush();
+  const ids = () => ui.nodes.get('defect-list').children.filter(node => node.attrs['data-defect-id']).map(node => Number(node.attrs['data-defect-id']));
+  const change = async (field, value) => {
+    const id = 'defect-list-' + field + '-filter';
+    ui.$('#' + id).val(value); await ui.fire(ui.nodes.get(id), 'change');
+  };
+  await change('severity', 'CRITICAL'); await change('assignee', '11'); assert.deepEqual(ids(), [1]);
+  ui.memberCalls[0].resolve([developer(11, 'Alice'), developer(12, 'Bob')]); await flush();
+  const names = ui.$('#defect-list-assignee-filter').text(); assert.match(names, /Alice/); assert.match(names, /Bob/); assert.match(names, /User #14/);
+  await change('assignee', '12'); assert.deepEqual(ids(), []);
+  await change('assignee', 'UNASSIGNED'); assert.deepEqual(ids(), [3]);
+  await change('assignee', '11'); await ui.fire(ui.nodes.get('defect-list').all().find(node => node.tag === 'a'));
+  ui.calls[1].resolve({ defect: rows[0], evidence: [] }); await flush();
+  await ui.fire(ui.nodes.get('defect-back')); ui.calls[2].resolve(rows); await flush();
+  ui.memberCalls.at(-1).reject({ status: 503 }); await flush();
+  assert.equal(ui.$('#defect-list-severity-filter').val(), 'CRITICAL');
+  assert.equal(ui.$('#defect-list-assignee-filter').val(), '11'); assert.deepEqual(ids(), [1]);
+  await ui.fire(ui.nodes.get('defect-list-clear')); assert.deepEqual(ids(), [4, 3, 2, 1]);
+  assert.equal(ui.$('#defect-list-severity-filter').val(), ''); assert.equal(ui.$('#defect-list-assignee-filter').val(), '');
+  assert.equal(ui.calls.length, 3);
+});
+
 test('failure evidence shows the actual source build and environment separately from record revision', async () => {
   const ui = browser({ view: 'defects', projectId: '1', defectId: '9' });
   ui.calls[0].resolve({ defect: defect(), evidence: [evidence()] }); await flush();

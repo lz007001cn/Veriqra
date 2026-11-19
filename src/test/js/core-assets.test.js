@@ -48,7 +48,7 @@ function browser(initial = { view: 'requirements', projectId: '7', requirementId
     toggleClass(name, enabled) { return enabled ? this.addClass(name) : this.removeClass(name); }
     hasClass(name) { return this.items[0]?.classes.has(name); }
     prop(name, value) { if (value === undefined) return this.items[0]?.[name]; return this.each(function () { this[name] = value; }); }
-    attr(name, value) { if (value === undefined) return this.items[0]?.attributes[name]; return this.each(function () { this.attributes[name] = String(value); }); }
+    attr(name, value) { if (value === undefined) return this.items[0]?.attributes[name]; return this.each(function () { this.attributes[name] = String(value); if (name === 'id') nodes.set('#' + value, this); }); }
     removeAttr(name) { return this.each(function () { delete this.attributes[name]; }); }
     find(selector) { return new Collection(selector.split(',').flatMap(part => this.items.flatMap(node => descendants(node).filter(child => matches(child, part.trim().replace(/^#\S+\s+/, '')))))); }
     children() { return new Collection(this.items.flatMap(node => node.childrenNodes).filter(node => node instanceof Node)); }
@@ -360,6 +360,26 @@ test('requirement actions open AI or a source-linked form without generating or 
   await ui.click('#asset-form-cancel');
   assert.equal(ui.route().view, 'requirements'); assert.equal(ui.route().requirementId, '10');
   assert.equal(ui.requests.at(-1).url, 'projects/7/requirements/10');
+});
+
+test('requirement AI recommends generation until a current case is linked and keeps alternate actions accessible', async () => {
+  for (const status of ['REMOVED', 'CONFIRMED', 'NEEDS_REVIEW']) {
+    const ui = browser(), opened = [];
+    ui.window.VeriqraAiCases = { clear() {}, mount() {}, open() { opened.push('cases'); }, hasDraft: () => false };
+    ui.window.VeriqraRequirementAssist = { clear() {}, mount() {}, open(mode) { opened.push(mode); }, hasDraft: () => false };
+    ui.dispatchProject(); ui.requests[0].resolve(ui.requirement()); await flush();
+    ui.requests[1].resolve([{ testCase: ui.caseRow(20, 'READY'), status }]); await flush();
+    const hasLink = status !== 'REMOVED', rail = ui.$('#asset-primary-actions');
+    const primary = hasLink ? 'requirement-coverage-open' : 'requirement-ai-open';
+    assert.deepEqual(rail.find('.requirement-ai-suggested').get().map(node => node.attributes.id), [primary]);
+    const more = rail.find('details');
+    assert.deepEqual(more.find('button').get().map(node => node.attributes.id),
+      [hasLink ? 'requirement-ai-open' : 'requirement-coverage-open', 'requirement-review-open']);
+    assert.deepEqual(opened, []);
+    await ui.click('#' + primary); await ui.click('#requirement-review-open');
+    assert.deepEqual(opened, [hasLink ? 'coverage' : 'cases', 'review']);
+    assert.equal(ui.requests.length, 2);
+  }
 });
 
 test('requirement coverage distinguishes active confirmed Ready cases from pending, removed and draft cases', async () => {

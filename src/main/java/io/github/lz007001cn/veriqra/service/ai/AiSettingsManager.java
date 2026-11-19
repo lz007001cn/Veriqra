@@ -25,6 +25,8 @@ public final class AiSettingsManager {
 
     private record Selection(String model, String source, long revision) { }
     private static final List<ModelOption> PRESETS = List.of(
+            new ModelOption("gemini-4-hydrogen", "Gemini 4 Hydrogen"),
+            new ModelOption("gemini-4-carbon", "Gemini 4 Carbon"),
             new ModelOption("gemini-4-argon", "Gemini 4 Argon"),
             new ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash"),
             new ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"),

@@ -253,10 +253,11 @@ test('retest handoff preserves exact evidence IDs only in defect routes', async 
   assert.deepEqual(plain(ui.nav.read()), { view: 'runs', projectId: '7', runId: '55' });
 });
 
-test('generated dashboard links use the verified project in native href and preserve modified clicks', async () => {
+test('the dashboard leaves workflow navigation in the project sidebar', async () => {
   for (const base of ['http://127.0.0.1:9000/', 'http://127.0.0.1:9000/veriqra/']) {
     const ui = browser(base + 'index.html?projectId=7#dashboard'); await ui.boot();
-    const links = ui.$('#workflow')[0].children;
+    assert.equal(ui.$('#workflow')[0].children.length, 0);
+    const links = ui.sidebar.filter(link => ['requirements', 'test-cases', 'test-plans', 'runs', 'defects', 'automation'].includes(link.attrs['data-view']));
     assert.equal(links.length, 6);
     for (const link of links) {
       const target = new URL(link.attrs.href);
@@ -265,7 +266,7 @@ test('generated dashboard links use the verified project in native href and pres
     }
     const first = links[0]; ui.click(first); assert.deepEqual(plain(ui.nav.read()), { view: 'requirements', projectId: '7' });
     ui.changeProject('8'); ui.requests.at(-1).resolve(ui.project(8));
-    for (const link of ui.$('#workflow')[0].children) assert.equal(new URL(link.attrs.href).searchParams.get('projectId'), '8');
+    for (const link of links) assert.equal(new URL(link.attrs.href).searchParams.get('projectId'), '8');
   }
 });
 
@@ -424,6 +425,7 @@ test('read-only developer and archived-project recommendations cannot offer asse
 test('assigned developer defect and tester RESOLVED defect guidance use actual IDs in their current project', async () => {
   for (const [context, defects, key, id] of [
     [qaContext(7, { projectRole: 'DEVELOPER', canWriteAssets: false }), [{ id: 31, status: 'OPEN', assigneeId: 2 }, { id: 32, status: 'IN_PROGRESS', assigneeId: 1 }], 'r2.handleAssigned', '32'],
+    [qaContext(7, { projectRole: 'DEVELOPER', canWriteAssets: false }), [{ id: 31, status: 'CLOSED', assigneeId: 1 }, { id: 34, status: 'REOPENED', assigneeId: 1 }], 'r2.handleAssigned', '34'],
     [qaContext(7), [{ id: 33, status: 'RESOLVED' }], 'r2.reviewRetest', '33']
   ]) {
     const ui = browser(undefined, '8', { workflow: true }); await ui.boot(); ui.contextCalls[0].resolve(context);

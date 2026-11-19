@@ -105,11 +105,8 @@
   }
   function ai(data) {
     const value = data.ai || {};
-    return disclosure('system-ai', message('ai', 'AI connection configuration'), $('<div>').append(facts([
-      [message('provider', 'Provider'), value.provider], [message('configured', 'Connection configured'), bool(value.configured)],
-      [message('project', 'Google Cloud project'), value.project], [message('location', 'Location'), value.location],
-      [message('model', 'Effective model'), value.model, 'system-ai-model'], [message('modelWritable', 'Model selection can be saved'), bool(value.settingsWritable)],
-      [message('modelSource', 'Model source'), source(value.settingsSource)]]),
+    return disclosure('system-ai', message('ai', 'AI model'), $('<div>').append(facts([
+      [message('provider', 'Provider'), value.provider], [message('model', 'Effective model'), value.model, 'system-ai-model']]),
       $('<div class="admin-system-links">').append($('<a class="btn btn-outline-primary" href="admin/ai.html">').text(message('openAi', 'Open AI settings')))));
   }
   function render() {

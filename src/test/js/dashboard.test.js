@@ -86,11 +86,13 @@ test('my work links only the current actor’s open responsibilities in the sele
     { id: 31, keyNo: 1, title: 'Assigned', status: 'OPEN', assigneeId: 1 },
     { id: 32, keyNo: 2, title: 'Reported', status: 'RESOLVED', reporterId: 1 },
     { id: 33, keyNo: 3, title: 'Closed', status: 'CLOSED', reporterId: 1, assigneeId: 1 },
-    { id: 34, keyNo: 4, title: 'Other tester', status: 'RESOLVED', reporterId: 2 }
+    { id: 34, keyNo: 4, title: 'Other tester', status: 'RESOLVED', reporterId: 2 },
+    { id: 35, keyNo: 5, title: 'Reopened', status: 'REOPENED', assigneeId: '1' },
+    { id: 36, keyNo: 6, title: 'Reopened for someone else', status: 'REOPENED', assigneeId: 2 }
   ]));
   const targets = links(ui, '#dashboard-my-work-items').map(link => new URL(link.attrs.href));
   assert.deepEqual(targets.map(target => [target.hash, target.searchParams.get('runId') || target.searchParams.get('defectId')]),
-    [['#runs', '40'], ['#defects', '31'], ['#defects', '32']]);
+    [['#runs', '40'], ['#defects', '31'], ['#defects', '35'], ['#defects', '32']]);
   assert.ok(targets.every(target => target.searchParams.get('projectId') === '7'));
 });
 

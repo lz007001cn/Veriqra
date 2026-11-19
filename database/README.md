@@ -1,6 +1,6 @@
 # 数据库安装
 
-目标环境为 MySQL 8.0，字符集 `utf8mb4`。当前空库安装使用 32 表基线，再加入缺陷复测、缺陷评论和发版验收表，共 37 表。
+目标环境为 MySQL 8.0，字符集 `utf8mb4`。当前空库安装使用 32 表基线，再加入缺陷复测、缺陷评论和发布验收表，共 37 表。
 
 ## 新安装
 
@@ -17,11 +17,11 @@ SOURCE database/migrations/20261106-release-acceptance.sql;
 
 ## 已有实例
 
-从 v0.3 升级到原 v0.9.0 发布包时沿用已有结构。小团队试用构建增加了运行负责人、缺陷评论和发版验收。
+从 v0.3 升级到原 v0.9.0 发布包时沿用已有结构。小团队试用构建增加了运行负责人、缺陷评论和发布验收。
 
 升级到支持测试运行负责人的构建前，在已有实例应用 `migrations/20261105-run-assignee.sql`。已有运行的负责人初始为空。新安装的 `schema.sql` 已包含该字段，无需再执行此增量。
 
-升级到支持缺陷评论和发版验收的构建前，按顺序应用 `migrations/20261106-defect-comments.sql` 和 `migrations/20261106-release-acceptance.sql`。
+升级到支持缺陷评论和发布验收的构建前，按顺序应用 `migrations/20261106-defect-comments.sql` 和 `migrations/20261106-release-acceptance.sql`。
 
 如果实例早于 v0.2，可根据实际结构使用 `migrations/` 中的历史增量；已经应用的迁移不重复执行。实际生产升级记录见 [ECS 部署记录](../docs/ECS-DEPLOYMENT.md)。
 

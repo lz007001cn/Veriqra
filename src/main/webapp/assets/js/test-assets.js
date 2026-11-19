@@ -634,6 +634,30 @@
     target.append($('<p class="mb-0">').text(message), actions);
     syncAssetPrimaryEmphasis();
   }
+  function appendRequirementAiActions(target, hasLinkedCases) {
+    const cases = window.VeriqraAiCases, assist = window.VeriqraRequirementAssist;
+    if (!cases && !assist) return;
+    const more = $('<details class="requirement-ai-more">');
+    const options = $('<div class="requirement-ai-options">');
+    function add(id, key, fallback, panelId, open, featured) {
+      const button = $('<button type="button" class="btn">').attr('id', id).attr('aria-controls', panelId)
+        .addClass(featured ? 'btn-outline-primary requirement-ai-suggested' : 'btn-outline-secondary')
+        .text(t(key, null, fallback)).on('click', function () {
+          if (writable() && !writing && $('#trace-form').hasClass('d-none')) open();
+        });
+      (featured ? target : options).append(button);
+    }
+    if (cases) add('requirement-ai-open', 'requirements.generateCases', 'Generate test cases with AI', 'ai-cases-panel',
+      function () { cases.open(); }, !hasLinkedCases || !assist);
+    if (assist) {
+      add('requirement-coverage-open', 'aiRequirementAssist.coverageAction', 'Check coverage with AI', 'ai-requirement-assist-panel',
+        function () { assist.open('coverage'); }, hasLinkedCases || !cases);
+      add('requirement-review-open', 'aiRequirementAssist.reviewTitle', 'Check requirement', 'ai-requirement-assist-panel',
+        function () { assist.open('review'); }, false);
+      more.append($('<summary class="btn btn-outline-secondary">').text(t('aiRequirementAssist.moreActions', null, 'More AI actions')), options);
+      target.append(more);
+    }
+  }
   function renderPrimaryActions() {
     if (window.VeriqraAiCases) window.VeriqraAiCases.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable(), actorId: qaContext && qaContext.actorId } : null);
     if (window.VeriqraRequirementAssist) window.VeriqraRequirementAssist.mount(view === 'requirements' && detail ? { projectId: projectId, requirement: detail.row, writable: writable(), actorId: qaContext && qaContext.actorId, onAdoptCriteria: adoptAiCriteria } : null);
@@ -664,15 +688,8 @@
     if (!writable()) { syncAssetPrimaryEmphasis(); return; }
     if (returnToPlan || returnToDefect) { syncAssetPrimaryEmphasis(); return; }
     if (view === 'requirements') {
-      if (window.VeriqraAiCases) target.append($('<button id="requirement-ai-open" type="button" class="btn btn-outline-primary" aria-controls="ai-cases-panel">')
-        .text(t('requirements.generateCases')).on('click', function () {
-          if (writable() && !writing && $('#trace-form').hasClass('d-none') && window.VeriqraAiCases) window.VeriqraAiCases.open();
-        }));
-      if (window.VeriqraRequirementAssist) [['review', 'requirement-review-open', 'reviewTitle', 'Check requirement'], ['coverage', 'requirement-coverage-open', 'coverageTitle', 'Find coverage gaps']].forEach(function (entry) {
-        target.append($('<button id="' + entry[1] + '" type="button" class="btn btn-outline-secondary" aria-controls="ai-requirement-assist-panel">')
-          .text(t('aiRequirementAssist.' + entry[2], null, entry[3])).on('click', function () { if (writable() && !writing && $('#trace-form').hasClass('d-none')) window.VeriqraRequirementAssist.open(entry[0]); }));
-      });
       const hasCurrent = currentLinks.some(function (entry) { return entry.status !== 'REMOVED'; });
+      appendRequirementAiActions(target, hasCurrent);
       target.append(linkTo('test-cases', { projectId: projectId, action: 'create', sourceRequirementId: String(detail.row.id) }, t('requirements.newCase'), detail.row.status === 'ACTIVE' && traceState === 'loaded' && !hasCurrent).removeClass('btn-sm'),
         $('<button id="requirement-link-open" type="button" class="btn btn-outline-secondary" aria-controls="trace-form">')
           .prop('disabled', traceState !== 'loaded').text(t('requirements.linkExisting')).on('click', loadTraceTargets));

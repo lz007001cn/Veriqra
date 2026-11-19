@@ -90,27 +90,6 @@
             <h2 id="dashboard-my-work-title" data-i18n="dashboard.myWork">My work</h2>
             <div id="dashboard-my-work-items" aria-live="polite"></div>
           </section>
-          <section id="project-chat" class="asset-panel project-chat d-none" aria-labelledby="project-chat-title">
-            <div class="project-chat-heading">
-              <div>
-                <h2 id="project-chat-title" class="fs-5 mb-1" data-i18n="projectChat.title">Ask about this project</h2>
-                <p id="project-chat-scope" class="small text-secondary mb-0"></p>
-              </div>
-              <button id="project-chat-clear" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="projectChat.clear">Clear conversation</button>
-            </div>
-            <div id="project-chat-log" class="project-chat-log d-none" role="log" aria-live="polite" aria-relevant="additions text" aria-labelledby="project-chat-title" tabindex="0"></div>
-            <div class="project-chat-feedback">
-              <p id="project-chat-status" class="small mb-0" role="status" aria-live="polite"></p>
-              <button id="project-chat-retry" class="btn btn-outline-primary btn-sm d-none" type="button" data-i18n="common.retry">Retry</button>
-            </div>
-            <form id="project-chat-form">
-              <label for="project-chat-question" class="form-label" data-i18n="projectChat.question">Question</label>
-              <div class="project-chat-composer">
-                <textarea id="project-chat-question" class="form-control" rows="2" maxlength="1500" required disabled data-i18n-placeholder="projectChat.placeholder" placeholder="What’s blocking the current release?"></textarea>
-                <button id="project-chat-send" class="btn btn-primary" type="submit" disabled data-i18n="projectChat.send">Send</button>
-              </div>
-            </form>
-          </section>
           <div class="dashboard-run-toolbar"><label for="dashboard-run-select" class="form-label mb-0" data-i18n="dashboard.currentRun">Current test run</label><select id="dashboard-run-select" class="form-select" disabled><option value="" data-i18n="common.loading">Loading…</option></select></div>
           <div class="dashboard-feedback"><p id="dashboard-summary-status" class="small text-secondary mb-0 d-none" role="status" aria-live="polite"></p><button id="dashboard-summary-retry" type="button" class="btn btn-outline-secondary btn-sm d-none" data-i18n="common.retry">Retry</button></div>
           <div id="dashboard-summary" class="row g-3 mb-3">
@@ -124,7 +103,35 @@
             <div class="dashboard-results-layout"><div id="dashboard-results-chart" class="dashboard-results-chart" role="img" aria-label="Current run results" data-i18n-aria-label="dashboard.currentRunResults"></div><section class="dashboard-attention" aria-labelledby="dashboard-attention-title"><h3 id="dashboard-attention-title" data-i18n="dashboard.runAttentionTitle">Cases needing attention</h3><div id="dashboard-attention-list" aria-live="polite"></div></section></div>
             <section id="qa-next-step" class="dashboard-next-step" aria-live="polite"></section>
           </section>
-          <details class="dashboard-workflow"><summary data-i18n="dashboard.workflowLinks">Quality workflow shortcuts</summary><div id="workflow" class="workflow-grid mt-3" aria-label="Quality workflow pages" data-i18n-aria-label="shell.upcomingWorkflowPages"></div></details>
+          <section id="project-chat" class="asset-panel project-chat d-none" aria-labelledby="project-chat-title">
+            <div class="project-chat-heading">
+              <div>
+                <h2 id="project-chat-title" data-i18n="projectChat.title">Project chat</h2>
+                <p id="project-chat-scope"></p>
+              </div>
+              <div class="d-flex flex-wrap gap-2">
+                <button id="project-chat-return" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="projectChat.returnToProject">Return to project chat</button>
+                <button id="project-chat-clear" class="btn btn-outline-secondary btn-sm d-none" type="button" data-i18n="projectChat.clear">Clear conversation</button>
+              </div>
+            </div>
+            <div id="project-chat-log" class="project-chat-log d-none" role="log" aria-live="polite" aria-relevant="additions text" aria-labelledby="project-chat-title" tabindex="0"></div>
+            <div id="project-chat-starters" class="project-chat-starters" role="group" aria-label="Suggested questions" data-i18n-aria-label="projectChat.starters">
+              <button class="btn btn-outline-secondary btn-sm project-chat-starter" type="button" data-prompt="progress" data-i18n="projectChat.starterProgress">Project progress</button>
+              <button class="btn btn-outline-secondary btn-sm project-chat-starter" type="button" data-prompt="coverage" data-i18n="projectChat.starterCoverage">Uncovered requirements</button>
+              <button class="btn btn-outline-secondary btn-sm project-chat-starter" type="button" data-prompt="defects" data-i18n="projectChat.starterDefects">Open defects</button>
+            </div>
+            <div class="project-chat-feedback">
+              <p id="project-chat-status" class="small mb-0" role="status" aria-live="polite"></p>
+              <button id="project-chat-retry" class="btn btn-outline-primary btn-sm d-none" type="button" data-i18n="common.retry">Retry</button>
+            </div>
+            <form id="project-chat-form">
+              <label for="project-chat-question" class="form-label" data-i18n="projectChat.question">Question</label>
+              <div class="project-chat-composer">
+                <textarea id="project-chat-question" class="form-control" rows="2" maxlength="1500" required disabled data-i18n-placeholder="projectChat.placeholder" placeholder="Ask about a requirement, test run, or defect…"></textarea>
+                <button id="project-chat-send" class="btn btn-primary" type="submit" disabled data-i18n="projectChat.send">Send</button>
+              </div>
+            </form>
+          </section>
         </section>
         <section id="asset-workspace" class="d-none" aria-label="Test assets" data-i18n-aria-label="shell.testAssets">
           <div id="asset-notice" class="alert d-none" role="status" aria-live="polite"></div>
@@ -291,34 +298,33 @@
         </section>
         <section id="project-settings-workspace" class="d-none" aria-label="Project settings" data-i18n-aria-label="projectSettings.navigation"></section>
         <section id="automation-workspace" class="d-none" aria-label="Automation and JUnit imports" data-i18n-aria-label="shell.automationAndJUnitImports">
-          <p class="alert alert-info" data-i18n="imports.workflow">Select XML → preview → register unknown identities → map each to a READY case → preview again → import. Each report supports one classname.</p>
-          <p><a href="samples/junit-demo.xml" download data-i18n="imports.sample">Download PASS / FAIL / SKIPPED sample</a> · <code>demo.LoginTest</code></p>
           <div id="automation-notice" class="alert d-none" role="status" aria-live="polite"></div>
-          <section class="asset-panel" aria-label="Automation identities and mappings" data-i18n-aria-label="shell.automationIdentitiesAndMappings">
-            <div class="asset-panel-heading"><h2 data-i18n="shell.automationIdentitiesMappings">Automation identities &amp; mappings</h2><button id="automation-refresh" class="btn btn-outline-secondary" type="button" data-i18n="common.refresh">Refresh</button></div>
-            <p class="text-secondary small" data-i18n="shell.anExternalJUnitIdentityBecomesATestCaseAssociationOnlyAfterYouConfirmItsMapping">An external JUnit identity becomes a TestCase association only after you confirm its mapping.</p>
+          <section class="asset-panel" aria-label="JUnit XML preview and import" data-i18n-aria-label="shell.junitXMLPreviewAndImport">
+            <h2 class="fs-5" data-i18n="shell.junitXMLPreviewImport">JUnit XML preview &amp; import</h2>
+            <p class="small mb-3"><a href="samples/junit-demo.xml" download data-i18n="imports.sample">Download PASS / FAIL / SKIPPED sample</a> · <code>demo.LoginTest</code></p>
+            <form id="import-form" novalidate>
+              <div class="row g-3 mb-3"><div class="col-md-6"><label for="import-file" class="form-label" data-i18n="shell.junitXMLFileUpTo5MiB">JUnit XML file (up to 5 MiB)</label><input id="import-file" class="form-control" type="file" accept=".xml,application/xml" required></div><div class="col-md-6"><label for="import-namespace" class="form-label" data-i18n="shell.sourceNamespaceClassname">Source namespace / classname</label><input id="import-namespace" class="form-control" maxlength="128" aria-describedby="import-class-hint" required><small id="import-class-hint" class="form-text" data-i18n="automation.singleClass">Each XML report must use one classname.</small></div></div>
+              <p id="import-file-status" class="text-secondary small" role="status" aria-live="polite" data-i18n="shell.noXMLFileSelected">No XML file selected.</p>
+              <div id="import-run-details" class="row g-3 mb-3 d-none"><div class="col-md-6"><label for="import-run-name" class="form-label" data-i18n="shell.importedRunName">Imported Run name</label><input id="import-run-name" class="form-control" maxlength="160" required></div><div class="col-md-3"><label for="import-environment" class="form-label" data-i18n="shell.environmentOptional">Environment (optional)</label><input id="import-environment" class="form-control" maxlength="160"></div><div class="col-md-3"><label for="import-build" class="form-label" data-i18n="shell.buildVersionOptional">Build version (optional)</label><input id="import-build" class="form-control" maxlength="80"></div></div>
+              <div class="d-flex flex-wrap gap-2"><button id="import-preview-button" class="btn btn-primary" type="button" data-i18n="shell.previewXML">Preview XML</button><button id="import-submit" class="btn btn-primary d-none" type="submit" disabled data-i18n="shell.importMappedResults">Import mapped results</button></div>
+            </form>
+            <p id="import-status" class="mt-3" role="status" aria-live="polite"></p>
+            <div id="import-preview" class="mt-3"></div><div id="import-result" class="mt-3"></div>
+          </section>
+          <details id="automation-mapping-panel" class="asset-panel">
+            <summary class="fw-semibold" data-i18n="shell.automationIdentitiesMappings">Automation identities &amp; mappings</summary>
+            <div class="d-flex justify-content-end mb-2"><button id="automation-refresh" class="btn btn-outline-secondary btn-sm" type="button" data-i18n="common.refresh">Refresh</button></div>
             <form id="automation-register" class="row g-2 align-items-end mb-4" novalidate>
               <div class="col-lg-4"><label for="automation-namespace" class="form-label" data-i18n="shell.junitNamespaceClassname">JUnit namespace / classname</label><input id="automation-namespace" class="form-control" maxlength="128" required></div>
               <div class="col-lg-4"><label for="automation-key" class="form-label" data-i18n="shell.externalTestName">External test name</label><input id="automation-key" class="form-control" maxlength="512" required></div>
               <div class="col-lg-4"><button id="automation-register-submit" class="btn btn-primary" type="submit" data-i18n="shell.registerJUnitIdentity">Register JUnit identity</button></div>
             </form>
             <p id="automation-status" role="status" aria-live="polite"></p><div id="automation-identities"></div>
-          </section>
-          <section class="asset-panel" aria-label="JUnit XML preview and import" data-i18n-aria-label="shell.junitXMLPreviewAndImport">
-            <h2 class="fs-5" data-i18n="shell.junitXMLPreviewImport">JUnit XML preview &amp; import</h2>
-            <p class="text-secondary small" data-i18n="shell.previewIsReadOnlyFormalImportRequiresEveryIdentityToHaveAConfirmedActiveMappingToAREADYTestCase">Preview is read-only. Formal import requires every identity to have a confirmed active mapping to a READY TestCase.</p>
-            <form id="import-form" novalidate>
-              <div class="row g-3 mb-3"><div class="col-md-6"><label for="import-namespace" class="form-label" data-i18n="shell.sourceNamespaceClassname">Source namespace / classname</label><input id="import-namespace" class="form-control" maxlength="128" required></div><div class="col-md-6"><label for="import-file" class="form-label" data-i18n="shell.junitXMLFileUpTo5MiB">JUnit XML file (up to 5 MiB)</label><input id="import-file" class="form-control" type="file" accept=".xml,application/xml" required></div></div>
-              <p id="import-file-status" class="text-secondary small" role="status" aria-live="polite" data-i18n="shell.noXMLFileSelected">No XML file selected.</p>
-              <div class="row g-3 mb-3"><div class="col-md-6"><label for="import-run-name" class="form-label" data-i18n="shell.importedRunName">Imported Run name</label><input id="import-run-name" class="form-control" maxlength="160" required></div><div class="col-md-3"><label for="import-environment" class="form-label" data-i18n="shell.environmentOptional">Environment (optional)</label><input id="import-environment" class="form-control" maxlength="160"></div><div class="col-md-3"><label for="import-build" class="form-label" data-i18n="shell.buildVersionOptional">Build version (optional)</label><input id="import-build" class="form-control" maxlength="80"></div></div>
-              <div class="d-flex flex-wrap gap-2"><button id="import-preview-button" class="btn btn-outline-primary" type="button" data-i18n="shell.previewXML">Preview XML</button><button id="import-submit" class="btn btn-primary" type="submit" disabled data-i18n="shell.importMappedResults">Import mapped results</button></div>
-            </form>
-            <p id="import-status" class="mt-3" role="status" aria-live="polite"></p>
-            <div id="import-preview" class="mt-3"></div><div id="import-result" class="mt-3"></div>
-          </section>
+          </details>
         </section>
       </main>
     </div>
   </div>
+  <article id="release-print-report"></article>
 </body>
 </html>

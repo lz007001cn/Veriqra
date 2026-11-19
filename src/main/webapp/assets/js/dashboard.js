@@ -44,6 +44,10 @@
     $('#dashboard-results-chart').empty().attr('aria-label', t('common.loading', null, 'Loading…'));
     $('#qa-next-step').empty().append($('<p>').text(t('r2.loadingNext')));
   }
+  function isAssignedOpenDefect(row, actorId) {
+    return actorId != null && row.assigneeId != null && String(row.assigneeId) === String(actorId)
+      && ['OPEN', 'IN_PROGRESS', 'REOPENED'].includes(row.status);
+  }
   function renderMyWork(value) {
     const context = value.context, data = value.data, actorId = String(context.actorId);
     if (context.projectStatus !== 'ACTIVE') return;
@@ -52,7 +56,7 @@
       { title: 'dashboard.myRuns', view: 'runs', id: 'runId', rows: context.canWriteAssets
         ? data.runs.filter(function (row) { return row.status === 'IN_PROGRESS' && String(row.assigneeId) === actorId; }) : [] },
       { title: 'dashboard.myDefects', view: 'defects', id: 'defectId', rows: data.defects.filter(function (row) {
-        return String(row.assigneeId) === actorId && ['OPEN', 'IN_PROGRESS', 'REOPENED'].includes(row.status);
+        return isAssignedOpenDefect(row, context.actorId);
       }) },
       { title: 'dashboard.myRetests', view: 'defects', id: 'defectId', rows: context.canWriteAssets
         ? data.defects.filter(function (row) { return row.status === 'RESOLVED' && String(row.reporterId) === actorId; }) : [] }
@@ -79,7 +83,7 @@
     const draftPlan = data.plans.find(function (row) { return row.status === 'DRAFT'; });
     const activeRun = data.runs.find(function (row) { return String(row.id) === value.runId && row.status === 'IN_PROGRESS'; });
     const resolved = data.defects.find(function (row) { return row.status === 'RESOLVED'; });
-    const assigned = data.defects.find(function (row) { return String(row.assigneeId) === String(context.actorId) && ['OPEN', 'IN_PROGRESS'].includes(row.status); });
+    const assigned = data.defects.find(function (row) { return isAssignedOpenDefect(row, context.actorId); });
     let next;
     if (context.projectStatus !== 'ACTIVE') next = ['r2.projectReadOnly', 'requirements', {}];
     else if (!context.canWriteAssets) next = assigned ? ['r2.handleAssigned', 'defects', { defectId: assigned.id }] : ['r2.inspectResults', 'runs', {}];

@@ -3,6 +3,7 @@ package io.github.lz007001cn.veriqra.admin;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.lz007001cn.veriqra.service.ai.AiSettingsManager;
 import io.github.lz007001cn.veriqra.service.ai.GoogleApiException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +36,7 @@ public final class GoogleAiDashboard {
         Instant now = clock.instant();
         long deadline = System.nanoTime() + Duration.ofSeconds(25).toNanos();
         String key = settings.project() + ":" + settings.location() + ":" + settings.model() + ":" + settings.revision();
+        var baseline = GoogleCreditEstimate.load(settings.project());
         if (cached != null && cached.key().equals(key)
                 && Duration.between(cached.fetchedAt(), now).compareTo(Duration.ofSeconds(30)) < 0) return cached.data();
         Map<String,Object> result = map("checkedAt", now, "project", settings.project(), "location", settings.location(),
@@ -45,6 +47,7 @@ public final class GoogleAiDashboard {
             result.put("usage7d", usageUnavailable("NOT_CONFIGURED", now, WEEKLY_USAGE));
             result.put("quotas", quotaUnavailable("NOT_CONFIGURED"));
             result.put("billing", billingUnavailable("NOT_CONFIGURED"));
+            result.put("creditEstimate", null);
             return result;
         }
         Map<String,Object> connection;
@@ -69,13 +72,98 @@ public final class GoogleAiDashboard {
                     ? quotaUnavailable(projectFailure)
                     : quotas(settings, projectNumber));
             Future<Map<String,Object>> billing = tasks.submit(() -> billing(settings.project()));
+            Future<GoogleCreditEstimate> estimate = tasks.submit(() -> estimateCredits(settings.project(), baseline, now));
             result.put("usage", await(usage, usageUnavailable("TIMEOUT", now, DAILY_USAGE), deadline));
             result.put("usage7d", await(usage7d, usageUnavailable("TIMEOUT", now, WEEKLY_USAGE), deadline));
             result.put("quotas", await(quotas, quotaUnavailable("TIMEOUT"), deadline));
             result.put("billing", await(billing, billingUnavailable("TIMEOUT"), deadline));
+            result.put("creditEstimate", await(estimate, baseline == null ? null
+                    : baseline.reply("USAGE_UNAVAILABLE", now, List.of()), deadline));
         }
         cached = new Cached(key, now, Collections.unmodifiableMap(result));
         return cached.data();
+    }
+
+    GoogleCreditEstimate estimateCredits(String project, GoogleCreditEstimate.Baseline baseline, Instant now) {
+        if (baseline == null) return null;
+        if (!now.isAfter(baseline.start())) return baseline.reply("NO_DATA", now, List.of());
+        Map<String,String> query = new LinkedHashMap<>();
+        query.put("filter", "metric.type=\"" + METRIC_PREFIX + "token_count\""
+                + " AND resource.type=\"aiplatform.googleapis.com/PublisherModel\""
+                + " AND resource.labels.publisher=\"google\""
+                + " AND metric.labels.source=\"global\" AND metric.labels.request_type=\"shared\""
+                + " AND metric.labels.shared_request_type=\"standard\"");
+        query.put("interval.startTime", baseline.start().toString());
+        query.put("interval.endTime", now.toString());
+        query.put("view", "FULL");
+        query.put("aggregation.alignmentPeriod", "86400s");
+        query.put("aggregation.perSeriesAligner", "ALIGN_SUM");
+        // Preserve original resource and metric labels when aligning; prices depend on model AND direction.
+        query.put("pageSize", "1000");
+        record Counts(Long input, Long output) { }
+        var observed = new TreeMap<String, Counts>();
+        boolean incomplete = false;
+        try {
+            for (var series : pages("https://monitoring.googleapis.com/v3/projects/" + segment(project) + "/timeSeries",
+                    query, "timeSeries")) {
+                String model = series.path("resource").path("labels").path("model_user_id").asText();
+                boolean missingPoint = !series.path("points").isArray() || series.path("points").isEmpty();
+                for (var point : series.path("points")) {
+                    if (!point.path("value").hasNonNull("int64Value")) missingPoint = true;
+                }
+                if (model.isBlank() || missingPoint) {
+                    incomplete = true;
+                    continue;
+                }
+                Long tokens = total(List.of(series));
+                var labels = series.path("metric").path("labels");
+                String modality = labels.path("modality").asText("");
+                if ((!modality.isEmpty() && !modality.equalsIgnoreCase("text")) || labels.path("explicit_caching").asBoolean(false)) {
+                    if (tokens == null || tokens != 0L) incomplete = true;
+                    continue;
+                }
+                Counts counts = observed.getOrDefault(model, new Counts(null, null));
+                switch (labels.path("type").asText()) {
+                    case "input" -> observed.put(model, new Counts(add(counts.input(), tokens), counts.output()));
+                    case "output" -> observed.put(model, new Counts(counts.input(), add(counts.output(), tokens)));
+                    default -> incomplete = true;
+                }
+            }
+        } catch (GoogleApiException e) {
+            return baseline.reply("USAGE_UNAVAILABLE", now, List.of());
+        }
+        try (var tasks = Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures = observed.entrySet().stream().map(entry -> CompletableFuture.supplyAsync(() -> {
+                var skus = baseline.skus(entry.getKey());
+                String currency = baseline.currency().getCurrencyCode();
+                var counts = entry.getValue();
+                return GoogleCreditEstimate.ModelCharge.from(entry.getKey(), counts.input(), counts.output(),
+                        skus == null ? null : price(skus.input(), currency),
+                        skus == null ? null : price(skus.output(), currency));
+            }, tasks)).toList();
+            var charges = futures.stream().map(CompletableFuture::join).toList();
+            String status;
+            if (incomplete || charges.stream().anyMatch(c -> c.inputTokens() == null || c.outputTokens() == null)) {
+                status = "PARTIAL";
+            } else if (charges.isEmpty()) {
+                status = "NO_DATA";
+            } else if (charges.stream().anyMatch(c -> c.estimatedSpend() == null)) {
+                status = "PRICING_UNAVAILABLE";
+            } else {
+                status = "OK";
+            }
+            return baseline.reply(status, now, charges);
+        }
+    }
+
+    private BigDecimal price(String sku, String currency) {
+        try {
+            var endpoint = uri("https://cloudbilling.googleapis.com/v1beta/skus/" + segment(sku) + "/price",
+                    Map.of("currencyCode", currency));
+            return GoogleCreditEstimate.listPrice(reader.get(endpoint), currency);
+        } catch (GoogleApiException e) {
+            return null;
+        }
     }
 
     private Map<String,Object> usage(AiSettingsManager.Settings settings, Instant end, UsageWindow window) {
@@ -182,6 +270,9 @@ public final class GoogleAiDashboard {
         for (int page = 0; page < MAX_PAGES; page++) {
             JsonNode body = reader.get(uri(url, query));
             if (!body.isObject() || body.has("error") || body.has(field) && !body.path(field).isArray()) throw new GoogleApiException(502, "INVALID_RESPONSE");
+            if (!body.path("executionErrors").isEmpty() || !body.path("unreachable").isEmpty()) {
+                throw new GoogleApiException(502, "INCOMPLETE_DATA");
+            }
             body.path(field).forEach(result::add);
             String next = body.path("nextPageToken").asText();
             if (next.isEmpty()) return result;
@@ -237,7 +328,7 @@ public final class GoogleAiDashboard {
             default -> "UNAVAILABLE";
         };
     }
-    private static Map<String,Object> await(Future<Map<String,Object>> future, Map<String,Object> fallback, long deadline) {
+    private static <T> T await(Future<T> future, T fallback, long deadline) {
         try { return future.get(Math.max(1, deadline-System.nanoTime()), TimeUnit.NANOSECONDS); }
         catch (InterruptedException interrupted) { future.cancel(true); Thread.currentThread().interrupt(); return fallback; }
         catch (TimeoutException timeout) { future.cancel(true); return fallback; }

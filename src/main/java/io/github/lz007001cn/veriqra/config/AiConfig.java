@@ -4,7 +4,10 @@ import java.nio.file.*;
 import java.io.IOException;
 import java.util.Properties;
 
-public record AiConfig(String project, String location, String model, String credentials) {
+public record AiConfig(String project, String location, String model, String credentials, String generalChatPassphrase) {
+    public AiConfig(String project, String location, String model, String credentials) {
+        this(project, location, model, credentials, null);
+    }
     public static AiConfig load() {
         Properties p = new Properties();
         String selected = EnvironmentVariables.get("AI_CONFIG");
@@ -18,8 +21,10 @@ public record AiConfig(String project, String location, String model, String cre
             String value = EnvironmentVariables.get("AI_" + key.toUpperCase(java.util.Locale.ROOT));
             if (value != null) p.setProperty(key, value);
         }
+        String passphrase = EnvironmentVariables.get("AI_GENERAL_CHAT_PASSPHRASE");
         return new AiConfig(p.getProperty("project"), p.getProperty("location", "global"),
-                p.getProperty("model", "gemini-2.5-flash"), p.getProperty("credentials"));
+                p.getProperty("model", "gemini-2.5-flash"), p.getProperty("credentials"),
+                passphrase == null ? p.getProperty("generalChatPassphrase") : passphrase);
     }
     public boolean configured() { return project != null && !project.isBlank() && credentials != null && !credentials.isBlank(); }
     @Override public String toString() { return "AiConfig[external configuration]"; }

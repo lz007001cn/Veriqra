@@ -50,6 +50,7 @@ public final class ApplicationListener implements ServletContextListener {
             var access = new ProjectAccessPolicy();
             var passwords = new PasswordVerifier();
             var aiConfig = io.github.lz007001cn.veriqra.config.AiConfig.load();
+            context.setAttribute(io.github.lz007001cn.veriqra.config.AiConfig.class.getName(), aiConfig);
             var aiSettings = new io.github.lz007001cn.veriqra.service.ai.AiSettingsManager(aiConfig);
             aiProvider = new io.github.lz007001cn.veriqra.service.ai.VertexAiProvider(aiConfig, aiSettings);
             context.setAttribute(io.github.lz007001cn.veriqra.service.ai.AiSettingsManager.class.getName(), aiSettings);

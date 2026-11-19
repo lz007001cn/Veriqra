@@ -13,6 +13,8 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 function browser({ canWrite = true, acceptanceId, sourceRunId, locale = 'en' } = {}) {
   const nodes = new Map(), calls = [], listeners = new Map(), guards = new Map();
+  const prints = [];
+  const session = { expired: false };
   class Element {
     constructor(tag = 'div', attrs = {}) {
       this.tag = tag;
@@ -67,6 +69,9 @@ function browser({ canWrite = true, acceptanceId, sourceRunId, locale = 'en' } =
   };
   const window = { VeriqraApi: { get: url => call('GET', url), post: (url, body) => call('POST', url, body) },
     VeriqraQaNavigation: navigation, VeriqraQaContext: { load: () => Promise.resolve({ canWriteAssets: canWrite }) },
+    VeriqraSessionRecovery: { paused: () => session.expired },
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    print: () => prints.push(text('#release-print-report')),
     VeriqraDraftGuard: { register: (name, guard) => guards.set(name, guard) }, I18n: {
       t: (key, values) => (catalogs[locale][key] || key).replace(/\{(\w+)\}/g, (_, name) => values?.[name] ?? ''),
       formatDateTime: String, formatNumber: String, enumLabel: String
@@ -81,8 +86,9 @@ function browser({ canWrite = true, acceptanceId, sourceRunId, locale = 'en' } =
     return Promise.all((node.handlers.get(name) || []).map(fn => fn.call(node, { preventDefault() {} })));
   }
   function text(selector) { return $(selector)[0].textContent(); }
-  emit('veriqra:project', { project: { id: 7, status: 'ACTIVE' } });
-  return { $, calls, guards, navigation, emit, fire, text, locale(value) { locale = value; emit('veriqra:localechange'); } };
+  emit('veriqra:project', { project: { id: 7, projectKey: 'REL', name: 'Regression', status: 'ACTIVE' } });
+  return { $, calls, guards, navigation, emit, fire, text, prints, session,
+    locale(value) { locale = value; emit('veriqra:localechange'); } };
 }
 
 const endpoint = 'projects/7/release-acceptances';
@@ -249,4 +255,42 @@ test('read-only members can open a shareable record and switch language without 
   assert.match(ui.text('#release-record'), /项目未关闭缺陷（1）/);
   assert.match(ui.$('#release-history-list').find('a')[0].attrs.href, /projectId=7&acceptanceId=99#release-acceptance/);
   await ui.fire('#release-form', 'submit'); assert.equal(ui.calls.length, 2);
+});
+
+test('print uses the saved snapshot and a cancelled dialog can be reopened without duplicate content', async () => {
+  const ui = browser({ canWrite: false, acceptanceId: '99', locale: 'zh-CN' });
+  const printButton = () => Array.from(ui.$('#release-record').find('button')).find(node => node.content.includes('PDF'));
+  assert.equal(printButton(), undefined);
+  ui.calls.find(call => call.url === endpoint + '/99').resolve(detail({ runs: [firstRun, secondRun] }));
+  await flush();
+  const trigger = printButton();
+  const requestCount = ui.calls.length;
+  await ui.fire(trigger);
+  for (const value of ['发布验收报告 #99', 'REL · Regression', '2.1', '不通过', 'Reviewer', '2026-11-06',
+    'Fix the failure.', 'Run 11', 'Run 12', 'BUG-004 · <Pending defect>']) assert.ok(ui.prints[0].includes(value), value);
+  assert.equal(ui.$('#release-print-report').find('a').length, 0);
+  assert.equal(ui.$('body')[0].classes.has('release-printing'), true);
+  ui.emit('afterprint');
+  assert.equal(ui.text('#release-print-report'), '');
+  assert.equal(ui.$('body')[0].classes.has('release-printing'), false);
+  await ui.fire(trigger);
+  assert.equal(ui.prints[1], ui.prints[0]);
+  ui.emit('afterprint');
+  ui.session.expired = true;
+  await ui.fire(trigger);
+  assert.equal(ui.prints.length, 2);
+  ui.session.expired = false;
+  ui.navigation.open('dashboard', { projectId: '7' });
+  await ui.fire(trigger);
+  assert.equal(ui.prints.length, 2);
+  assert.equal(ui.calls.length, requestCount);
+});
+
+test('a failed or mismatched saved record has no print action', async () => {
+  const ui = browser({ acceptanceId: '99' });
+  ui.calls.find(call => call.url === endpoint + '/99').resolve(detail({ projectId: 8 }));
+  await flush();
+  assert.match(ui.text('#release-record'), /Could not open/);
+  assert.doesNotMatch(ui.text('#release-record'), /save PDF/i);
+  assert.equal(ui.prints.length, 0);
 });

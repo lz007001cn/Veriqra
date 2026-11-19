@@ -37,6 +37,7 @@ function browser() {
     append(...children) { return this.each(node => children.flatMap(child => child instanceof Collection ? child.items : [child]).forEach(child => node.children.push(child))); }
     addClass(value) { return this.each(node => value.split(/\s+/).forEach(name => node.classes.add(name))); }
     toggleClass(name, value) { return this.each(node => { if (value) node.classes.add(name); else node.classes.delete(name); }); }
+    trigger(name) { return this.each(node => { if (name === 'focus') node.focused = true; }); }
     on(names, fn) { return this.each(node => names.split(' ').forEach(name => { if (!node.handlers.has(name)) node.handlers.set(name, []); node.handlers.get(name).push(fn); })); }
   }
   const documentNode = new Element('document');
@@ -135,6 +136,8 @@ test('JUnit success and replay show imported attempt counts before the optional 
     ui.calls.at(-1).resolve({ readyToImport: true, mappedResults: [{ testCase: caseRow,
       result: { namespace: 'suite', externalKey: 'example.Test', outcome: 'PASS' } }], unknownIdentities: [], invalidEntries: [] });
     await preview;
+    assert.equal(ui.$('#automation-mapping-panel').prop('open'), false);
+    assert.equal(ui.$('#import-run-details')[0].classes.has('d-none'), false);
     const importing = ui.fire(ui.$('#import-form')[0], 'submit');
     const result = { testImport: { id: 51 }, run: { id: 52, name: 'Imported run', status: 'COMPLETED' }, runCases: [caseRow],
       attempts: [{ outcome: 'FAIL' }, { outcome: 'PASS' }, { outcome: 'SKIPPED' }, { outcome: 'PASS' }], replayed };
@@ -152,5 +155,61 @@ test('JUnit success and replay show imported attempt counts before the optional 
     assert.equal(ui.events[0].type, 'veriqra:open-run');
     assert.equal(ui.events[0].detail.projectId, '7'); assert.equal(ui.events[0].detail.runId, 52);
     assert.equal(ui.location.hash, '#runs'); assert.equal(ui.calls.length, 5);
+  }
+});
+
+test('preview opens mapping tools for unmatched identities and offers the correct next action', async () => {
+  for (const registered of [false, true]) {
+    const ui = browser();
+    respondRows(ui, 0, registered ? [identity] : []); await flush();
+    assert.equal(ui.$('#automation-mapping-panel').prop('open'), false);
+    ui.$('#import-file')[0].files = [{ name: 'junit.xml', size: 100 }];
+    await ui.fire(ui.$('#import-file')[0], 'change');
+    ui.$('#import-namespace').val(identity.namespace);
+    const preview = ui.fire(ui.$('#import-preview-button')[0]);
+    ui.calls.at(-1).resolve({ readyToImport: false, mappedResults: [], unknownIdentities: [identity], invalidEntries: [] });
+    await preview;
+    assert.equal(ui.$('#automation-mapping-panel').prop('open'), true);
+    assert.equal(ui.$('#import-submit').prop('disabled'), true);
+    assert.equal(ui.$('#import-run-details')[0].classes.has('d-none'), true);
+    assert.equal(ui.$('#import-status').text(), catalogs.en['automation.previewStatusMappingNeeded']);
+    ui.$('#automation-mapping-panel').prop('open', false);
+    await ui.fire(button(ui, 'import-preview', catalogs.en['automation.resolveMapping']));
+    assert.equal(ui.$('#automation-mapping-panel').prop('open'), true);
+    if (registered) {
+      assert.equal(ui.$('#automation-identity-' + identity.id)[0].focused, true);
+      assert.equal(ui.$('#automation-key').val(), '');
+    } else {
+      assert.equal(ui.$('#automation-key').val(), identity.externalKey);
+      assert.equal(ui.$('#automation-key')[0].focused, true);
+    }
+    assert.equal(ui.calls.length, 4);
+  }
+});
+
+test('JUnit preview distinguishes invalid entries from missing mappings and localizes both', async () => {
+  for (const mixed of [false, true]) {
+    const ui = browser(); respondRows(ui, 0); await flush();
+    ui.$('#import-file')[0].files = [{ name: 'junit.xml', size: 100 }];
+    await ui.fire(ui.$('#import-file')[0], 'change');
+    ui.$('#import-namespace').val('suite');
+    const preview = ui.fire(ui.$('#import-preview-button')[0]);
+    ui.calls.at(-1).resolve({
+      readyToImport: false,
+      mappedResults: [],
+      unknownIdentities: mixed ? [identity] : [],
+      invalidEntries: [{ entryIndex: 2, message: 'testcase namespace differs from import sourceNamespace' }]
+    });
+    await preview;
+    const suffix = mixed ? 'MixedIssues' : 'InvalidEntries';
+    assert.equal(ui.$('#import-status').text(), catalogs.en['automation.previewStatus' + suffix]);
+    assert.equal(ui.$('#import-submit').prop('disabled'), true);
+    assert.equal(ui.$('#automation-mapping-panel').prop('open'), mixed);
+    ui.locale('zh-CN');
+    const text = ui.nodes.get('import-preview').all().map(node => node.content).join('\n');
+    assert.match(text, /条目 #2：此 testcase 的 classname 与上方填写的来源类名不一致/);
+    assert.doesNotMatch(text, /differs from import sourceNamespace/);
+    assert.ok(text.includes(catalogs['zh-CN']['automation.preview' + suffix]));
+    assert.equal(ui.$('#import-status').text(), catalogs['zh-CN']['automation.previewStatus' + suffix]);
   }
 });

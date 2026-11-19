@@ -121,6 +121,33 @@ class VertexAiAdminTransportTest {
         assertTrue(transport.requests.getLast().uri().getPath().endsWith("/gemini-new-selection:generateContent"));
     }
 
+    @Test void generalChatSendsOnlyItsConversationAndReturnsPlainText() throws Exception {
+        AiConfig base = config();
+        var settings = new AiSettingsManager(base, temporary.resolve("chat-model.properties"));
+        settings.update("gemini-4-hydrogen", 0);
+        var transport = new StubHttpClient();
+        transport.body = assistanceResponse("Saturn has rings.");
+        try (var provider = new VertexAiProvider(base, settings, transport)) {
+            var history = List.of(new ProjectChatService.Message("user", "Name a planet."),
+                    new ProjectChatService.Message("assistant", "Saturn."));
+            assertEquals("Saturn has rings.", provider.answerGeneral("Tell me about it.", history, "en"));
+        }
+        var request = transport.requests.getLast();
+        assertTrue(request.uri().getPath().endsWith("/gemini-4-hydrogen:generateContent"));
+        var payload = new ObjectMapper().readTree(requestBody(request));
+        assertEquals(3, payload.size());
+        assertTrue(payload.path("systemInstruction").path("parts").get(0).path("text").asText().contains("English"));
+        var turns = payload.path("contents");
+        assertEquals(3, turns.size());
+        assertEquals("user", turns.get(0).path("role").asText());
+        assertEquals("Name a planet.", turns.get(0).path("parts").get(0).path("text").asText());
+        assertEquals("model", turns.get(1).path("role").asText());
+        assertEquals("Saturn.", turns.get(1).path("parts").get(0).path("text").asText());
+        assertEquals("user", turns.get(2).path("role").asText());
+        assertEquals("Tell me about it.", turns.get(2).path("parts").get(0).path("text").asText());
+        assertFalse(payload.path("generationConfig").has("responseSchema"));
+    }
+
     @Test void explicitModelCheckOnlyCountsPingTokensAndKeepsItsCapturedSelectionDuringAnUpdate() throws Exception {
         AiConfig config = config();
         var manager = new AiSettingsManager(config, temporary.resolve("model-settings.properties"));

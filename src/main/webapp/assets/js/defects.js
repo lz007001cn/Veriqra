@@ -16,6 +16,7 @@
   let evidenceLoading = false;
   const memberPickers = {};
   let projectMembers = [];
+  let listMembers = [];
   let accessGeneration = 0;
   let actor = null;
   let projectArchived = false;
@@ -65,7 +66,7 @@
   function listKey() { return projectId + '/' + (actor && actor.id != null ? actor.id : 'unverified'); }
   function listState() {
     const key = listKey();
-    if (!listPositions.has(key)) listPositions.set(key, { scroll: 0, search: '', status: '', quick: 'ALL', sort: 'UPDATED' });
+    if (!listPositions.has(key)) listPositions.set(key, { scroll: 0, search: '', status: '', severity: '', assignee: '', quick: 'ALL', sort: 'UPDATED' });
     return listPositions.get(key);
   }
   function rememberList(id) {
@@ -141,7 +142,7 @@
     if (window.VeriqraDefectComments) window.VeriqraDefectComments.clear();
     generation++;
     listLoaded = false;
-    listRows = []; generatedDraft = null; pendingAiDraft = null;
+    listRows = []; listMembers = []; generatedDraft = null; pendingAiDraft = null;
     $('#defect-list-toolbar').remove();
     pickerGeneration['defect-create']++;
     pickerGeneration['defect-action']++;
@@ -176,8 +177,9 @@
     try {
       const rows = await api.get(base('defects'));
       if (!valid(token)) return;
-      listRows = rows; listLoaded = true;
+      listRows = rows; listMembers = []; listLoaded = true;
       renderListToolbar(); renderListRows(); restoreList(token);
+      loadListMembers(token);
     } catch (error) { if (valid(token)) {
       $('#defect-list-status').text(t('common.unavailable', null, 'Unavailable')); notice(error.message, true);
       $('#defect-list').append($('<button type="button" class="btn btn-outline-secondary btn-sm">')
@@ -188,6 +190,27 @@
     return quick === 'UNCLOSED' ? row.status !== 'CLOSED'
       : quick === 'RETEST' ? row.status === 'RESOLVED'
       : quick === 'MINE' ? !!actor && sameId(row.assigneeId, actor.id) : true;
+  }
+  async function loadListMembers(token) {
+    try {
+      const members = await api.get(base('members'));
+      if (!valid(token) || !listLoaded || !Array.isArray(members) || $('#defect-list-panel').hasClass('d-none')) return;
+      listMembers = members;
+      updateListAssignees($('#defect-list-assignee-filter'), listState());
+    } catch (_) { /* Existing assignee IDs remain available if member names cannot be read. */ }
+  }
+  function updateListAssignees(select, state) {
+    const names = new Map(listMembers.map(function (member) { return [String(member.userId), memberName(member)]; }));
+    const ids = new Set(listRows.filter(function (row) { return row.assigneeId != null; }).map(function (row) { return String(row.assigneeId); }));
+    if (state.assignee && state.assignee !== 'UNASSIGNED') ids.add(state.assignee);
+    ids.forEach(function (id) {
+      if (!names.has(id)) names.set(id, t('zentaoDefects.assigneeNumber', { id: id }, 'User #{id}'));
+    });
+    select.empty().append(option('', t('zentaoDefects.allAssignees', null, 'All assignees')),
+      option('UNASSIGNED', t('defects.unassigned', null, 'Unassigned')));
+    Array.from(names).sort(function (left, right) { return left[1].localeCompare(right[1]); })
+      .forEach(function (entry) { select.append(option(entry[0], entry[1])); });
+    select.val(state.assignee);
   }
   function renderListToolbar() {
     $('#defect-list-toolbar').remove();
@@ -204,7 +227,7 @@
           renderListToolbar(); renderListRows();
         }));
     });
-    const filters = $('<div class="workflow-list-filters">');
+    const filters = $('<div class="workflow-list-filters defect-list-filters">');
     function filter(id, text, control) {
       filters.append($('<div class="workflow-list-filter">').append($('<label>').attr('for', id).text(text), control.attr('id', id)));
     }
@@ -214,12 +237,20 @@
     ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', 'REOPENED'].forEach(function (value) { status.append(option(value, label(value))); });
     status.val(state.status).on('change', function () { state.status = String($(this).val() || ''); state.scroll = 0; renderListRows(); });
     filter('defect-list-status-filter', t('common.status', null, 'Status'), status);
+    const severity = $('<select class="form-select">').append(option('', t('zentaoDefects.allSeverities', null, 'All severities')));
+    ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].forEach(function (value) { severity.append(option(value, label(value))); });
+    severity.val(state.severity).on('change', function () { state.severity = String($(this).val() || ''); state.scroll = 0; renderListRows(); });
+    filter('defect-list-severity-filter', t('common.severity', null, 'Severity'), severity);
+    const assignee = $('<select class="form-select">');
+    updateListAssignees(assignee, state);
+    assignee.on('change', function () { state.assignee = String($(this).val() || ''); state.scroll = 0; renderListRows(); });
+    filter('defect-list-assignee-filter', t('defects.assignee', null, 'Assignee'), assignee);
     const sort = $('<select class="form-select">');
     [['UPDATED', 'recentlyUpdated', 'Recently updated'], ['NEWEST', 'newest', 'Newest first'], ['PRIORITY', 'highestPriority', 'Highest priority']].forEach(function (entry) { sort.append(option(entry[0], t('zentaoDefects.' + entry[1], null, entry[2]))); });
     sort.val(state.sort).on('change', function () { state.sort = String($(this).val() || 'UPDATED'); state.scroll = 0; renderListRows(); });
     filter('defect-list-sort', t('zentaoDefects.sort', null, 'Sort'), sort);
     filters.append($('<button type="button" id="defect-list-clear" class="btn btn-outline-secondary">').text(t('zentaoDefects.clear', null, 'Clear filters'))
-      .on('click', function () { state.search = ''; state.status = ''; state.quick = 'ALL'; state.sort = 'UPDATED'; state.scroll = 0; renderListToolbar(); renderListRows(); }));
+      .on('click', function () { state.search = ''; state.status = ''; state.severity = ''; state.assignee = ''; state.quick = 'ALL'; state.sort = 'UPDATED'; state.scroll = 0; renderListToolbar(); renderListRows(); }));
     toolbar.append(quick, filters);
     $('#defect-list').before(toolbar);
   }
@@ -227,7 +258,8 @@
     if (!active() || !listLoaded || $('#defect-list-panel').hasClass('d-none')) return;
     const state = listState(), search = state.search.trim().toLocaleLowerCase();
     const visible = listRows.filter(function (row) {
-      return quickMatch(row, state.quick) && (!state.status || row.status === state.status) && (!search ||
+      return quickMatch(row, state.quick) && (!state.status || row.status === state.status) && (!state.severity || row.severity === state.severity)
+        && (!state.assignee || (state.assignee === 'UNASSIGNED' ? row.assigneeId == null : sameId(row.assigneeId, state.assignee))) && (!search ||
         ['BUG-' + String(row.keyNo).padStart(3, '0'), row.title, row.description].join(' ').toLocaleLowerCase().includes(search));
     });
     const rank = { HIGH: 3, MEDIUM: 2, LOW: 1 };

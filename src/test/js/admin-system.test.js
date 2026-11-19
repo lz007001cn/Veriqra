@@ -171,6 +171,9 @@ test('only an active administrator can read system information and the page fetc
   assert.equal(ui.$('#system-database-status').text(), 'Available');
   assert.equal(ui.$('#system-uptime').text(), '1h 1m');
   assert.equal(ui.$('#system-ai-model').text(), 'gemini-2.5-flash');
+  const ai = ui.textOf(ui.$('#system-ai')[0]);
+  assert.match(ai, /Vertex AI/);
+  assert.doesNotMatch(ai, /test-project|global|Model source|Connection configured/);
 });
 
 test('runtime, configuration and AI details start closed and preserve expansion and focus across language changes', async () => {

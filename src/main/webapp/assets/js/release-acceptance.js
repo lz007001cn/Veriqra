@@ -14,6 +14,7 @@
   let project = null;
   let view = navigation.read().view;
   let scope = null;
+  let printing = false;
 
   function node(tag, value, className) {
     return $('<' + tag + '>').text(value).addClass(className || '');
@@ -48,11 +49,15 @@
     if (action) target.append(button(actionLabel || t('common.retry'), action));
   }
 
-  function renderEvidence(s, value) {
-    const runs = $('<div>').append(node('h3', tr('runResults'), 'fs-6'));
+  function renderEvidence(s, value, report = false) {
+    function evidenceTitle(title, view, ids, className) {
+      return report ? node('span', title, className) : link(s, title, view, ids, className);
+    }
+    const headingTag = report ? 'h2' : 'h3';
+    const runs = $('<div>').append(node(headingTag, tr('runResults'), 'fs-6'));
     value.runs.forEach(function (run) {
       const heading = $('<div class="d-flex flex-wrap gap-2 align-items-center">')
-        .append(link(s, run.name, 'runs', { runId: String(run.id) }, 'fw-semibold'),
+        .append(evidenceTitle(run.name, 'runs', { runId: String(run.id) }, 'fw-semibold'),
           node('span', label(run.status), 'badge text-bg-light'));
       if (run.outcome) heading.append(node('span', label(run.outcome), 'badge text-bg-light'));
       if (run.environment) heading.append(node('span', run.environment, 'small text-secondary'));
@@ -62,14 +67,14 @@
         fail: number(counts.failed), blocked: number(counts.blocked), skipped: number(counts.skipped), notRun: number(counts.notRun)
       }), 'small mb-0 mt-1')));
     });
-    const defects = $('<div class="mt-3">').append(node('h3', tr('unclosedDefects', {
+    const defects = $('<div class="mt-3">').append(node(headingTag, tr('unclosedDefects', {
       count: number(value.unclosedDefects.length)
     }), 'fs-6'));
     if (!value.unclosedDefects.length) defects.append(node('p', tr('noUnclosedDefects'), 'small text-secondary mb-0'));
     else {
       const items = $('<ul class="list-unstyled mb-0">');
       value.unclosedDefects.forEach(function (defect) {
-        items.append($('<li class="mb-2">').append(link(s, 'BUG-' + String(defect.keyNo).padStart(3, '0') + ' · ' + defect.title,
+        items.append($('<li class="mb-2">').append(evidenceTitle('BUG-' + String(defect.keyNo).padStart(3, '0') + ' · ' + defect.title,
           'defects', { defectId: String(defect.id) }), node('span', ' · ' + [defect.status, defect.severity, defect.priority]
           .map(label).join(' · '), 'small text-secondary')));
       });
@@ -77,6 +82,31 @@
     }
     return $('<div>').append(runs, defects);
   }
+
+  function clearPrint() {
+    if (!printing) return;
+    printing = false;
+    $('body').toggleClass('release-printing', false);
+    $('#release-print-report').empty();
+  }
+  function printRecord(s, row) {
+    if (!active(s) || s.record !== row || String(row.id) !== s.recordId || window.VeriqraSessionRecovery?.paused()) return;
+    const facts = $('<dl>');
+    function fact(title, value) {
+      facts.append($('<div>').append(node('dt', title), node('dd', value)));
+    }
+    fact(t('project.name'), [project.projectKey, project.name].filter(Boolean).join(' · ') || '#' + s.projectId);
+    fact(tr('build'), row.buildVersion);
+    fact(tr('verdict'), tr(row.verdict));
+    fact(tr('reviewer'), row.reviewerName);
+    fact(tr('reviewDate'), date(row.createdAt));
+    $('#release-print-report').empty().append(node('h1', tr('reportTitle') + ' #' + row.id), facts,
+      node('h2', tr('reportNotes')), node('p', row.notes || '—', 'defect-prewrap'), renderEvidence(s, row, true));
+    printing = true;
+    $('body').addClass('release-printing');
+    try { window.print(); } catch (error) { clearPrint(); throw error; }
+  }
+  window.addEventListener('afterprint', clearPrint);
 
   function renderComposer(s) {
     const form = s.form;
@@ -265,8 +295,9 @@
   function renderRecord(s) {
     const target = $('#release-record').empty().toggleClass('d-none', !s.recordId);
     if (!s.recordId) return;
-    target.append($('<div class="asset-panel-heading">').append(node('h2', tr('savedRecord'), 'fs-5'),
-      link(s, tr('backToAcceptance'), viewName, {}, 'btn btn-outline-secondary btn-sm')));
+    const actions = $('<div class="d-flex flex-wrap gap-2">')
+      .append(link(s, tr('backToAcceptance'), viewName, {}, 'btn btn-outline-secondary btn-sm'));
+    target.append($('<div class="asset-panel-heading">').append(node('h2', tr('savedRecord'), 'fs-5'), actions));
     if (!s.record) {
       const status = $('<p role="status">');
       showFeedback(status, s.recordState, s.recordState === 'recordFailed' ? () => loadRecord(s) : null);
@@ -274,6 +305,8 @@
       return;
     }
     const row = s.record;
+    actions.append($('<button type="button" class="btn btn-outline-primary btn-sm">')
+      .text(tr('printReport')).on('click', () => printRecord(s, row)));
     target.append($('<div class="d-flex flex-wrap align-items-center gap-2 mb-2">')
       .append(node('strong', '#' + row.id + ' · ' + row.buildVersion), verdictBadge(row.verdict)),
       node('p', row.reviewerName + ' · ' + date(row.createdAt), 'small text-secondary'));
@@ -343,6 +376,7 @@
   }
 
   function sync(route) {
+    clearPrint();
     if (view !== viewName || !project || !validId(project.id)) { scope = null; return; }
     const projectId = String(project.id);
     const recordId = validId(route.acceptanceId) ? String(route.acceptanceId) : null;

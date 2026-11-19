@@ -129,6 +129,7 @@ function browser(pageName = 'ai', options = {}) {
   const guards = new Map(); let allowLeave = true; const window = { VeriqraApi: api, VeriqraDraftGuard: { register: (key, value) => guards.set(key, value), allowLeave: () => allowLeave },
     I18n: { init: options.init || (async () => {}), t: options.t || ((key, params, fallback) => (fallback || key).replace(/\{(\w+)\}/g, (_, name) => params?.[name] ?? '')),
       getLocale: () => options.locale || 'en', error: error => error.message || 'Unavailable', formatDateTime: value => String(value),
+      formatDate: value => String(value),
       enumLabel: value => value, formatNumber: value => String(value) } };
   vm.runInNewContext(source, { window, document, jQuery: $, bootstrap: { Modal }, URL, URLSearchParams, location: { search: '', replace() {} } });
   const textOf = node => node.content + node.children.map(child => child instanceof Element ? textOf(child) : String(child)).join('');
@@ -201,25 +202,74 @@ test('manual refresh uses the effective server configuration while keeping the u
   assert.doesNotMatch(ui.textOf(ui.$('#ai-connection-card')[0]), /Model token-count check passed/);
 });
 
-test('Google usage switches between refreshed 24-hour and seven-day windows without another request', async () => {
-  const ui = await ready();
+test('trial credit requires a refresh and clears when the active model changes', async () => {
+  const creditEstimate = { currency: 'SGD', model: 'gemini-4-argon', status: 'NOT_REFRESHED', remaining: null, baseline: 375.52, total: 383.45,
+    baselineDate: '2026-11-16', asOf: '2026-11-18T11:00:00Z', usageStart: '2026-11-16T16:00:00Z',
+    inputTokens: null, outputTokens: null, inputRate: null, outputRate: null, estimatedSpend: null };
+  const ui = browser('ai', { locale: 'zh-CN' }); await ui.authorize();
+  await ui.respond(ui.calls.at(-1), config({ creditEstimate }));
+  const money = (amount, maximumFractionDigits = 2) => new Intl.NumberFormat('zh-CN', {
+    style: 'currency', currency: 'SGD', currencyDisplay: 'code', maximumFractionDigits
+  }).format(amount);
+  const assertNoBalance = () => {
+    assert.equal(ui.$('#ai-usage-creditEstimate').text(), '—');
+    const card = ui.textOf(ui.$('#ai-usage-card')[0]);
+    assert.doesNotMatch(card, /375\.52|383\.45|374\.88/);
+  };
+  assertNoBalance();
+  assert.equal(ui.$('#ai-usage-requests').text(), '—');
+  assert.equal(ui.$('#ai-billing-card').find('a')[0].getAttribute('href'), 'https://console.cloud.google.com/billing/credits');
+
   await ui.click(ui.$('#ai-refresh')[0]);
-  await ui.respond(ui.calls.at(-1), report({ usage7d: { status: 'OK', requests: 24, inputTokens: 800, outputTokens: 200, totalTokens: 1000 } }));
-  assert.equal(ui.$('#ai-usage-period').val(), '24h');
-  assert.equal(ui.$('#ai-usage-requests').text(), '0');
+  assertNoBalance();
+  await ui.reject(ui.calls.at(-1));
+  assertNoBalance();
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report());
+  assertNoBalance();
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report({ creditEstimate: { ...creditEstimate, status: 'NO_DATA', remaining: 375.52 } }));
+  assert.equal(ui.$('#ai-usage-creditEstimate').text(), '375.52＄');
+  const noData = ui.textOf(ui.$('#ai-usage-details')[0]);
+  assert.match(noData, /no token measurements/);
+  assert.match(noData, /Input: — tokens · Output: — tokens/);
 
-  ui.$('#ai-usage-period').val('7d');
-  ui.emit(ui.$('#ai-usage-period')[0], 'change');
-  assert.equal(ui.$('#ai-usage-requests').text(), '24');
-  assert.equal(ui.$('#ai-usage-totalTokens').text(), '1000');
-  assert.equal(ui.calls.length, 3);
-  await ui.locale();
-  assert.equal(ui.$('#ai-usage-period').val(), '7d');
+  const priced = { ...creditEstimate, status: 'OK', remaining: 374.88, inputTokens: 25000, outputTokens: 20000,
+    models: [{model: 'gemini-4-argon', inputTokens: 11000, outputTokens: 9000, inputRate: 5.131, outputRate: 25.655},
+      {model: 'gemini-4-carbon', inputTokens: 14000, outputTokens: 11000, inputRate: 5.131, outputRate: 25.655}],
+    estimatedSpend: 0.641375 };
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report({ creditEstimate: priced }));
+  assert.equal(ui.$('#ai-usage-creditEstimate').text(), '374.88＄');
+  const pricedDetails = ui.textOf(ui.$('#ai-usage-details')[0]);
+  assert.match(pricedDetails, /2026-11-16T16:00:00Z – 2026-11-18T11:00:00Z/);
+  assert.match(pricedDetails, /Global standard online text/);
+  assert.match(pricedDetails, /gemini-4-argon/);
+  assert.match(pricedDetails, /gemini-4-carbon/);
+  assert.match(pricedDetails, /Check Google Credits for the current balance/);
+  assert.match(pricedDetails, /Input: 25000 tokens · Output: 20000 tokens/);
+  assert.ok(pricedDetails.includes(money(5.131, 4)) && pricedDetails.includes(money(25.655, 4)));
+  assert.ok(pricedDetails.includes(money(0.641375)));
 
-  ui.$('#ai-usage-period').val('24h');
-  ui.emit(ui.$('#ai-usage-period')[0], 'change');
-  assert.equal(ui.$('#ai-usage-requests').text(), '0');
-  assert.equal(ui.$('#ai-usage-totalTokens').text(), '112');
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report({ creditEstimate: { ...priced, currency: 'JPY' } }));
+  assert.equal(ui.$('#ai-usage-creditEstimate').text(), new Intl.NumberFormat('zh-CN', {
+    style: 'currency', currency: 'JPY', currencyDisplay: 'code'
+  }).format(374.88));
+  ui.$('#ai-usage-period').val('7d'); ui.emit(ui.$('#ai-usage-period')[0], 'change');
+  assert.equal(ui.$('#ai-usage-creditEstimate').text(), new Intl.NumberFormat('zh-CN', {
+    style: 'currency', currency: 'JPY', currencyDisplay: 'code'
+  }).format(priced.remaining));
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report({ creditEstimate: { ...creditEstimate, status: 'PARTIAL', remaining: 375.52, inputTokens: 100 } }));
+  assert.equal(ui.$('#ai-usage-creditEstimate').text(), '—');
+  assert.match(ui.textOf(ui.$('#ai-usage-details')[0]), /Input: 100 tokens · Output: — tokens/);
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report({ creditEstimate: null }));
+  assertNoBalance();
+
+  await ui.click(ui.$('#ai-refresh')[0]); await ui.respond(ui.calls.at(-1), report({ creditEstimate: priced }));
+  assert.equal(ui.$('#ai-usage-creditEstimate').text(), '374.88＄');
+  await select(ui, 'gemini-next');
+  const saving = ui.submit(ui.$('#ai-model-form')[0]);
+  await ui.respond(ui.calls.at(-1), config({ model: 'gemini-next', revision: 'revision-2', creditEstimate }));
+  await saving;
+  assert.equal(ui.$('#ai-effective-model').text(), 'gemini-next');
+  assertNoBalance();
 });
 
 test('query setup is shown for actual API or permission errors and links to the configured Google project', async () => {
@@ -453,4 +503,25 @@ test('draft guard protects navigation and logout and reset clears a pending sele
   await ui.click(ui.$('#ai-reset')[0]); assert.equal(ui.guards.get('admin-ai').dirty(), false); assert.equal(ui.$('#ai-model').val(), 'gemini-current');
   ui.setAllowLeave(true); await ui.click(ui.$('#admin-logout')[0]); assert.equal(ui.calls.at(-1).url, 'auth/logout');
   await ui.respond(ui.calls.at(-1), {});
+});
+
+test('Google usage switches between refreshed 24-hour and seven-day windows without another request', async () => {
+  const ui = await ready();
+  await ui.click(ui.$('#ai-refresh')[0]);
+  await ui.respond(ui.calls.at(-1), report({ usage7d: { status: 'OK', requests: 24, inputTokens: 800, outputTokens: 200, totalTokens: 1000 } }));
+  assert.equal(ui.$('#ai-usage-period').val(), '24h');
+  assert.equal(ui.$('#ai-usage-requests').text(), '0');
+
+  ui.$('#ai-usage-period').val('7d');
+  ui.emit(ui.$('#ai-usage-period')[0], 'change');
+  assert.equal(ui.$('#ai-usage-requests').text(), '24');
+  assert.equal(ui.$('#ai-usage-totalTokens').text(), '1000');
+  assert.equal(ui.calls.length, 3);
+  await ui.locale();
+  assert.equal(ui.$('#ai-usage-period').val(), '7d');
+
+  ui.$('#ai-usage-period').val('24h');
+  ui.emit(ui.$('#ai-usage-period')[0], 'change');
+  assert.equal(ui.$('#ai-usage-requests').text(), '0');
+  assert.equal(ui.$('#ai-usage-totalTokens').text(), '112');
 });
