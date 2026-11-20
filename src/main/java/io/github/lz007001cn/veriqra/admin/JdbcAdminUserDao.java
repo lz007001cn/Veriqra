@@ -17,7 +17,8 @@ public final class JdbcAdminUserDao implements AdminUserDao {
         StringBuilder where = new StringBuilder("WHERE 1=1");
         List<String> parameters = new ArrayList<>();
         if (!query.search().isEmpty()) {
-            where.append(" AND (LOCATE(?,username)>0 OR LOCATE(?,display_name)>0)");
+            where.append(" AND (LOCATE(?,CONVERT(username USING utf8mb4) COLLATE utf8mb4_bin)>0"
+                    + " OR LOCATE(?,display_name)>0)");
             parameters.add(query.search()); parameters.add(query.search());
         }
         if (query.systemRole() != null) { where.append(" AND system_role=?"); parameters.add(query.systemRole().name()); }

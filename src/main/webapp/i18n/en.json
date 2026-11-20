@@ -181,6 +181,7 @@
   "admin.administration": "ADMINISTRATION",
   "admin.changeSaved": "Change saved.",
   "admin.completeRequiredFields": "Complete the required fields.",
+  "admin.invalidUsernameFormat": "Use 3–64 letters (A–Z), digits, periods, underscores, or hyphens.",
   "admin.checkingAdministratorAccess": "Checking administrator access…",
   "admin.createUser": "Create user",
   "admin.displayName": "Display name",

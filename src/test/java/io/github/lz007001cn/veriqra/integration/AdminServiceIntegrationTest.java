@@ -42,18 +42,22 @@ class AdminServiceIntegrationTest extends MysqlFixture {
         tx.inTransaction(c -> {
             var dao = new JdbcUserDao(c);
             for (int i = 0; i < 30; i++) dao.insert(new User(null, "listing_" + String.format("%02d", i),
-                    i == 0 ? "Beyond first page" : "Listed User", "fixture-hash", i == 0 ? SystemRole.ADMIN : SystemRole.USER,
+                    i == 0 ? "Beyond first page 中文用户" : "Listed User", "fixture-hash", i == 0 ? SystemRole.ADMIN : SystemRole.USER,
                     i == 0 ? UserStatus.DISABLED : UserStatus.ACTIVE, null, null, null));
             return null;
         });
         assertEquals(32, users.list(admin.id(), 1, 25).total());
         assertFalse(users.list(admin.id(), 1, 25).items().stream().anyMatch(row -> row.username().equals("listing_00")));
-        var found = users.list(admin.id(), new AdminUserQuery(1, 10, "Beyond", SystemRole.ADMIN, UserStatus.DISABLED, "username", "asc"));
+        var found = users.list(admin.id(), new AdminUserQuery(1, 10, "中文", SystemRole.ADMIN, UserStatus.DISABLED, "username", "asc"));
         assertEquals(1, found.total()); assertEquals("listing_00", found.items().getFirst().username());
         var second = users.list(admin.id(), new AdminUserQuery(2, 10, "listing_", SystemRole.USER, UserStatus.ACTIVE, "username", "asc"));
         assertEquals(29, second.total()); assertEquals(10, second.items().size());
         assertEquals("listing_11", second.items().getFirst().username());
         assertEquals(0, users.list(admin.id(), new AdminUserQuery(1, 10, "%", null, null, "username", "asc")).total());
+        assertEquals(0, users.list(admin.id(), new AdminUserQuery(1, 10, "LISTING_", null, null, "username", "asc")).total());
+        var unmatched = users.list(admin.id(), new AdminUserQuery(1, 10, "🧪", null, null, "username", "asc"));
+        assertEquals(0, unmatched.total());
+        assertTrue(unmatched.items().isEmpty());
     }
 
     @Test void lastActiveAdminCannotBeDisabledOrDemotedAndVersionsAreEnforced() {

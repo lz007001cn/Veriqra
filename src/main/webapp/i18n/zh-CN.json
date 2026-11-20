@@ -181,6 +181,7 @@
   "admin.administration": "管理后台",
   "admin.changeSaved": "更改已保存。",
   "admin.completeRequiredFields": "请填写必填项。",
+  "admin.invalidUsernameFormat": "用户名须为 3–64 个字符，可使用英文字母、数字、点、下划线和连字符。",
   "admin.checkingAdministratorAccess": "正在检查管理员权限…",
   "admin.createUser": "创建用户",
   "admin.displayName": "显示名称",

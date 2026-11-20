@@ -21,13 +21,17 @@ function browser(pageName = 'users', options = {}) {
     closest(selector) { let node = this; while (node) { if (matches(node, selector)) return node; node = node.parent; } return null; }
     focus() { if (this.isConnected && !this.disabled) document.activeElement = this; }
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
+    get validity() {
+      const { pattern } = this.attributes;
+      return { patternMismatch: !!pattern && !!this.value && !new RegExp('^(?:' + pattern + ')$', 'v').test(this.value) };
+    }
     checkValidity() { return descendants(this).every(valid); }
   }
   function valid(node) {
     const value = node.value || '';
     return (!node.required || !!value) && (!value || (!node.attributes.minlength || value.length >= Number(node.attributes.minlength))
       && (!node.attributes.maxlength || value.length <= Number(node.attributes.maxlength))
-      && (!node.attributes.pattern || new RegExp('^(?:' + node.attributes.pattern + ')$').test(value)));
+      && !node.validity.patternMismatch);
   }
   const descendants = node => node.children.flatMap(child => child instanceof Element ? [child, ...descendants(child)] : []);
   function matches(node, selector) {
@@ -196,11 +200,15 @@ test('create and reset password fields share backend format limits before submis
   const ui = browser(); await ui.authorize(); await ui.respond(ui.calls.at(-1), paged());
   await ui.click(ui.find('#admin-content', 'Create user'));
   const form = ui.$('.modal').find('form')[0];
-  assert.equal(ui.$('[name="username"]').attr('pattern'), '[A-Za-z0-9._-]{3,64}');
+  const username = ui.$('[name="username"]');
   assert.equal(ui.$('[name="username"]').attr('maxlength'), '64');
   assert.equal(ui.$('[name="displayName"]').attr('maxlength'), '80');
   assert.equal(ui.$('[name="password"]').attr('minlength'), '12'); assert.equal(ui.$('[name="password"]').attr('maxlength'), '1024');
-  ui.$('[name="username"]').val('invalid user'); ui.$('[name="displayName"]').val('Tester'); ui.$('[name="password"]').val('short');
+  username.val('invalid user'); ui.$('[name="displayName"]').val('Tester'); ui.$('[name="password"]').val('valid-test-password');
+  await ui.submit(form); assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
+  assert.match(ui.textOf(ui.$('.modal')[0]), /Use 3–64 letters/);
+  username.val('test-user.01_a'); assert.equal(form.checkValidity(), true);
+  ui.$('[name="password"]').val('short');
   await ui.submit(form); assert.equal(ui.calls.some(call => call.method !== 'GET'), false);
   assert.match(ui.textOf(ui.$('.modal')[0]), /Complete the required fields/);
 });

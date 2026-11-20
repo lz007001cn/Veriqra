@@ -109,7 +109,10 @@
       event.preventDefault(); if (send.prop('disabled')) return;
       if (!form[0].checkValidity()) {
         const invalid = form.find(':invalid')[0];
-        error.removeClass('d-none').text(t('admin.completeRequiredFields', null, 'Complete the required fields.'));
+        const message = invalid?.name === 'username' && invalid.validity.patternMismatch
+          ? t('admin.invalidUsernameFormat', null, 'Use 3–64 letters (A–Z), digits, periods, underscores, or hyphens.')
+          : t('admin.completeRequiredFields', null, 'Complete the required fields.');
+        error.removeClass('d-none').text(message);
         if (invalid) invalid.focus();
         return;
       }
@@ -127,7 +130,7 @@
   }
   function createUser() {
     modal(t('admin.createUser', null, 'Create user'), [
-      { name: 'username', label: t('common.username', null, 'Username'), required: true, minlength: 3, maxlength: 64, pattern: '[A-Za-z0-9._-]{3,64}' },
+      { name: 'username', label: t('common.username', null, 'Username'), required: true, minlength: 3, maxlength: 64, pattern: '[A-Za-z0-9._\\-]{3,64}' },
       { name: 'displayName', label: t('admin.displayName', null, 'Display name'), required: true, maxlength: 80 },
       { name: 'password', label: t('admin.temporaryPassword12Characters', null, 'Temporary password (12+ characters)'), type: 'password', required: true, minlength: 12, maxlength: 1024 },
       { name: 'systemRole', label: t('admin.systemRole', null, 'System role'), options: ['USER', 'ADMIN'] },
