@@ -12,7 +12,7 @@
     <name>Veriqra</name>
     <description>Software Test &amp; Quality Management Platform</description>
     <url>https://veriqra.xyz</url>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
 
     <packaging>war</packaging>
 
